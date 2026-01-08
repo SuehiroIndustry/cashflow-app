@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase/client'
+const supabase = createClient()
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
