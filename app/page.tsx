@@ -13,19 +13,21 @@ export default function AuthCallbackPage() {
   const router = useRouter()
 
   useEffect(() => {
-    (async () => {
-      // URL（hash / code）からセッションを確定して保存する
-      const { data, error } = await supabase.auth.getSessionFromUrl({ storeSession: true })
+    ;(async () => {
+      // Supabase v2: magic link / OAuth では ?code=... を受け取って exchange する
+      const params = new URLSearchParams(window.location.search)
+      const code = params.get('code')
 
-      if (error) {
-        console.error('getSessionFromUrl error:', error)
+      if (!code) {
+        // code がない = コールバックURL直叩き等
         router.replace('/login')
         return
       }
 
-      // 念のためセッションが取れてるか確認
-      const session = data?.session
-      if (!session) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code)
+
+      if (error) {
+        console.error('exchangeCodeForSession error:', error)
         router.replace('/login')
         return
       }
