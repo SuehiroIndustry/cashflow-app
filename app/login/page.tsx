@@ -1,67 +1,77 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-const supabase = createClient()
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  const supabase = useMemo(() => createClient(), [])
 
-  const handleLogin = async () => {
-    if (!email) {
-      setMessage('メールアドレスを入力してください')
+  const [email, setEmail] = useState('')
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [error, setError] = useState<string | null>(null)
+
+  const onSend = async () => {
+    setError(null)
+
+    const trimmed = email.trim()
+    if (!trimmed) {
+      setError('メールアドレスを入力してね')
       return
     }
 
-    setLoading(true)
-    setMessage(null)
+    setStatus('sending')
+
+    // ✅ redirect 先を明示（ここが “2) /login の送信側で redirect 先を明示” の本体）
+    const origin = window.location.origin
+    const emailRedirectTo = `${origin}/auth/callback`
 
     const { error } = await supabase.auth.signInWithOtp({
-      email,
+      email: trimmed,
       options: {
-        // ★ ここが今回の核心：redirect 先を明示
-        emailRedirectTo: `${location.origin}/auth/callback`,
+        emailRedirectTo,
       },
     })
 
     if (error) {
-      console.error(error)
-      setMessage('ログインに失敗しました')
-    } else {
-      setMessage('ログイン用のメールを送信しました')
+      setStatus('idle')
+      setError(error.message)
+      return
     }
 
-    setLoading(false)
+    setStatus('sent')
   }
 
   return (
-    <div style={{ padding: 24 }}>
+    <main style={{ padding: 24 }}>
       <h1>Login</h1>
 
-      <input
-        type="email"
-        placeholder="email@example.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        style={{ display: 'block', marginBottom: 12 }}
-      />
+      <div style={{ marginTop: 12 }}>
+        <input
+          type="email"
+          placeholder="email@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          style={{ padding: 8, width: 320 }}
+        />
+      </div>
 
-      <button onClick={handleLogin} disabled={loading}>
-        {loading ? 'Sending...' : 'Send Magic Link'}
-      </button>
+      <div style={{ marginTop: 12 }}>
+        <button onClick={onSend} disabled={status === 'sending'} style={{ padding: '8px 12px' }}>
+          {status === 'sending' ? 'Sending...' : 'Send Magic Link'}
+        </button>
+      </div>
 
-      {message && (
+      {status === 'sent' && (
         <p style={{ marginTop: 12 }}>
-          {message}
+          送ったよ。メールのリンクを開いてね（数分以内に！）。
         </p>
       )}
-    </div>
+
+      {error && (
+        <p style={{ marginTop: 12, color: 'salmon' }}>
+          Error: {error}
+        </p>
+      )}
+    </main>
   )
 }
