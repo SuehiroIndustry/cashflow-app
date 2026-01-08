@@ -1,46 +1,66 @@
 'use client'
 
 import { useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@supabase/supabase-js'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
-  const [msg, setMsg] = useState<string>('')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
 
-  const sendMagicLink = async () => {
-    setMsg('')
+  const handleLogin = async () => {
+    if (!email) {
+      setMessage('メールアドレスを入力してください')
+      return
+    }
+
+    setLoading(true)
+    setMessage(null)
 
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
+        // ★ ここが今回の核心：redirect 先を明示
         emailRedirectTo: `${location.origin}/auth/callback`,
       },
     })
 
     if (error) {
-      setMsg(`送信失敗: ${error.message}`)
+      console.error(error)
+      setMessage('ログインに失敗しました')
     } else {
-      setMsg('送信OK。メールのリンクを開いてください。')
+      setMessage('ログイン用のメールを送信しました')
     }
+
+    setLoading(false)
   }
 
   return (
-    <main style={{ padding: 24 }}>
-      <h1>Login (Magic Link)</h1>
+    <div style={{ padding: 24 }}>
+      <h1>Login</h1>
 
       <input
-        style={{ padding: 8, width: 360 }}
+        type="email"
+        placeholder="email@example.com"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        placeholder="email"
-        autoComplete="email"
+        style={{ display: 'block', marginBottom: 12 }}
       />
 
-      <button style={{ marginLeft: 8, padding: 8 }} onClick={sendMagicLink}>
-        Send
+      <button onClick={handleLogin} disabled={loading}>
+        {loading ? 'Sending...' : 'Send Magic Link'}
       </button>
 
-      {msg && <p style={{ marginTop: 12 }}>{msg}</p>}
-    </main>
+      {message && (
+        <p style={{ marginTop: 12 }}>
+          {message}
+        </p>
+      )}
+    </div>
   )
 }
