@@ -1,385 +1,452 @@
 // app/dashboard/page.tsx
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
-type Tx = {
-  id: string;
-  date: string; // YYYY-MM-DD
-  type: "income" | "expense";
-  amount: number;
-  category: string | null;
-  memo: string | null;
+// ✅ ここは君のプロジェクトの実装に合わせて調整してOK
+// 例: import { createClient } from "@/utils/supabase/server";
+import { createClient } from "@/utils/supabase/server";
+
+type SearchParams = {
+  account?: string;
 };
 
-type PageProps = {
-  searchParams?: {
-    m?: string; // message
-    kind?: "success" | "error"; // banner kind
-  };
-};
-
-function formatJPY(n: number) {
-  return `¥${n.toLocaleString("ja-JP")}`;
+function isUuid(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  // 雑に UUID 判定（十分）
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v
+  );
 }
 
-function toYMD(v: FormDataEntryValue | null) {
-  const s = String(v ?? "").trim();
-  // HTML date input -> "YYYY-MM-DD"
-  return s;
+function yen(n: number) {
+  return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(n);
 }
 
-function toTrimmed(v: FormDataEntryValue | null) {
-  const s = String(v ?? "").trim();
-  return s.length ? s : "";
-}
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams> | SearchParams;
+}) {
+  const sp = (await searchParams) as SearchParams;
+  const selectedAccountId = sp.account && isUuid(sp.account) ? sp.account : null;
 
-function buildDashboardRedirect(kind: "success" | "error", message: string) {
-  const params = new URLSearchParams();
-  params.set("kind", kind);
-  params.set("m", message);
-  return `/dashboard?${params.toString()}`;
-}
-
-export default async function DashboardPage({ searchParams }: PageProps) {
   const supabase = await createClient();
 
+  // --- Auth ---
   const {
     data: { user },
+    error: userErr,
   } = await supabase.auth.getUser();
 
-  if (!user) redirect("/login");
+  if (userErr || !user) {
+    redirect("/login");
+  }
+
+  // --- Accounts（必須テーブル） ---
+  const { data: accounts, error: accErr } = await supabase
+    .from("accounts")
+    .select("id,name,type,currency,is_active,is_default,created_at")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: true });
+
+  if (accErr) {
+    throw new Error(`Failed to fetch accounts: ${accErr.message}`);
+  }
+
+  const activeAccounts = accounts ?? [];
+  const defaultAccountId =
+    activeAccounts.find((a) => a.is_default)?.id ?? activeAccounts[0]?.id ?? null;
+
+  // selectedAccountId が変な値なら default に寄せる
+  const effectiveAccountId =
+    selectedAccountId && activeAccounts.some((a) => a.id === selectedAccountId)
+      ? selectedAccountId
+      : selectedAccountId
+      ? null // URLで変なの渡されたら「全件」に落とす（消すより安全）
+      : defaultAccountId; // 初回は default を選択状態にしておくのが自然
+
+  // --- Transactions ---
+  // 「口座未選択」= 全件表示（過去データの NULL account_id も含む）
+  // 「口座選択」= account_id で絞る（NULL は除外される）
+  let txQuery = supabase
+    .from("transactions")
+    .select("id,user_id,account_id,date,type,amount,category,note,created_at")
+    .eq("user_id", user.id)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (effectiveAccountId) {
+    txQuery = txQuery.eq("account_id", effectiveAccountId);
+  }
+
+  const { data: transactions, error: txErr } = await txQuery;
+
+  if (txErr) {
+    throw new Error(`Failed to fetch transactions: ${txErr.message}`);
+  }
+
+  const txs = transactions ?? [];
+
+  // 旧データ（account_id が NULL）がどれだけあるか：全件表示のときに見える
+  const { data: nullAccountStats } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .is("account_id", null);
+
+  const nullAccountCount = nullAccountStats?.count ?? 0;
+
+  // --- Summary（選択口座 or 全体） ---
+  // type は 'income' | 'expense' 前提
+  const income = txs
+    .filter((t) => t.type === "income")
+    .reduce((sum, t) => sum + Number(t.amount ?? 0), 0);
+
+  const expense = txs
+    .filter((t) => t.type === "expense")
+    .reduce((sum, t) => sum + Number(t.amount ?? 0), 0);
+
+  const balance = income - expense;
 
   // --- Server Actions ---
   async function addTransaction(formData: FormData) {
     "use server";
 
-    try {
-      const supabase = await createClient();
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) redirect("/login");
+    if (!user) redirect("/login");
 
-      const date = toYMD(formData.get("date"));
-      const type = toTrimmed(formData.get("type")) as "income" | "expense";
-      const amountRaw = toTrimmed(formData.get("amount"));
-      const category = toTrimmed(formData.get("category")) || null;
-      const memo = toTrimmed(formData.get("memo")) || null;
+    const date = String(formData.get("date") ?? "");
+    const type = String(formData.get("type") ?? "");
+    const amountRaw = String(formData.get("amount") ?? "");
+    const category = String(formData.get("category") ?? "");
+    const note = String(formData.get("note") ?? "");
+    const accountIdRaw = String(formData.get("account_id") ?? "");
 
-      const amount = Number(amountRaw);
+    if (!date) throw new Error("date is required");
+    if (type !== "income" && type !== "expense") throw new Error("type is invalid");
+    if (!amountRaw) throw new Error("amount is required");
 
-      // 最低限のバリデーション（壊れないこと優先）
-      if (!date) throw new Error("date is required");
-      if (type !== "income" && type !== "expense") throw new Error("invalid type");
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be > 0");
+    const amount = Number(amountRaw);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be > 0");
 
-      const { error } = await supabase.from("transactions").insert({
-        user_id: user.id,
-        date,
-        type,
-        amount,
-        category,
-        memo,
-      });
+    // ✅ account_id は必須
+    if (!isUuid(accountIdRaw)) throw new Error("account_id is required");
 
-      if (error) throw new Error(error.message);
+    // ✅ 念のため「その口座が本人のものか」を確認（RLSあっても二重で安全）
+    const { data: acc, error: accErr } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("id", accountIdRaw)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-      revalidatePath("/dashboard");
-      redirect(buildDashboardRedirect("success", "Added ✅"));
-    } catch (e: any) {
-      const msg = e?.message ? String(e.message) : "Unknown error";
-      redirect(buildDashboardRedirect("error", `Add failed: ${msg}`));
+    if (accErr || !acc) throw new Error("invalid account");
+
+    const { error } = await supabase.from("transactions").insert({
+      user_id: user.id,
+      account_id: accountIdRaw,
+      date,
+      type,
+      amount,
+      category: category || null,
+      note: note || null,
+    });
+
+    if (error) {
+      throw new Error(`insert failed: ${error.message}`);
     }
-  }
 
-  async function updateTransaction(formData: FormData) {
-    "use server";
-
-    try {
-      const supabase = await createClient();
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) redirect("/login");
-
-      const id = toTrimmed(formData.get("id"));
-      const date = toYMD(formData.get("date"));
-      const type = toTrimmed(formData.get("type")) as "income" | "expense";
-      const amountRaw = toTrimmed(formData.get("amount"));
-      const category = toTrimmed(formData.get("category")) || null;
-      const memo = toTrimmed(formData.get("memo")) || null;
-
-      const amount = Number(amountRaw);
-
-      if (!id) throw new Error("id is required");
-      if (!date) throw new Error("date is required");
-      if (type !== "income" && type !== "expense") throw new Error("invalid type");
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be > 0");
-
-      // RLSで user_id 制限されるので where user_id は必須ではないが、二重で安全にしておく
-      const { error } = await supabase
-        .from("transactions")
-        .update({
-          date,
-          type,
-          amount,
-          category,
-          memo,
-        })
-        .eq("id", id)
-        .eq("user_id", user.id);
-
-      if (error) throw new Error(error.message);
-
-      revalidatePath("/dashboard");
-      redirect(buildDashboardRedirect("success", "Saved ✅"));
-    } catch (e: any) {
-      const msg = e?.message ? String(e.message) : "Unknown error";
-      redirect(buildDashboardRedirect("error", `Save failed: ${msg}`));
-    }
+    // 口座選択してたら、その口座の画面に戻すと気持ちいい
+    revalidatePath("/dashboard");
   }
 
   async function deleteTransaction(formData: FormData) {
     "use server";
 
-    try {
-      const supabase = await createClient();
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) redirect("/login");
-
-      const id = toTrimmed(formData.get("id"));
-      if (!id) throw new Error("id is required");
-
-      const { error } = await supabase.from("transactions").delete().eq("id", id).eq("user_id", user.id);
-      if (error) throw new Error(error.message);
-
-      revalidatePath("/dashboard");
-      redirect(buildDashboardRedirect("success", "Deleted ✅"));
-    } catch (e: any) {
-      const msg = e?.message ? String(e.message) : "Unknown error";
-      redirect(buildDashboardRedirect("error", `Delete failed: ${msg}`));
-    }
-  }
-
-  async function signOut() {
-    "use server";
     const supabase = await createClient();
-    await supabase.auth.signOut();
-    redirect("/login");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) redirect("/login");
+
+    const id = String(formData.get("id") ?? "");
+    if (!isUuid(id)) throw new Error("invalid id");
+
+    const { error } = await supabase
+      .from("transactions")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", user.id);
+
+    if (error) throw new Error(`delete failed: ${error.message}`);
+
+    revalidatePath("/dashboard");
   }
 
-  // --- Data fetch (SSR) ---
-  const { data: rows, error } = await supabase
-    .from("transactions")
-    .select("id,date,type,amount,category,memo")
-    .order("date", { ascending: false })
-    .limit(200);
-
-  const txs = (rows ?? []) as Tx[];
-
-  const income = txs.filter((t) => t.type === "income").reduce((a, b) => a + (b.amount ?? 0), 0);
-  const expense = txs.filter((t) => t.type === "expense").reduce((a, b) => a + (b.amount ?? 0), 0);
-  const balance = income - expense;
-
-  const kind = searchParams?.kind;
-  const message = searchParams?.m;
+  // --- UI helpers ---
+  const accountLabel = (id: string | null) => {
+    if (!id) return "All accounts";
+    const a = activeAccounts.find((x) => x.id === id);
+    return a ? a.name : "All accounts";
+  };
 
   return (
-    <main style={{ padding: 24, maxWidth: 980, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>Dashboard</h1>
-      <div style={{ marginBottom: 12, opacity: 0.9 }}>Logged in: {user.email}</div>
-
-      <form action={signOut} style={{ marginBottom: 20 }}>
-        <button type="submit" style={{ padding: "8px 12px", borderRadius: 8 }}>
-          Sign out
-        </button>
-      </form>
-
-      {/* Message banner */}
-      {message ? (
-        <section
-          style={{
-            marginBottom: 14,
-            padding: "10px 12px",
-            borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.12)",
-            background:
-              kind === "error"
-                ? "rgba(255, 80, 80, 0.10)"
-                : "rgba(80, 255, 170, 0.10)",
-          }}
-        >
-          <div style={{ fontSize: 13, opacity: 0.95 }}>
-            {kind === "error" ? "⚠️ " : "✅ "}
-            {message}
+    <main className="min-h-screen bg-black text-white">
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <div className="flex items-start justify-between gap-6">
+          <div>
+            <h1 className="text-3xl font-semibold">Dashboard</h1>
+            <p className="mt-2 text-sm text-white/70">Logged in: {user.email}</p>
+            <p className="mt-1 text-sm text-white/70">
+              Account: <span className="text-white">{accountLabel(effectiveAccountId)}</span>
+            </p>
           </div>
-          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-            ※ URLに付いてるメッセージなので、気になるならリロードで消すか、/dashboard を開き直す。
+
+          <form
+            action={async () => {
+              "use server";
+              const supabase = await createClient();
+              await supabase.auth.signOut();
+              redirect("/login");
+            }}
+          >
+            <button className="rounded-lg border border-white/15 px-4 py-2 text-sm hover:bg-white/10">
+              Sign out
+            </button>
+          </form>
+        </div>
+
+        {/* Account Switch UI */}
+        <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="/dashboard"
+              className={[
+                "rounded-full border px-3 py-1 text-sm",
+                !effectiveAccountId ? "border-white/30 bg-white/10" : "border-white/10 hover:bg-white/10",
+              ].join(" ")}
+            >
+              All
+            </a>
+
+            {activeAccounts.map((a) => {
+              const active = a.id === effectiveAccountId;
+              return (
+                <a
+                  key={a.id}
+                  href={`/dashboard?account=${a.id}`}
+                  className={[
+                    "rounded-full border px-3 py-1 text-sm",
+                    active ? "border-white/30 bg-white/10" : "border-white/10 hover:bg-white/10",
+                  ].join(" ")}
+                  title={`${a.type} / ${a.currency}`}
+                >
+                  {a.name}
+                  {a.is_default ? " (default)" : ""}
+                </a>
+              );
+            })}
+          </div>
+
+          {!effectiveAccountId && nullAccountCount > 0 && (
+            <p className="mt-3 text-xs text-amber-300/90">
+              ⚠ account_id が NULL の古い取引が {nullAccountCount} 件あります。口座別で集計したいなら、
+              “Cash” など default 口座に移すUPDATEを一回打つのが吉。
+            </p>
+          )}
+
+          {effectiveAccountId && !activeAccounts.some((a) => a.id === effectiveAccountId) && (
+            <p className="mt-3 text-xs text-amber-300/90">
+              ⚠ 指定された口座が見つからないので “All” 表示にしています。
+            </p>
+          )}
+        </section>
+
+        {/* Summary Cards */}
+        <section className="mt-6 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <div className="text-xs text-white/60">Balance</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(balance)}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <div className="text-xs text-white/60">Income</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(income)}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <div className="text-xs text-white/60">Expense</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(expense)}</div>
           </div>
         </section>
-      ) : null}
 
-      {/* If fetch error, show it */}
-      {error ? (
-        <section style={{ marginBottom: 18, padding: 12, borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)" }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>Query error</div>
-          <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, opacity: 0.9 }}>{error.message}</pre>
+        {/* Add Transaction */}
+        <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <h2 className="text-lg font-semibold">Add Transaction</h2>
+
+          <form action={addTransaction} className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-xs text-white/60">date</label>
+              <input
+                name="date"
+                type="date"
+                defaultValue={new Date().toISOString().slice(0, 10)}
+                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/30"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-white/60">account</label>
+              <select
+                name="account_id"
+                defaultValue={effectiveAccountId ?? defaultAccountId ?? ""}
+                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/30"
+                required
+              >
+                {activeAccounts.length === 0 && <option value="">(no accounts)</option>}
+                {activeAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                    {a.is_default ? " (default)" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-white/40">
+                ※ ここで選んだ口座の account_id を transactions に必ず保存します。
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs text-white/60">type</label>
+              <select
+                name="type"
+                defaultValue="expense"
+                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/30"
+                required
+              >
+                <option value="expense">expense</option>
+                <option value="income">income</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-white/60">amount</label>
+              <input
+                name="amount"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                placeholder="1000"
+                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/30"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-white/60">category</label>
+              <input
+                name="category"
+                type="text"
+                placeholder="food / sales / ..."
+                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/30"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-white/60">note</label>
+              <input
+                name="note"
+                type="text"
+                placeholder="optional"
+                className="mt-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/30"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <button className="rounded-lg border border-white/15 px-4 py-2 text-sm hover:bg-white/10">
+                Add
+              </button>
+              <p className="mt-3 text-xs text-white/40">
+                ※ まずは insert→select→update→delete が通ることを確認。見た目は後でいじる。
+              </p>
+            </div>
+          </form>
         </section>
-      ) : null}
 
-      {/* Summary cards */}
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 18 }}>
-        <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 14 }}>
-          <div style={{ opacity: 0.7, fontSize: 12 }}>Balance</div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>{formatJPY(balance)}</div>
-        </div>
-        <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 14 }}>
-          <div style={{ opacity: 0.7, fontSize: 12 }}>Income</div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>{formatJPY(income)}</div>
-        </div>
-        <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 14 }}>
-          <div style={{ opacity: 0.7, fontSize: 12 }}>Expense</div>
-          <div style={{ fontSize: 22, fontWeight: 700 }}>{formatJPY(expense)}</div>
-        </div>
-      </section>
-
-      {/* Add */}
-      <section style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 16, marginBottom: 20 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Add Transaction</h2>
-
-        <form action={addTransaction} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "end" }}>
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>date</div>
-            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} style={{ width: "100%", padding: 10, borderRadius: 10 }} />
+        {/* Transactions */}
+        <section className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="flex items-end justify-between gap-4">
+            <h2 className="text-lg font-semibold">Transactions</h2>
+            <p className="text-xs text-white/50">Latest: {txs.length} rows (max 200)</p>
           </div>
 
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>type</div>
-            <select name="type" defaultValue="expense" style={{ width: "100%", padding: 10, borderRadius: 10 }}>
-              <option value="income">income</option>
-              <option value="expense">expense</option>
-            </select>
-          </div>
-
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>amount</div>
-            <input name="amount" type="number" min="1" step="1" placeholder="1000" style={{ width: "100%", padding: 10, borderRadius: 10 }} />
-          </div>
-
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>category</div>
-            <input name="category" placeholder="food / sales / ..." style={{ width: "100%", padding: 10, borderRadius: 10 }} />
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>memo</div>
-            <input name="memo" placeholder="optional" style={{ width: "100%", padding: 10, borderRadius: 10 }} />
-          </div>
-
-          <button type="submit" style={{ width: 120, padding: "10px 12px", borderRadius: 10 }}>
-            Add
-          </button>
-        </form>
-
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-          ※ まずは insert→select→update→delete が通ることを確認。見た目は後でいじる。
-        </div>
-      </section>
-
-      {/* List */}
-      <section style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 14, padding: 16 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Transactions</h2>
-
-        {txs.length === 0 ? (
-          <div style={{ opacity: 0.8 }}>まだデータがありません（空でOK）。</div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[900px] border-separate border-spacing-0 text-sm">
               <thead>
-                <tr style={{ textAlign: "left", opacity: 0.75 }}>
-                  <th style={{ padding: "10px 8px" }}>date</th>
-                  <th style={{ padding: "10px 8px" }}>type</th>
-                  <th style={{ padding: "10px 8px" }}>amount</th>
-                  <th style={{ padding: "10px 8px" }}>category</th>
-                  <th style={{ padding: "10px 8px" }}>memo</th>
-                  <th style={{ padding: "10px 8px" }}>id</th>
-                  <th style={{ padding: "10px 8px" }}>action</th>
+                <tr className="text-left text-xs text-white/60">
+                  <th className="border-b border-white/10 px-3 py-2">date</th>
+                  <th className="border-b border-white/10 px-3 py-2">type</th>
+                  <th className="border-b border-white/10 px-3 py-2">amount</th>
+                  <th className="border-b border-white/10 px-3 py-2">category</th>
+                  <th className="border-b border-white/10 px-3 py-2">note</th>
+                  <th className="border-b border-white/10 px-3 py-2">account_id</th>
+                  <th className="border-b border-white/10 px-3 py-2">id</th>
+                  <th className="border-b border-white/10 px-3 py-2">action</th>
                 </tr>
               </thead>
               <tbody>
                 {txs.map((t) => (
-                  <tr key={t.id} style={{ borderTop: "1px solid rgba(255,255,255,0.10)" }}>
-                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{t.date}</td>
-                    <td style={{ padding: "10px 8px" }}>{t.type}</td>
-                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{formatJPY(t.amount)}</td>
-                    <td style={{ padding: "10px 8px" }}>{t.category ?? ""}</td>
-                    <td style={{ padding: "10px 8px" }}>{t.memo ?? ""}</td>
-                    <td style={{ padding: "10px 8px", fontSize: 12, opacity: 0.8 }}>{t.id}</td>
-
-                    <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                      {/* Edit (no client state) */}
-                      <details style={{ display: "inline-block", marginRight: 10 }}>
-                        <summary style={{ cursor: "pointer" }}>Edit</summary>
-                        <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, minWidth: 320 }}>
-                          <form action={updateTransaction} style={{ display: "grid", gap: 8 }}>
-                            <input type="hidden" name="id" value={t.id} />
-
-                            <label style={{ display: "grid", gap: 4 }}>
-                              <span style={{ fontSize: 12, opacity: 0.75 }}>date</span>
-                              <input name="date" type="date" defaultValue={t.date} style={{ padding: 8, borderRadius: 8 }} />
-                            </label>
-
-                            <label style={{ display: "grid", gap: 4 }}>
-                              <span style={{ fontSize: 12, opacity: 0.75 }}>type</span>
-                              <select name="type" defaultValue={t.type} style={{ padding: 8, borderRadius: 8 }}>
-                                <option value="income">income</option>
-                                <option value="expense">expense</option>
-                              </select>
-                            </label>
-
-                            <label style={{ display: "grid", gap: 4 }}>
-                              <span style={{ fontSize: 12, opacity: 0.75 }}>amount</span>
-                              <input name="amount" type="number" min="1" step="1" defaultValue={t.amount} style={{ padding: 8, borderRadius: 8 }} />
-                            </label>
-
-                            <label style={{ display: "grid", gap: 4 }}>
-                              <span style={{ fontSize: 12, opacity: 0.75 }}>category</span>
-                              <input name="category" defaultValue={t.category ?? ""} style={{ padding: 8, borderRadius: 8 }} />
-                            </label>
-
-                            <label style={{ display: "grid", gap: 4 }}>
-                              <span style={{ fontSize: 12, opacity: 0.75 }}>memo</span>
-                              <input name="memo" defaultValue={t.memo ?? ""} style={{ padding: 8, borderRadius: 8 }} />
-                            </label>
-
-                            <button type="submit" style={{ padding: "8px 10px", borderRadius: 8 }}>
-                              Save
-                            </button>
-                          </form>
-                        </div>
-                      </details>
-
-                      {/* Delete */}
-                      <form action={deleteTransaction} style={{ display: "inline-block" }}>
+                  <tr key={t.id} className="text-white/90">
+                    <td className="border-b border-white/10 px-3 py-3">{t.date}</td>
+                    <td className="border-b border-white/10 px-3 py-3">{t.type}</td>
+                    <td className="border-b border-white/10 px-3 py-3">
+                      {yen(Number(t.amount ?? 0))}
+                    </td>
+                    <td className="border-b border-white/10 px-3 py-3">
+                      {t.category ?? ""}
+                    </td>
+                    <td className="border-b border-white/10 px-3 py-3">
+                      {t.note ?? ""}
+                    </td>
+                    <td className="border-b border-white/10 px-3 py-3">
+                      <span className={t.account_id ? "text-white/70" : "text-amber-300/90"}>
+                        {t.account_id ?? "NULL"}
+                      </span>
+                    </td>
+                    <td className="border-b border-white/10 px-3 py-3 text-white/60">
+                      {t.id}
+                    </td>
+                    <td className="border-b border-white/10 px-3 py-3">
+                      <form action={deleteTransaction}>
                         <input type="hidden" name="id" value={t.id} />
-                        <button type="submit" style={{ padding: "8px 10px", borderRadius: 8 }}>
+                        <button className="rounded-md border border-white/15 px-2 py-1 text-xs hover:bg-white/10">
                           Delete
                         </button>
                       </form>
                     </td>
                   </tr>
                 ))}
+
+                {txs.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-6 text-sm text-white/50" colSpan={8}>
+                      No transactions.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
-        )}
-      </section>
+        </section>
+      </div>
     </main>
   );
 }
