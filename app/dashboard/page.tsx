@@ -12,20 +12,14 @@ type Tx = {
   memo: string | null;
 };
 
-type PageProps = {
-  searchParams?: {
-    success?: string;
-    error?: string;
-  };
-};
-
 function formatJPY(n: number) {
   return `¥${n.toLocaleString("ja-JP")}`;
 }
 
 function toYMD(v: FormDataEntryValue | null) {
   const s = String(v ?? "").trim();
-  return s; // HTML date input -> "YYYY-MM-DD"
+  // HTML date input -> "YYYY-MM-DD"
+  return s;
 }
 
 function toTrimmed(v: FormDataEntryValue | null) {
@@ -33,11 +27,7 @@ function toTrimmed(v: FormDataEntryValue | null) {
   return s.length ? s : "";
 }
 
-function q(s: string) {
-  return encodeURIComponent(s);
-}
-
-export default async function DashboardPage({ searchParams }: PageProps) {
+export default async function DashboardPage() {
   const supabase = await createClient();
 
   const {
@@ -46,124 +36,103 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   if (!user) redirect("/login");
 
-  const success = searchParams?.success ? decodeURIComponent(searchParams.success) : "";
-  const errorMsg = searchParams?.error ? decodeURIComponent(searchParams.error) : "";
-
   // --- Server Actions ---
   async function addTransaction(formData: FormData) {
     "use server";
 
-    try {
-      const supabase = await createClient();
+    const supabase = await createClient();
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) redirect("/login");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) redirect("/login");
 
-      const date = toYMD(formData.get("date"));
-      const type = toTrimmed(formData.get("type")) as "income" | "expense";
-      const amountRaw = toTrimmed(formData.get("amount"));
-      const category = toTrimmed(formData.get("category")) || null;
-      const memo = toTrimmed(formData.get("memo")) || null;
+    const date = toYMD(formData.get("date"));
+    const type = toTrimmed(formData.get("type")) as "income" | "expense";
+    const amountRaw = toTrimmed(formData.get("amount"));
+    const category = toTrimmed(formData.get("category")) || null;
+    const memo = toTrimmed(formData.get("memo")) || null;
 
-      const amount = Number(amountRaw);
+    const amount = Number(amountRaw);
 
-      if (!date) throw new Error("date is required");
-      if (type !== "income" && type !== "expense") throw new Error("invalid type");
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be > 0");
+    // 最低限のバリデーション（壊れないこと優先）
+    if (!date) throw new Error("date is required");
+    if (type !== "income" && type !== "expense") throw new Error("invalid type");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be > 0");
 
-      const { error } = await supabase.from("transactions").insert({
-        user_id: user.id,
-        date,
-        type,
-        amount,
-        category,
-        memo,
-      });
+    const { error } = await supabase.from("transactions").insert({
+      user_id: user.id,
+      date,
+      type,
+      amount,
+      category,
+      memo,
+    });
 
-      if (error) throw new Error(error.message);
+    if (error) throw new Error(error.message);
 
-      revalidatePath("/dashboard");
-      redirect(`/dashboard?success=${q("✅ Added")}`);
-    } catch (e: any) {
-      redirect(`/dashboard?error=${q(`❌ ${e?.message ?? "Unknown error"}`)}`);
-    }
+    revalidatePath("/dashboard");
   }
 
   async function updateTransaction(formData: FormData) {
     "use server";
 
-    try {
-      const supabase = await createClient();
+    const supabase = await createClient();
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) redirect("/login");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) redirect("/login");
 
-      const id = toTrimmed(formData.get("id"));
-      const date = toYMD(formData.get("date"));
-      const type = toTrimmed(formData.get("type")) as "income" | "expense";
-      const amountRaw = toTrimmed(formData.get("amount"));
-      const category = toTrimmed(formData.get("category")) || null;
-      const memo = toTrimmed(formData.get("memo")) || null;
+    const id = toTrimmed(formData.get("id"));
+    const date = toYMD(formData.get("date"));
+    const type = toTrimmed(formData.get("type")) as "income" | "expense";
+    const amountRaw = toTrimmed(formData.get("amount"));
+    const category = toTrimmed(formData.get("category")) || null;
+    const memo = toTrimmed(formData.get("memo")) || null;
 
-      const amount = Number(amountRaw);
+    const amount = Number(amountRaw);
 
-      if (!id) throw new Error("id is required");
-      if (!date) throw new Error("date is required");
-      if (type !== "income" && type !== "expense") throw new Error("invalid type");
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be > 0");
+    if (!id) throw new Error("id is required");
+    if (!date) throw new Error("date is required");
+    if (type !== "income" && type !== "expense") throw new Error("invalid type");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be > 0");
 
-      const { error } = await supabase
-        .from("transactions")
-        .update({
-          date,
-          type,
-          amount,
-          category,
-          memo,
-        })
-        .eq("id", id)
-        .eq("user_id", user.id);
+    // RLSで user_id 制限されるので where user_id は必須ではないが、二重で安全にしておく
+    const { error } = await supabase
+      .from("transactions")
+      .update({
+        date,
+        type,
+        amount,
+        category,
+        memo,
+      })
+      .eq("id", id)
+      .eq("user_id", user.id);
 
-      if (error) throw new Error(error.message);
+    if (error) throw new Error(error.message);
 
-      revalidatePath("/dashboard");
-      redirect(`/dashboard?success=${q("✅ Updated")}`);
-    } catch (e: any) {
-      redirect(`/dashboard?error=${q(`❌ ${e?.message ?? "Unknown error"}`)}`);
-    }
+    revalidatePath("/dashboard");
   }
 
   async function deleteTransaction(formData: FormData) {
     "use server";
 
-    try {
-      const supabase = await createClient();
+    const supabase = await createClient();
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) redirect("/login");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) redirect("/login");
 
-      const id = toTrimmed(formData.get("id"));
-      if (!id) throw new Error("id is required");
+    const id = toTrimmed(formData.get("id"));
+    if (!id) throw new Error("id is required");
 
-      const { error } = await supabase
-        .from("transactions")
-        .delete()
-        .eq("id", id)
-        .eq("user_id", user.id);
+    const { error } = await supabase.from("transactions").delete().eq("id", id).eq("user_id", user.id);
+    if (error) throw new Error(error.message);
 
-      if (error) throw new Error(error.message);
-
-      revalidatePath("/dashboard");
-      redirect(`/dashboard?success=${q("✅ Deleted")}`);
-    } catch (e: any) {
-      redirect(`/dashboard?error=${q(`❌ ${e?.message ?? "Unknown error"}`)}`);
-    }
+    revalidatePath("/dashboard");
   }
 
   async function signOut() {
@@ -181,6 +150,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .limit(200);
 
   if (error) {
+    // ここで落とすと検証が止まるので画面に出す
     return (
       <main style={{ padding: 24 }}>
         <h1>Dashboard</h1>
@@ -201,22 +171,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>Dashboard</h1>
       <div style={{ marginBottom: 12, opacity: 0.9 }}>Logged in: {user.email}</div>
 
-      {/* Feedback banner */}
-      {(success || errorMsg) && (
-        <div
-          style={{
-            marginBottom: 14,
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.14)",
-            background: "rgba(255,255,255,0.04)",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {success ? success : errorMsg}
-        </div>
-      )}
-
       <form action={signOut} style={{ marginBottom: 20 }}>
         <button type="submit" style={{ padding: "8px 12px", borderRadius: 8 }}>
           Sign out
@@ -224,14 +178,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       </form>
 
       {/* Summary cards */}
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: 12,
-          marginBottom: 18,
-        }}
-      >
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginBottom: 18 }}>
         <div style={{ border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: 14 }}>
           <div style={{ opacity: 0.7, fontSize: 12 }}>Balance</div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>{formatJPY(balance)}</div>
@@ -253,12 +200,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <form action={addTransaction} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "end" }}>
           <div>
             <div style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>date</div>
-            <input
-              name="date"
-              type="date"
-              defaultValue={new Date().toISOString().slice(0, 10)}
-              style={{ width: "100%", padding: 10, borderRadius: 10 }}
-            />
+            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} style={{ width: "100%", padding: 10, borderRadius: 10 }} />
           </div>
 
           <div>
@@ -325,7 +267,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                     <td style={{ padding: "10px 8px", fontSize: 12, opacity: 0.8 }}>{t.id}</td>
 
                     <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
-                      {/* Edit */}
+                      {/* Edit (no client state) */}
                       <details style={{ display: "inline-block", marginRight: 10 }}>
                         <summary style={{ cursor: "pointer" }}>Edit</summary>
                         <div style={{ marginTop: 10, padding: 10, border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, minWidth: 320 }}>
@@ -367,10 +309,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                         </div>
                       </details>
 
-                      {/* Delete */}
+                      {/* Delete (with confirm) */}
                       <form action={deleteTransaction} style={{ display: "inline-block" }}>
                         <input type="hidden" name="id" value={t.id} />
-                        <button type="submit" style={{ padding: "8px 10px", borderRadius: 8 }}>
+                        <button
+                          type="submit"
+                          onClick={(e) => {
+                            if (!confirm("本当に削除しますか？この操作は元に戻せません。")) {
+                              e.preventDefault();
+                            }
+                          }}
+                          style={{ padding: "8px 10px", borderRadius: 8 }}
+                        >
                           Delete
                         </button>
                       </form>
