@@ -1,126 +1,187 @@
 // app/dashboard/page.tsx
-import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@/lib/supabase/server";
 
-type Transaction = {
-  id: string;
-  user_id: string;
-  date: string; // date型は文字列で返る
-  type: string;
-  amount: number;
-  category: string | null;
-  memo: string | null;
-};
+type TxType = "income" | "expense";
+
+function fmtDate(d: string | null | undefined) {
+  if (!d) return "";
+  return d;
+}
+
+function fmtAmount(a: any) {
+  if (a === null || a === undefined) return "";
+  const n = typeof a === "number" ? a : Number(a);
+  if (Number.isNaN(n)) return String(a);
+  return n.toLocaleString();
+}
+
+async function requireUser() {
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) redirect("/login");
+  return { supabase, user: data.user };
+}
 
 export default async function DashboardPage() {
-  const cookieStore = await cookies();
+  const { supabase, user } = await requireUser();
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {
-            // Server Component から set できないケースがある（Route Handler / Server ActionならOK）
-          }
-        },
-      },
+  const { data: txs, error } = await supabase
+    .from("transactions")
+    .select("id, date, type, amount, category, memo")
+    .order("date", { ascending: false })
+    .limit(200);
+
+  // ※エラーがあっても画面は出す（原因切り分けしやすい）
+  const errMsg = error?.message ?? null;
+
+  const email = user.email ?? "(no email)";
+
+  async function addTransaction(formData: FormData) {
+    "use server";
+
+    const { supabase, user } = await requireUser();
+
+    const date = String(formData.get("date") ?? "").trim();
+    const typeRaw = String(formData.get("type") ?? "").trim() as TxType;
+    const amountRaw = String(formData.get("amount") ?? "").trim();
+    const category = String(formData.get("category") ?? "").trim();
+    const memo = String(formData.get("memo") ?? "").trim();
+
+    const type: TxType = typeRaw === "expense" ? "expense" : "income";
+
+    const amountNum = Number(amountRaw);
+    if (!amountRaw || Number.isNaN(amountNum)) {
+      // バリデーション：ここで弾く（雑に silent fail させない）
+      // Server Action でUIに返す仕組みを入れてないので、最低限 redirect で戻す
+      redirect("/dashboard");
     }
-  );
 
-  // 1) ログイン確認（未ログインなら /login へ）
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    const payload = {
+      user_id: user.id,
+      date: date || new Date().toISOString().slice(0, 10), // YYYY-MM-DD
+      type,
+      amount: amountNum,
+      category: category || "misc",
+      memo: memo || null,
+    };
 
-  if (!session) {
+    const { error } = await supabase.from("transactions").insert(payload);
+    if (error) {
+      // ここで落とすと分かりづらいので、一旦 dashboard に戻す
+      // ちゃんと表示したければ後で「エラー表示」対応する
+      redirect("/dashboard");
+    }
+
+    revalidatePath("/dashboard");
+    redirect("/dashboard");
+  }
+
+  async function signOut() {
+    "use server";
+    const supabase = await createClient();
+    await supabase.auth.signOut();
     redirect("/login");
   }
 
-  // 2) transactions を select（RLSで自分の行だけ見える前提）
-  const { data: transactions, error } = await supabase
-    .from("transactions")
-    .select("id, user_id, date, type, amount, category, memo")
-    .order("date", { ascending: false })
-    .limit(50);
-
   return (
     <main style={{ padding: 24 }}>
-      <h1>Dashboard</h1>
+      <h1 style={{ marginBottom: 8 }}>Dashboard</h1>
       <div style={{ marginBottom: 16 }}>
-        Logged in: <b>{session.user.email ?? session.user.id}</b>
+        <div>Logged in: <strong>{email}</strong></div>
+        <form action={signOut} style={{ marginTop: 8 }}>
+          <button type="submit">Sign out</button>
+        </form>
       </div>
 
-      <h2>Transactions</h2>
+      <section style={{ marginTop: 24, marginBottom: 24 }}>
+        <h2 style={{ marginBottom: 12 }}>Add Transaction</h2>
 
-      {error ? (
-        <pre style={{ color: "tomato", whiteSpace: "pre-wrap" }}>
-          {JSON.stringify(
-            { message: error.message, details: error.details, hint: error.hint },
-            null,
-            2
-          )}
-        </pre>
-      ) : !transactions || transactions.length === 0 ? (
-        <p>まだデータがありません（空でOK）。</p>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{
-              borderCollapse: "collapse",
-              minWidth: 720,
-              width: "100%",
-            }}
-          >
-            <thead>
-              <tr>
-                {["date", "type", "amount", "category", "memo", "id"].map(
-                  (h) => (
+        <form action={addTransaction} style={{ display: "grid", gap: 10, maxWidth: 520 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>date</span>
+            <input name="date" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>type</span>
+            <select name="type" defaultValue="income">
+              <option value="income">income</option>
+              <option value="expense">expense</option>
+            </select>
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>amount</span>
+            <input name="amount" type="number" step="1" placeholder="1000" required />
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>category</span>
+            <input name="category" type="text" placeholder="test / food / sales ..." />
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <span>memo</span>
+            <input name="memo" type="text" placeholder="optional" />
+          </label>
+
+          <button type="submit">Add</button>
+
+          <div style={{ opacity: 0.7, fontSize: 12 }}>
+            ※まずは insert→select が通ることを確認。見た目は後でいじる。
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <h2 style={{ marginBottom: 12 }}>Transactions</h2>
+
+        {errMsg ? (
+          <div style={{ marginBottom: 12, color: "tomato" }}>
+            Supabase error: {errMsg}
+          </div>
+        ) : null}
+
+        {!txs || txs.length === 0 ? (
+          <div>まだデータがありません（空でOK）。</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", minWidth: 800 }}>
+              <thead>
+                <tr>
+                  {["date", "type", "amount", "category", "memo", "id"].map((h) => (
                     <th
                       key={h}
                       style={{
                         textAlign: "left",
-                        borderBottom: "1px solid #333",
-                        padding: "8px 6px",
+                        borderBottom: "1px solid rgba(255,255,255,0.2)",
+                        padding: "8px 10px",
+                        fontWeight: 600,
                       }}
                     >
                       {h}
                     </th>
-                  )
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {(transactions as Transaction[]).map((t) => (
-                <tr key={t.id}>
-                  <td style={{ padding: "8px 6px" }}>{t.date}</td>
-                  <td style={{ padding: "8px 6px" }}>{t.type}</td>
-                  <td style={{ padding: "8px 6px" }}>{t.amount}</td>
-                  <td style={{ padding: "8px 6px" }}>{t.category ?? ""}</td>
-                  <td style={{ padding: "8px 6px" }}>{t.memo ?? ""}</td>
-                  <td style={{ padding: "8px 6px", opacity: 0.7 }}>
-                    {t.id}
-                  </td>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <hr style={{ margin: "24px 0" }} />
-      <p style={{ opacity: 0.8 }}>
-        ※ログアウトは後で追加する（まずは select が通ることを確認する）。
-      </p>
+              </thead>
+              <tbody>
+                {txs.map((t: any) => (
+                  <tr key={t.id}>
+                    <td style={{ padding: "8px 10px" }}>{fmtDate(t.date)}</td>
+                    <td style={{ padding: "8px 10px" }}>{t.type}</td>
+                    <td style={{ padding: "8px 10px" }}>{fmtAmount(t.amount)}</td>
+                    <td style={{ padding: "8px 10px" }}>{t.category}</td>
+                    <td style={{ padding: "8px 10px" }}>{t.memo ?? ""}</td>
+                    <td style={{ padding: "8px 10px", opacity: 0.8 }}>{t.id}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </main>
   );
 }
