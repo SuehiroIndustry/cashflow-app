@@ -97,7 +97,7 @@ export default async function DashboardPage({
     .eq("user_id", user.id)
     .is("account_id", null);
 
-  const nullAccountCount = nullAccountStats?.count ?? 0;
+  const nullAccountCount = nullAccountStats?.length ?? 0;
 
   // --- Summary（選択口座 or 全体） ---
   // type は 'income' | 'expense' 前提
