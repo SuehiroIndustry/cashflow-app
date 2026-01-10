@@ -2,6 +2,7 @@
 import { createClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 
 type SearchParams = {
   account?: string; // "all" or account_id(uuid)
@@ -25,9 +26,8 @@ type Account = {
   is_default: boolean | null;
 };
 
-type BalanceRow = {
-  user_id: string;
-  account_id: string;
+type Summary = {
+  account: string | null;
   income: number;
   expense: number;
   balance: number;
@@ -35,6 +35,29 @@ type BalanceRow = {
 
 function yen(n: number) {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(n);
+}
+
+async function fetchSummary(accountParam: string | null): Promise<Summary> {
+  const qs = new URLSearchParams();
+  if (accountParam) qs.set("account", accountParam);
+
+  // Server Component から同一オリジンの Route Handler を呼ぶ
+  // cookie を渡して認証状態を引き継ぐ
+  const cookieStore = await cookies();
+  const res = await fetch(`/api/summary?${qs.toString()}`, {
+    method: "GET",
+    headers: {
+      cookie: cookieStore.toString(),
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`Failed to load summary: ${res.status} ${txt}`);
+  }
+
+  return (await res.json()) as Summary;
 }
 
 export default async function DashboardPage({
@@ -53,7 +76,6 @@ export default async function DashboardPage({
   if (!user) redirect("/login");
 
   // ---- accounts ----
-  // ※ テーブル/カラムが違うならここを君のスキーマに合わせて修正
   const { data: accountsRaw, error: accountsErr } = await supabase
     .from("accounts")
     .select("id,name,is_default")
@@ -93,7 +115,6 @@ export default async function DashboardPage({
     const note = String(formData.get("note") ?? "").trim() || null;
     const accountId = String(formData.get("account_id") ?? "").trim();
 
-    // ★ここが「必須化」の本体（UIで防いでもサーバーでも縛る）
     if (!accountId) {
       throw new Error("account_id is required");
     }
@@ -120,9 +141,13 @@ export default async function DashboardPage({
       throw new Error(`Insert failed: ${error.message}`);
     }
 
+    // Dashboard 再描画（summary(API)も transactions も両方更新される）
     revalidatePath("/dashboard");
-    // account=all の閲覧中でも登録はOK。画面はそのままで良い
   }
+
+  // ---- summary (via API) ----
+  const summaryAccountParam = isAllView ? "all" : (filterAccountId ?? "all");
+  const summary = await fetchSummary(summaryAccountParam);
 
   // ---- transactions ----
   let txQuery = supabase
@@ -144,44 +169,6 @@ export default async function DashboardPage({
   }
 
   const transactions = (txRaw ?? []) as Txn[];
-
-  // ---- summary (from VIEW: account_balances) ----
-  // All: user_id の全口座を合算 / Single: user_id + account_id の1行
-  let summaryIncome = 0;
-  let summaryExpense = 0;
-  let summaryBalance = 0;
-
-  if (isAllView) {
-    const { data, error } = await supabase
-      .from("account_balances")
-      .select("user_id,account_id,income,expense,balance")
-      .eq("user_id", user.id);
-
-    if (error) {
-      throw new Error(`Failed to load account_balances: ${error.message}`);
-    }
-
-    const rows = (data ?? []) as BalanceRow[];
-    summaryIncome = rows.reduce((s, r) => s + Number(r.income ?? 0), 0);
-    summaryExpense = rows.reduce((s, r) => s + Number(r.expense ?? 0), 0);
-    summaryBalance = rows.reduce((s, r) => s + Number(r.balance ?? 0), 0);
-  } else if (filterAccountId) {
-    const { data, error } = await supabase
-      .from("account_balances")
-      .select("user_id,account_id,income,expense,balance")
-      .eq("user_id", user.id)
-      .eq("account_id", filterAccountId)
-      .single();
-
-    // PGRST116 = No rows returned（その口座に取引がまだない等）→ 0 扱いでOK
-    if (error && error.code !== "PGRST116") {
-      throw new Error(`Failed to load account_balance: ${error.message}`);
-    }
-
-    summaryIncome = Number(data?.income ?? 0);
-    summaryExpense = Number(data?.expense ?? 0);
-    summaryBalance = Number(data?.balance ?? 0);
-  }
 
   // ---- UI ----
   const currentAccountLabel =
@@ -226,19 +213,19 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Summary */}
+      {/* Summary (VIEW → API) */}
       <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Balance</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(summaryBalance)}</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(Number(summary.balance ?? 0))}</div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Income</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(summaryIncome)}</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(Number(summary.income ?? 0))}</div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Expense</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(summaryExpense)}</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(Number(summary.expense ?? 0))}</div>
         </div>
       </div>
 
@@ -246,7 +233,6 @@ export default async function DashboardPage({
       <div className="mb-10 rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
         <div className="mb-4 text-lg font-semibold">Add Transaction</div>
 
-        {/* All は閲覧用。登録は口座必須。 */}
         {isAllView && (
           <div className="mb-4 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-sm text-amber-200">
             “All” は表示用です。登録する口座を必ず選んでください（選んだ口座の account_id で保存されます）。
@@ -340,9 +326,7 @@ export default async function DashboardPage({
             >
               Add
             </button>
-            <div className="mt-2 text-xs text-neutral-500">
-              ● まずは insert→select が通ることを確認。見た目は後でいじればいい。
-            </div>
+            <div className="mt-2 text-xs text-neutral-500">● insert→select→summary(API) が通ることを確認。</div>
           </div>
         </form>
       </div>
