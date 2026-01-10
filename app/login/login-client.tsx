@@ -2,94 +2,110 @@
 
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { createClient } from "@/utils/supabase/client"; // ←ここが存在してるか確認
+import { createBrowserClient } from "@supabase/ssr";
+
+function getSiteUrl(): string {
+  // 優先順位: NEXT_PUBLIC_SITE_URL -> window.origin
+  const env = process.env.NEXT_PUBLIC_SITE_URL;
+  if (env && env.startsWith("http")) return env.replace(/\/$/, "");
+  if (typeof window !== "undefined") return window.location.origin;
+  return "";
+}
 
 export default function LoginClient() {
   const sp = useSearchParams();
-  const urlError = sp.get("error");
 
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [localMsg, setLocalMsg] = useState<string | null>(null);
 
-  // ランタイムで createClient が死んでも、画面を真っ黒にしない
+  const errorMsg = sp.get("error");
+  const infoMsg = sp.get("message");
+
   const supabase = useMemo(() => {
-    try {
-      return createClient();
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-      return null;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    return createBrowserClient(url, key);
   }, []);
 
-  async function onSendMagicLink(e: React.FormEvent) {
+  const onSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErr(null);
-    setStatus(null);
+    setLocalMsg(null);
 
-    if (!supabase) {
-      setErr("Supabase client is not available (createClient failed).");
-      return;
-    }
-
-    if (!email.trim()) {
-      setErr("メールアドレス入れて。");
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setLocalMsg("メールアドレスを入力して。");
       return;
     }
 
     setLoading(true);
     try {
-      const origin = window.location.origin;
+      const siteUrl = getSiteUrl();
+      if (!siteUrl) {
+        setLocalMsg("SITE_URL が取れない。Vercel の環境変数 NEXT_PUBLIC_SITE_URL を確認して。");
+        return;
+      }
+
+      // 重要：redirect は /auth/callback に寄せる（ここでセッション確定処理をする）
+      const emailRedirectTo = `${siteUrl}/auth/callback?next=/dashboard`;
 
       const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          // 重要：callback 経由でセッション確立させる
-          emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
-        },
+        email: trimmed,
+        options: { emailRedirectTo },
       });
 
-      if (error) throw error;
-      setStatus("メール送った。リンク踏んで戻ってきて。");
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
+      if (error) {
+        setLocalMsg(error.message);
+        return;
+      }
+
+      setLocalMsg("メールを送信しました。届いたリンクを開いてください。");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
-    <div style={{ padding: 24, maxWidth: 520 }}>
-      <h1 style={{ fontSize: 20, marginBottom: 16 }}>Login</h1>
-
-      {urlError && (
-        <div style={{ marginBottom: 12, color: "salmon" }}>
-          URL error: {urlError}
+    <div className="space-y-4">
+      {(errorMsg || infoMsg) && (
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm">
+          {errorMsg ? (
+            <span className="text-red-300">{decodeURIComponent(errorMsg)}</span>
+          ) : (
+            <span className="text-white/70">{decodeURIComponent(infoMsg ?? "")}</span>
+          )}
         </div>
       )}
 
-      {err && (
-        <div style={{ marginBottom: 12, color: "salmon", whiteSpace: "pre-wrap" }}>
-          {err}
+      {localMsg && (
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-white/80">
+          {localMsg}
         </div>
       )}
 
-      {status && (
-        <div style={{ marginBottom: 12, color: "lightgreen" }}>{status}</div>
-      )}
-
-      <form onSubmit={onSendMagicLink}>
+      <form onSubmit={onSend} className="space-y-3">
+        <label className="block text-sm text-white/70">Email</label>
         <input
+          className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 outline-none focus:ring-2 focus:ring-white/20"
+          placeholder="email@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="email@example.com"
-          style={{ width: "100%", padding: 10, marginBottom: 12 }}
+          autoComplete="email"
+          inputMode="email"
         />
-        <button type="submit" disabled={loading} style={{ padding: "10px 14px" }}>
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full rounded-xl bg-white text-black py-2 font-medium disabled:opacity-60"
+        >
           {loading ? "Sending…" : "Send Magic Link"}
         </button>
+
+        <p className="text-xs text-white/50">
+          ※リンクが /login に戻る問題は、redirect_to が <code>/auth/callback</code> になってないのが主因。
+          ここで確実に <code>/auth/callback</code> に寄せてる。
+        </p>
       </form>
     </div>
   );
