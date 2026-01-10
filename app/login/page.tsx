@@ -3,7 +3,13 @@ import LoginClient from "./login-client";
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense
+      fallback={
+        <div style={{ padding: 24 }}>
+          <p>Loading login…</p>
+        </div>
+      }
+    >
       <LoginClient />
     </Suspense>
   );
