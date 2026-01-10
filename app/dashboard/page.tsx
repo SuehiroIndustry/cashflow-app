@@ -25,6 +25,14 @@ type Account = {
   is_default: boolean | null;
 };
 
+type BalanceRow = {
+  user_id: string;
+  account_id: string;
+  income: number;
+  expense: number;
+  balance: number;
+};
+
 function yen(n: number) {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(n);
 }
@@ -45,6 +53,7 @@ export default async function DashboardPage({
   if (!user) redirect("/login");
 
   // ---- accounts ----
+  // ※ テーブル/カラムが違うならここを君のスキーマに合わせて修正
   const { data: accountsRaw, error: accountsErr } = await supabase
     .from("accounts")
     .select("id,name,is_default")
@@ -84,7 +93,11 @@ export default async function DashboardPage({
     const note = String(formData.get("note") ?? "").trim() || null;
     const accountId = String(formData.get("account_id") ?? "").trim();
 
-    if (!accountId) throw new Error("account_id is required");
+    // ★ここが「必須化」の本体（UIで防いでもサーバーでも縛る）
+    if (!accountId) {
+      throw new Error("account_id is required");
+    }
+
     if (!date) throw new Error("date is required");
     if (type !== "income" && type !== "expense") throw new Error("type is invalid");
 
@@ -103,53 +116,13 @@ export default async function DashboardPage({
       note,
     });
 
-    if (error) throw new Error(`Insert failed: ${error.message}`);
+    if (error) {
+      throw new Error(`Insert failed: ${error.message}`);
+    }
 
     revalidatePath("/dashboard");
+    // account=all の閲覧中でも登録はOK。画面はそのままで良い
   }
-
-  // ---- summary (VIEW: account_balances) ----
-  type Summary = { income: number; expense: number; balance: number };
-  let summary: Summary = { income: 0, expense: 0, balance: 0 };
-
-  if (filterAccountId) {
-    const { data, error } = await supabase
-      .from("account_balances")
-      .select("income,expense,balance")
-      .eq("user_id", user.id)
-      .eq("account_id", filterAccountId)
-      .maybeSingle();
-
-    if (error) throw new Error(`Failed to load account balance: ${error.message}`);
-
-    if (data) {
-      summary = {
-        income: Number((data as any).income ?? 0),
-        expense: Number((data as any).expense ?? 0),
-        balance: Number((data as any).balance ?? 0),
-      };
-    }
-  } else {
-    const { data, error } = await supabase
-      .from("account_balances")
-      .select("income:sum(income),expense:sum(expense),balance:sum(balance)")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (error) throw new Error(`Failed to load summary balances: ${error.message}`);
-
-    if (data) {
-      summary = {
-        income: Number((data as any).income ?? 0),
-        expense: Number((data as any).expense ?? 0),
-        balance: Number((data as any).balance ?? 0),
-      };
-    }
-  }
-
-  const income = summary.income;
-  const expense = summary.expense;
-  const balance = summary.balance;
 
   // ---- transactions ----
   let txQuery = supabase
@@ -165,9 +138,50 @@ export default async function DashboardPage({
   }
 
   const { data: txRaw, error: txErr } = await txQuery;
-  if (txErr) throw new Error(`Failed to load transactions: ${txErr.message}`);
+
+  if (txErr) {
+    throw new Error(`Failed to load transactions: ${txErr.message}`);
+  }
 
   const transactions = (txRaw ?? []) as Txn[];
+
+  // ---- summary (from VIEW: account_balances) ----
+  // All: user_id の全口座を合算 / Single: user_id + account_id の1行
+  let summaryIncome = 0;
+  let summaryExpense = 0;
+  let summaryBalance = 0;
+
+  if (isAllView) {
+    const { data, error } = await supabase
+      .from("account_balances")
+      .select("user_id,account_id,income,expense,balance")
+      .eq("user_id", user.id);
+
+    if (error) {
+      throw new Error(`Failed to load account_balances: ${error.message}`);
+    }
+
+    const rows = (data ?? []) as BalanceRow[];
+    summaryIncome = rows.reduce((s, r) => s + Number(r.income ?? 0), 0);
+    summaryExpense = rows.reduce((s, r) => s + Number(r.expense ?? 0), 0);
+    summaryBalance = rows.reduce((s, r) => s + Number(r.balance ?? 0), 0);
+  } else if (filterAccountId) {
+    const { data, error } = await supabase
+      .from("account_balances")
+      .select("user_id,account_id,income,expense,balance")
+      .eq("user_id", user.id)
+      .eq("account_id", filterAccountId)
+      .single();
+
+    // PGRST116 = No rows returned（その口座に取引がまだない等）→ 0 扱いでOK
+    if (error && error.code !== "PGRST116") {
+      throw new Error(`Failed to load account_balance: ${error.message}`);
+    }
+
+    summaryIncome = Number(data?.income ?? 0);
+    summaryExpense = Number(data?.expense ?? 0);
+    summaryBalance = Number(data?.balance ?? 0);
+  }
 
   // ---- UI ----
   const currentAccountLabel =
@@ -177,9 +191,7 @@ export default async function DashboardPage({
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-8">
         <h1 className="text-3xl font-semibold">Dashboard</h1>
-        <div className="mt-2 text-sm text-neutral-400">
-          Logged in: {user.email ?? user.id}
-        </div>
+        <div className="mt-2 text-sm text-neutral-400">Logged in: {user.email ?? user.id}</div>
         <div className="mt-1 text-sm text-neutral-400">Account: {currentAccountLabel}</div>
       </div>
 
@@ -218,15 +230,15 @@ export default async function DashboardPage({
       <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Balance</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(balance)}</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(summaryBalance)}</div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Income</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(income)}</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(summaryIncome)}</div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Expense</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(expense)}</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(summaryExpense)}</div>
         </div>
       </div>
 
@@ -234,6 +246,7 @@ export default async function DashboardPage({
       <div className="mb-10 rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
         <div className="mb-4 text-lg font-semibold">Add Transaction</div>
 
+        {/* All は閲覧用。登録は口座必須。 */}
         {isAllView && (
           <div className="mb-4 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-sm text-amber-200">
             “All” は表示用です。登録する口座を必ず選んでください（選んだ口座の account_id で保存されます）。
@@ -328,7 +341,7 @@ export default async function DashboardPage({
               Add
             </button>
             <div className="mt-2 text-xs text-neutral-500">
-              ● summary は VIEW（account_balances）参照。transactions は一覧表示用。
+              ● まずは insert→select が通ることを確認。見た目は後でいじればいい。
             </div>
           </div>
         </form>
@@ -338,9 +351,7 @@ export default async function DashboardPage({
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
         <div className="mb-4 flex items-center justify-between">
           <div className="text-lg font-semibold">Transactions</div>
-          <div className="text-xs text-neutral-500">
-            Latest: {transactions.length} rows (max 200)
-          </div>
+          <div className="text-xs text-neutral-500">Latest: {transactions.length} rows (max 200)</div>
         </div>
 
         <div className="overflow-x-auto">
