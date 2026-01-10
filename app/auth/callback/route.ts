@@ -16,7 +16,8 @@ export async function GET(request: Request) {
 
   const next = url.searchParams.get("next") ?? "/dashboard";
 
-  const cookieStore = await cookies();
+  // ✅ await しない
+  const cookieStore = cookies();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,16 +36,18 @@ export async function GET(request: Request) {
     }
   );
 
+  // next は相対パスだけ許可（安全）
+  const safeNext = next.startsWith("/") ? next : "/dashboard";
+
   // 1) PKCE code フロー
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
-      // 失敗したらログインへ戻す（詳細はURLに出すと便利）
       return NextResponse.redirect(
         new URL(`/login?error=${encodeURIComponent(error.message)}`, url.origin)
       );
     }
-    return NextResponse.redirect(new URL(next, url.origin));
+    return NextResponse.redirect(new URL(safeNext, url.origin));
   }
 
   // 2) token_hash フロー（magic link）
@@ -55,9 +58,10 @@ export async function GET(request: Request) {
         new URL(`/login?error=${encodeURIComponent(error.message)}`, url.origin)
       );
     }
-    return NextResponse.redirect(new URL(next, url.origin));
+    return NextResponse.redirect(new URL(safeNext, url.origin));
   }
 
-  // どっちでもない＝不正 or 失敗
-  return NextResponse.redirect(new URL("/login?error=missing_params", url.origin));
+  return NextResponse.redirect(
+    new URL("/login?error=missing_params", url.origin)
+  );
 }
