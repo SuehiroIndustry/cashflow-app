@@ -17,8 +17,8 @@ export async function GET(request: Request) {
   const next = url.searchParams.get("next") ?? "/dashboard";
   const safeNext = next.startsWith("/") ? next : "/dashboard";
 
-  // ✅ await しない（これが全て）
-  const cookieStore = cookies();
+  // ✅ Next.js(君のver)では cookies() が Promise なので await 必須
+  const cookieStore = await cookies();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     }
   );
 
-  // PKCE
+  // 1) PKCE code フロー
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL(safeNext, url.origin));
   }
 
-  // Magic link
+  // 2) token_hash フロー（magic link）
   if (token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({ token_hash, type });
     if (error) {
