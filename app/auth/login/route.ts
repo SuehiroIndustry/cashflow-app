@@ -5,7 +5,8 @@ import { cookies } from 'next/headers'
 export async function POST(req: Request) {
   const { email, password } = await req.json()
 
-  const cookieStore = cookies()
+  // ✅ Next.js 16.1系では cookies() が Promise 扱いになっているので await
+  const cookieStore = await cookies()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,7 +20,12 @@ export async function POST(req: Request) {
           cookieStore.set({ name, value, ...options })
         },
         remove(name: string, options: any) {
-          cookieStore.set({ name, value: '', ...options })
+          // delete が使えるならそれが綺麗
+          try {
+            cookieStore.delete({ name, ...options })
+          } catch {
+            cookieStore.set({ name, value: '', ...options })
+          }
         },
       },
     }
