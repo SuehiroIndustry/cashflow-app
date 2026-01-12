@@ -1,19 +1,13 @@
-// /app/login/page.tsx
+// app/login/page.tsx
 import { Suspense } from "react";
-import LoginClient from "./LoginClient"; // ここだけ自分の実際のパスに合わせて
+import LoginClient from "./LoginClient";
+
+export const dynamic = "force-dynamic"; // ← これ重要
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<LoginLoading />}>
+    <Suspense fallback={null}>
       <LoginClient />
     </Suspense>
-  );
-}
-
-function LoginLoading() {
-  return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-      <p>Loading login…</p>
-    </main>
   );
 }
