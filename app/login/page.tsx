@@ -1,33 +1,61 @@
-// app/login/page.tsx
-import { redirect } from "next/navigation";
-import { Suspense } from "react";
-import { createClient } from "@/utils/supabase/server";
-import LoginClient from "./LoginClient";
+'use client'
 
-export default async function LoginPage() {
-  // すでにログイン済みなら /dashboard へ
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
-  if (user) redirect("/dashboard");
+export default function LoginPage() {
+  const router = useRouter()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  // useSearchParams を使うのは Client 側に寄せる（Suspense で包む）
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+
+    const data = await res.json()
+
+    setLoading(false)
+
+    if (!res.ok) {
+      setError(data?.error ?? 'Login failed')
+      return
+    }
+
+    router.push('/')
+    router.refresh()
+  }
+
   return (
-    <main className="min-h-screen flex items-start justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-black/40 backdrop-blur p-6 mt-12 shadow">
-        <h1 className="text-xl font-semibold">Login</h1>
-        <p className="text-sm text-white/60 mt-1">
-          メールにMagic Linkを送ります。
-        </p>
-
-        <div className="mt-6">
-          <Suspense fallback={<div className="text-sm text-white/60">Loading…</div>}>
-            <LoginClient />
-          </Suspense>
-        </div>
-      </div>
-    </main>
-  );
+    <div style={{ maxWidth: 360, margin: '80px auto' }}>
+      <h1>Login</h1>
+      <form onSubmit={onSubmit}>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="email"
+          style={{ width: '100%', marginBottom: 8 }}
+        />
+        <input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="password"
+          type="password"
+          style={{ width: '100%', marginBottom: 8 }}
+        />
+        <button disabled={loading} style={{ width: '100%' }}>
+          {loading ? '...' : 'Login'}
+        </button>
+      </form>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+    </div>
+  )
 }
