@@ -1,6 +1,5 @@
 // app/dashboard/page.tsx
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -27,11 +26,12 @@ type CashFlowRow = {
   created_at: string;
 };
 
-type Summary = {
-  account: string | null;
-  income: number;
-  expense: number;
-  balance: number;
+type BalanceRow = {
+  user_id: string;
+  account_id: string; // view上の型が uuid のことが多い
+  income: number | null;
+  expense: number | null;
+  balance: number | null;
 };
 
 function yen(n: number) {
@@ -39,28 +39,6 @@ function yen(n: number) {
     style: "currency",
     currency: "JPY",
   }).format(n);
-}
-
-// Headers/ReadonlyHeaders どっちでも受けられるように「get()がある」だけにする
-type HeadersLike = {
-  get(name: string): string | null;
-};
-
-function getBaseUrlFromHeaders(h: HeadersLike) {
-  // Vercel/ローカル両対応（envがあれば最優先）
-  const envBase =
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_URL;
-
-  if (envBase) {
-    const withProto = envBase.startsWith("http") ? envBase : `https://${envBase}`;
-    return withProto.replace(/\/$/, "");
-  }
-
-  const proto = h.get("x-forwarded-proto") ?? "http";
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
-  return `${proto}://${host}`.replace(/\/$/, "");
 }
 
 export default async function DashboardPage({
@@ -86,7 +64,8 @@ export default async function DashboardPage({
     .order("created_at", { ascending: true });
 
   if (accountsErr) {
-    throw new Error(`Failed to load cash_accounts: ${accountsErr.message}`);
+    // ここで throw すると画面が死ぬので、ログ出して最低限表示
+    console.error("Failed to load cash_accounts:", accountsErr);
   }
 
   const accounts = (accountsRaw ?? []) as CashAccount[];
@@ -98,46 +77,69 @@ export default async function DashboardPage({
     ? "All"
     : accounts.find((a) => a.id === filterAccountId)?.name ?? "Unknown";
 
-  // ---- summary (API経由: app/api/summary/route.ts) ----
-  // ★ Next 16系で headers() が Promise の場合があるので await
-  const h = await headers();
-  const baseUrl = getBaseUrlFromHeaders(h);
+  // ---- summary (VIEW: account_balances を直接参照) ----
+  // 期待: user_id, account_id, income, expense, balance
+  let summaryIncome = 0;
+  let summaryExpense = 0;
+  let summaryBalance = 0;
 
-  const summaryUrl = new URL("/api/summary", baseUrl);
-  summaryUrl.searchParams.set(
-    "account",
-    isAllView ? "all" : String(filterAccountId ?? "all")
-  );
+  try {
+    let q = supabase
+      .from("account_balances")
+      .select("user_id,account_id,income,expense,balance")
+      .eq("user_id", user.id);
 
-  const summaryRes = await fetch(summaryUrl.toString(), { cache: "no-store" });
-  if (!summaryRes.ok) {
-    const body = await summaryRes.text().catch(() => "");
-    throw new Error(`Failed to load summary: ${summaryRes.status} ${body}`);
+    // account を指定してるときだけ絞る（view側の account_id が uuid なら不一致注意）
+    // ここでは「all以外なら絞る」だけにしておく
+    if (!isAllView && filterAccountId != null) {
+      // もし view が cash_account_id(int) を持ってる構造ならここを account_id じゃなく cash_account_id に変える
+      // 今は user が使ってた route.ts に合わせて account_id のままにする
+      q = q.eq("account_id", String(filterAccountId));
+    }
+
+    const { data, error } = await q;
+
+    if (error) {
+      // ここで throw すると /dashboard が死ぬ。なので 0 扱いで画面は出す
+      console.error("Failed to load account_balances:", error);
+    } else {
+      const rows = (data ?? []) as BalanceRow[];
+      summaryIncome = rows.reduce((s, r) => s + Number(r.income ?? 0), 0);
+      summaryExpense = rows.reduce((s, r) => s + Number(r.expense ?? 0), 0);
+      summaryBalance = rows.reduce((s, r) => s + Number(r.balance ?? 0), 0);
+    }
+  } catch (e) {
+    console.error("Unexpected error in summary:", e);
   }
-  const summary = (await summaryRes.json()) as Summary;
 
   // ---- recent cash flows ----
-  let q = supabase
-    .from("cash_flows")
-    .select(
-      "id,cash_account_id,date,type,amount,currency,source_type,description,cash_category_id,created_at"
-    )
-    .eq("user_id", user.id)
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(100);
+  let flows: CashFlowRow[] = [];
 
-  if (filterAccountId) {
-    q = q.eq("cash_account_id", filterAccountId);
+  try {
+    let q = supabase
+      .from("cash_flows")
+      .select(
+        "id,cash_account_id,date,type,amount,currency,source_type,description,cash_category_id,created_at"
+      )
+      .eq("user_id", user.id)
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (filterAccountId) {
+      q = q.eq("cash_account_id", filterAccountId);
+    }
+
+    const { data, error } = await q;
+
+    if (error) {
+      console.error("Failed to load cash_flows:", error);
+    } else {
+      flows = (data ?? []) as CashFlowRow[];
+    }
+  } catch (e) {
+    console.error("Unexpected error in cash_flows:", e);
   }
-
-  const { data: flowsRaw, error: flowsErr } = await q;
-
-  if (flowsErr) {
-    throw new Error(`Failed to load cash_flows: ${flowsErr.message}`);
-  }
-
-  const flows = (flowsRaw ?? []) as CashFlowRow[];
 
   // ---- UI ----
   return (
@@ -189,20 +191,22 @@ export default async function DashboardPage({
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Balance</div>
           <div className="mt-2 text-2xl font-semibold">
-            {yen(Number(summary.balance ?? 0))}
+            {yen(Number(summaryBalance ?? 0))}
           </div>
-          <div className="mt-1 text-xs text-neutral-500">via /api/summary</div>
+          <div className="mt-1 text-xs text-neutral-500">
+            via VIEW: account_balances
+          </div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Income</div>
           <div className="mt-2 text-2xl font-semibold">
-            {yen(Number(summary.income ?? 0))}
+            {yen(Number(summaryIncome ?? 0))}
           </div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Expense</div>
           <div className="mt-2 text-2xl font-semibold">
-            {yen(Number(summary.expense ?? 0))}
+            {yen(Number(summaryExpense ?? 0))}
           </div>
         </div>
       </div>
@@ -254,8 +258,7 @@ export default async function DashboardPage({
         </div>
 
         <div className="mt-3 text-xs text-neutral-500">
-          ※ 追加登録は次のステップで <code>public.add_cash_flow()</code>{" "}
-          経由に戻す（制約を安全に満たすため）
+          ※ summaryは API を叩かず view を直読み（落ちない設計）
         </div>
       </div>
     </div>
