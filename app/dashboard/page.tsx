@@ -35,10 +35,18 @@ type Summary = {
 };
 
 function yen(n: number) {
-  return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(n);
+  return new Intl.NumberFormat("ja-JP", {
+    style: "currency",
+    currency: "JPY",
+  }).format(n);
 }
 
-function getBaseUrlFromHeaders(h: Headers) {
+// Headers/ReadonlyHeaders どっちでも受けられるように「get()がある」だけにする
+type HeadersLike = {
+  get(name: string): string | null;
+};
+
+function getBaseUrlFromHeaders(h: HeadersLike) {
   // Vercel/ローカル両対応（envがあれば最優先）
   const envBase =
     process.env.NEXT_PUBLIC_SITE_URL ||
@@ -91,11 +99,15 @@ export default async function DashboardPage({
     : accounts.find((a) => a.id === filterAccountId)?.name ?? "Unknown";
 
   // ---- summary (API経由: app/api/summary/route.ts) ----
-  const h = headers();
+  // ★ Next 16系で headers() が Promise の場合があるので await
+  const h = await headers();
   const baseUrl = getBaseUrlFromHeaders(h);
 
   const summaryUrl = new URL("/api/summary", baseUrl);
-  summaryUrl.searchParams.set("account", isAllView ? "all" : String(filterAccountId ?? "all"));
+  summaryUrl.searchParams.set(
+    "account",
+    isAllView ? "all" : String(filterAccountId ?? "all")
+  );
 
   const summaryRes = await fetch(summaryUrl.toString(), { cache: "no-store" });
   if (!summaryRes.ok) {
@@ -132,13 +144,19 @@ export default async function DashboardPage({
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="mb-8">
         <h1 className="text-3xl font-semibold">Dashboard</h1>
-        <div className="mt-2 text-sm text-neutral-400">Logged in: {user.email ?? user.id}</div>
-        <div className="mt-1 text-sm text-neutral-400">Account: {currentAccountLabel}</div>
+        <div className="mt-2 text-sm text-neutral-400">
+          Logged in: {user.email ?? user.id}
+        </div>
+        <div className="mt-1 text-sm text-neutral-400">
+          Account: {currentAccountLabel}
+        </div>
       </div>
 
       {/* Account filter */}
       <div className="mb-6 rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-        <div className="mb-3 text-sm font-medium text-neutral-300">Account filter</div>
+        <div className="mb-3 text-sm font-medium text-neutral-300">
+          Account filter
+        </div>
         <div className="flex flex-wrap gap-2">
           <a
             className={`rounded-full border px-3 py-1 text-sm ${
@@ -170,16 +188,22 @@ export default async function DashboardPage({
       <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Balance</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(Number(summary.balance ?? 0))}</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {yen(Number(summary.balance ?? 0))}
+          </div>
           <div className="mt-1 text-xs text-neutral-500">via /api/summary</div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Income</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(Number(summary.income ?? 0))}</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {yen(Number(summary.income ?? 0))}
+          </div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
           <div className="text-xs text-neutral-400">Expense</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(Number(summary.expense ?? 0))}</div>
+          <div className="mt-2 text-2xl font-semibold">
+            {yen(Number(summary.expense ?? 0))}
+          </div>
         </div>
       </div>
 
@@ -187,7 +211,9 @@ export default async function DashboardPage({
       <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
         <div className="mb-4 flex items-center justify-between">
           <div className="text-lg font-semibold">Cash Flows</div>
-          <div className="text-xs text-neutral-500">Latest: {flows.length} rows (max 100)</div>
+          <div className="text-xs text-neutral-500">
+            Latest: {flows.length} rows (max 100)
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -214,7 +240,9 @@ export default async function DashboardPage({
                   <tr key={r.id} className="border-b border-neutral-900">
                     <td className="py-2">{r.date}</td>
                     <td className="py-2">{r.type}</td>
-                    <td className="py-2 text-right">{yen(Number(r.amount ?? 0))}</td>
+                    <td className="py-2 text-right">
+                      {yen(Number(r.amount ?? 0))}
+                    </td>
                     <td className="py-2">{r.description ?? ""}</td>
                     <td className="py-2">{r.cash_account_id}</td>
                     <td className="py-2">{r.id}</td>
@@ -226,7 +254,8 @@ export default async function DashboardPage({
         </div>
 
         <div className="mt-3 text-xs text-neutral-500">
-          ※ 追加登録は次のステップで <code>public.add_cash_flow()</code> 経由に戻す（制約を安全に満たすため）
+          ※ 追加登録は次のステップで <code>public.add_cash_flow()</code>{" "}
+          経由に戻す（制約を安全に満たすため）
         </div>
       </div>
     </div>
