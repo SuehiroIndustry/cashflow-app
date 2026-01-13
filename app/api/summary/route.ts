@@ -4,17 +4,14 @@ import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-type BalanceRow = {
-  user_id: string;
-  account_id: string;
-  income: number | null;
-  expense: number | null;
-  balance: number | null;
+type SummaryRow = {
+  type: "income" | "expense";
+  amount: number | null;
 };
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const account = url.searchParams.get("account"); // "all" | account_id(uuid) | null
+  const account = url.searchParams.get("account"); // "all" | cash_account_id(number) | null
 
   const supabase = await createClient();
 
@@ -26,30 +23,43 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // VIEW: public.account_balances を参照
-  // 期待カラム: user_id, account_id, income, expense, balance
-  let q = supabase.from("account_balances").select("user_id,account_id,income,expense,balance").eq("user_id", user.id);
-
   const isAll = !account || account === "all";
-  if (!isAll) {
-    q = q.eq("account_id", account);
+  const accountId = isAll ? null : Number(account);
+
+  // cash_flows を集計して income/expense/balance を返す
+  // ※RLSが効く前提 + 念のため user_id で絞る
+  let q = supabase
+    .from("cash_flows")
+    .select("type,amount")
+    .eq("user_id", user.id);
+
+  if (accountId) {
+    q = q.eq("cash_account_id", accountId);
   }
 
   const { data, error } = await q;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message, hint: "Failed to query cash_flows" },
+      { status: 500 }
+    );
   }
 
-  const rows = (data ?? []) as BalanceRow[];
+  const rows = (data ?? []) as SummaryRow[];
 
-  // account=all のときは全口座を合算。特定口座ならその1行（なければ0扱い）
-  const income = rows.reduce((s, r) => s + Number(r.income ?? 0), 0);
-  const expense = rows.reduce((s, r) => s + Number(r.expense ?? 0), 0);
-  const balance = rows.reduce((s, r) => s + Number(r.balance ?? 0), 0);
+  const income = rows
+    .filter((r) => r.type === "income")
+    .reduce((s, r) => s + Number(r.amount ?? 0), 0);
+
+  const expense = rows
+    .filter((r) => r.type === "expense")
+    .reduce((s, r) => s + Number(r.amount ?? 0), 0);
+
+  const balance = income - expense;
 
   return NextResponse.json({
-    account: isAll ? "all" : account,
+    account: isAll ? "all" : String(accountId),
     income,
     expense,
     balance,
