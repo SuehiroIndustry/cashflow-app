@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
-import LoginClient from "./LoginClient";
+import LoginClient from "./login-client";
 
 export default async function LoginPage() {
   // すでにログイン済みなら /dashboard へ
