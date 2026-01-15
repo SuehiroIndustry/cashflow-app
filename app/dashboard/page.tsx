@@ -23,25 +23,22 @@ type OverviewRow = {
 };
 
 export default async function DashboardPage() {
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient(); // ★ await 追加
 
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData?.user) {
     redirect('/login');
   }
 
-  // accounts
   const { data: accounts, error: accountsError } = await supabase
     .from('cash_accounts')
     .select('id, name')
     .order('id');
 
   if (accountsError) {
-    // Serverで落とすと「client-side exception」よりマシ（エラー表示に乗る）
     throw new Error(`Failed to fetch cash_accounts: ${accountsError.message}`);
   }
 
-  // overview (view)
   const { data: overview, error: overviewError } = await supabase
     .from('v_dashboard_overview_user_v2')
     .select('*');
