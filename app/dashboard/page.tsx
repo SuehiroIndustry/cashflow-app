@@ -1,398 +1,118 @@
 // app/dashboard/page.tsx
-import { createClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 
-type SearchParams = {
-  account?: string; // "all" or account_id(uuid)
-};
-
-type Txn = {
-  id: string;
-  user_id: string;
-  account_id: string | null;
-  date: string; // YYYY-MM-DD
-  type: "income" | "expense";
-  amount: number;
-  category: string | null;
-  note: string | null;
-  created_at: string;
-};
-
-type Account = {
-  id: string;
-  name: string;
-  is_default: boolean | null;
-};
-
-type OverviewRow = {
-  user_id: string;
-  current_balance: number | null;
-  monthly_fixed_cost: number | null;
-  month_expense: number | null;
-  planned_orders_30d: number | null;
-  projected_balance: number | null;
-  level: "RED" | "YELLOW" | "GREEN" | string | null;
+type Overview = {
+  current_balance: number;
+  monthly_fixed_cost: number;
+  month_expense: number;
+  planned_orders_30d: number;
+  projected_balance: number;
+  level: "GREEN" | "YELLOW" | "RED";
   computed_at: string | null;
 };
 
 function yen(n: number) {
-  return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(n);
+  return new Intl.NumberFormat("ja-JP", {
+    style: "currency",
+    currency: "JPY",
+  }).format(n);
 }
 
-export default async function DashboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams> | SearchParams;
-}) {
-  const sp = (await searchParams) as SearchParams;
-  const supabase = await createClient();
+export default async function DashboardPage() {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/overview`, {
+    cache: "no-store",
+  });
 
-  // ---- auth ----
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  // ---- accounts ----
-  const { data: accountsRaw, error: accountsErr } = await supabase
-    .from("accounts")
-    .select("id,name,is_default")
-    .eq("user_id", user.id)
-    .order("is_default", { ascending: false })
-    .order("created_at", { ascending: true });
-
-  if (accountsErr) {
-    throw new Error(`Failed to load accounts: ${accountsErr.message}`);
+  if (res.status === 401) {
+    redirect("/login");
   }
 
-  const accounts = (accountsRaw ?? []) as Account[];
-
-  const isAllView = sp.account === "all" || !sp.account;
-  const defaultAccount = accounts.find((a) => a.is_default) ?? accounts[0] ?? null;
-
-  // 閲覧フィルタ（allはnull）
-  const filterAccountId = !isAllView && sp.account ? sp.account : null;
-
-  // 登録は必ず account_id を持つ
-  const insertDefaultAccountId = defaultAccount?.id ?? "";
-
-  // ---- server action: insert ----
-  async function insertTransaction(formData: FormData) {
-    "use server";
-
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) redirect("/login");
-
-    const date = String(formData.get("date") ?? "").trim();
-    const type = String(formData.get("type") ?? "").trim() as "income" | "expense";
-    const amountRaw = String(formData.get("amount") ?? "").trim();
-    const category = String(formData.get("category") ?? "").trim() || null;
-    const note = String(formData.get("note") ?? "").trim() || null;
-    const accountId = String(formData.get("account_id") ?? "").trim();
-
-    if (!accountId) throw new Error("account_id is required");
-    if (!date) throw new Error("date is required");
-    if (type !== "income" && type !== "expense") throw new Error("type is invalid");
-
-    const amount = Number(amountRaw);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error("amount must be a positive number");
-    }
-
-    const { error } = await supabase.from("transactions").insert({
-      user_id: user.id,
-      account_id: accountId,
-      date,
-      type,
-      amount,
-      category,
-      note,
-    });
-
-    if (error) throw new Error(`Insert failed: ${error.message}`);
-
-    revalidatePath("/dashboard");
+  if (!res.ok) {
+    throw new Error("Failed to load overview");
   }
 
-  // ---- overview (VIEW) ----
-  // dashboard_overview は「ユーザー単位で1行」の想定
-  const { data: ovRaw, error: ovErr } = await supabase
-    .from("dashboard_overview")
-    .select("user_id,current_balance,monthly_fixed_cost,month_expense,planned_orders_30d,projected_balance,level,computed_at")
-    .eq("user_id", user.id)
-    .limit(1);
-
-  if (ovErr) {
-    throw new Error(`Failed to load dashboard_overview: ${ovErr.message}`);
-  }
-
-  const overview = ((ovRaw?.[0] ?? null) as OverviewRow | null) ?? null;
-
-  const current_balance = Number(overview?.current_balance ?? 0);
-  const monthly_fixed_cost = Number(overview?.monthly_fixed_cost ?? 0);
-  const month_expense = Number(overview?.month_expense ?? 0);
-  const planned_orders_30d = Number(overview?.planned_orders_30d ?? 0);
-  const projected_balance = Number(overview?.projected_balance ?? 0);
-  const level = (overview?.level ?? "GREEN") as "RED" | "YELLOW" | "GREEN";
-
-  // ---- transactions (list) ----
-  let txQuery = supabase
-    .from("transactions")
-    .select("id,user_id,account_id,date,type,amount,category,note,created_at")
-    .eq("user_id", user.id)
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(200);
-
-  if (filterAccountId) {
-    txQuery = txQuery.eq("account_id", filterAccountId);
-  }
-
-  const { data: txRaw, error: txErr } = await txQuery;
-  if (txErr) throw new Error(`Failed to load transactions: ${txErr.message}`);
-
-  const transactions = (txRaw ?? []) as Txn[];
-
-  // ---- UI ----
-  const currentAccountLabel =
-    isAllView ? "All" : accounts.find((a) => a.id === filterAccountId)?.name ?? "Unknown";
-
-  const levelBadge =
-    level === "RED"
-      ? "border-red-500/40 text-red-200 bg-red-950/30"
-      : level === "YELLOW"
-      ? "border-amber-500/40 text-amber-200 bg-amber-950/30"
-      : "border-emerald-500/40 text-emerald-200 bg-emerald-950/30";
+  const overview = (await res.json()) as Overview;
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold">Dashboard</h1>
-        <div className="mt-2 text-sm text-neutral-400">Logged in: {user.email ?? user.id}</div>
-        <div className="mt-1 text-sm text-neutral-400">Account: {currentAccountLabel}</div>
-      </div>
+    <main className="mx-auto max-w-5xl p-6 space-y-6">
+      <header>
+        <h1 className="text-3xl font-bold">経営ダッシュボード</h1>
+        <p className="text-sm text-neutral-400">
+          最終更新: {overview.computed_at ?? "-"}
+        </p>
+      </header>
 
-      {/* Overview (経営者VIEW) */}
-      <div className="mb-8 rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="text-lg font-semibold">Overview</div>
-          <div className={`rounded-full border px-3 py-1 text-xs ${levelBadge}`}>LEVEL: {level}</div>
-        </div>
+      {/* ===== KPI ===== */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card title="現在残高">
+          <span className="text-2xl font-semibold">
+            {yen(overview.current_balance)}
+          </span>
+        </Card>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-            <div className="text-xs text-neutral-400">Current Balance</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(current_balance)}</div>
+        <Card title="今月の支出">
+          <span className="text-2xl font-semibold text-red-400">
+            {yen(overview.month_expense)}
+          </span>
+        </Card>
+
+        <Card title="固定費（月）">
+          <span className="text-2xl font-semibold text-orange-400">
+            {yen(overview.monthly_fixed_cost)}
+          </span>
+        </Card>
+      </section>
+
+      {/* ===== Projection ===== */}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card title="30日以内の支払予定">
+          <span className="text-xl">
+            {yen(overview.planned_orders_30d)}
+          </span>
+        </Card>
+
+        <Card title="30日後予測残高">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl font-bold">
+              {yen(overview.projected_balance)}
+            </span>
+            <LevelBadge level={overview.level} />
           </div>
+        </Card>
+      </section>
+    </main>
+  );
+}
 
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-            <div className="text-xs text-neutral-400">This Month Expense</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(month_expense)}</div>
-          </div>
+/* ===== components ===== */
 
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-            <div className="text-xs text-neutral-400">Monthly Fixed Cost</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(monthly_fixed_cost)}</div>
-          </div>
-
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5 md:col-span-1">
-            <div className="text-xs text-neutral-400">Planned Orders (30d)</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(planned_orders_30d)}</div>
-          </div>
-
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5 md:col-span-2">
-            <div className="text-xs text-neutral-400">Projected Balance</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(projected_balance)}</div>
-            <div className="mt-2 text-xs text-neutral-500">
-              = Current Balance − Monthly Fixed Cost − Planned Orders(30d)
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 text-xs text-neutral-500">
-          computed_at: {overview?.computed_at ?? "n/a"}
-        </div>
-      </div>
-
-      {/* Account filter */}
-      <div className="mb-6 rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-        <div className="mb-3 text-sm font-medium text-neutral-300">Account filter</div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            className={`rounded-full border px-3 py-1 text-sm ${
-              isAllView ? "border-neutral-200 text-neutral-100" : "border-neutral-800 text-neutral-400 hover:text-neutral-200"
-            }`}
-            href="/dashboard?account=all"
-          >
-            All
-          </a>
-          {accounts.map((a) => (
-            <a
-              key={a.id}
-              className={`rounded-full border px-3 py-1 text-sm ${
-                !isAllView && filterAccountId === a.id
-                  ? "border-neutral-200 text-neutral-100"
-                  : "border-neutral-800 text-neutral-400 hover:text-neutral-200"
-              }`}
-              href={`/dashboard?account=${encodeURIComponent(a.id)}`}
-            >
-              {a.name}
-              {a.is_default ? " (default)" : ""}
-            </a>
-          ))}
-        </div>
-      </div>
-
-      {/* Add transaction */}
-      <div className="mb-10 rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
-        <div className="mb-4 text-lg font-semibold">Add Transaction</div>
-
-        {isAllView && (
-          <div className="mb-4 rounded-xl border border-amber-900/50 bg-amber-950/20 p-3 text-sm text-amber-200">
-            “All” は表示用です。登録する口座を必ず選んでください（選んだ口座の account_id で保存されます）。
-          </div>
-        )}
-
-        <form action={insertTransaction} className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div>
-            <label className="block text-xs text-neutral-400">date</label>
-            <input
-              name="date"
-              type="date"
-              required
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-              defaultValue={new Date().toISOString().slice(0, 10)}
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-neutral-400">account</label>
-            <select
-              name="account_id"
-              required
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-              defaultValue={insertDefaultAccountId}
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                  {a.is_default ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-            <div className="mt-1 text-xs text-neutral-500">
-              ※ここで選んだ口座の <code>account_id</code> を transactions に必ず保存します。
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-neutral-400">type</label>
-            <select
-              name="type"
-              required
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-              defaultValue="expense"
-            >
-              <option value="income">income</option>
-              <option value="expense">expense</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs text-neutral-400">amount</label>
-            <input
-              name="amount"
-              type="number"
-              inputMode="numeric"
-              required
-              min={1}
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-              placeholder="1000"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-neutral-400">category</label>
-            <input
-              name="category"
-              type="text"
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-              placeholder="food / sales / ..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs text-neutral-400">note</label>
-            <input
-              name="note"
-              type="text"
-              className="mt-1 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm"
-              placeholder="optional"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              className="inline-flex rounded-xl border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm hover:bg-neutral-800"
-              disabled={accounts.length === 0}
-              title={accounts.length === 0 ? "No accounts found" : ""}
-            >
-              Add
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Transactions */}
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="text-lg font-semibold">Transactions</div>
-          <div className="text-xs text-neutral-500">Latest: {transactions.length} rows (max 200)</div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-xs text-neutral-400">
-              <tr className="border-b border-neutral-800">
-                <th className="py-2 text-left font-medium">date</th>
-                <th className="py-2 text-left font-medium">type</th>
-                <th className="py-2 text-right font-medium">amount</th>
-                <th className="py-2 text-left font-medium">category</th>
-                <th className="py-2 text-left font-medium">note</th>
-                <th className="py-2 text-left font-medium">account_id</th>
-                <th className="py-2 text-left font-medium">id</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.length === 0 ? (
-                <tr>
-                  <td className="py-6 text-neutral-500" colSpan={7}>
-                    No transactions.
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((t) => (
-                  <tr key={t.id} className="border-b border-neutral-900">
-                    <td className="py-2">{t.date}</td>
-                    <td className="py-2">{t.type}</td>
-                    <td className="py-2 text-right">{yen(Number(t.amount ?? 0))}</td>
-                    <td className="py-2">{t.category ?? ""}</td>
-                    <td className="py-2">{t.note ?? ""}</td>
-                    <td className="py-2">{t.account_id ?? ""}</td>
-                    <td className="py-2">{t.id}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+function Card({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+      <p className="text-sm text-neutral-400 mb-1">{title}</p>
+      {children}
     </div>
+  );
+}
+
+function LevelBadge({ level }: { level: "GREEN" | "YELLOW" | "RED" }) {
+  const map = {
+    GREEN: "bg-green-500/20 text-green-400",
+    YELLOW: "bg-yellow-500/20 text-yellow-400",
+    RED: "bg-red-500/20 text-red-400",
+  };
+
+  return (
+    <span
+      className={`px-3 py-1 rounded-full text-xs font-semibold ${map[level]}`}
+    >
+      {level}
+    </span>
   );
 }
