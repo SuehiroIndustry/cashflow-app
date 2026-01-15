@@ -18,15 +18,25 @@ type Row = {
   computed_at: string | null;
 };
 
-const n = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const n = (v: unknown) => {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+};
 
-function calcRisk(projected: number) {
-  const risk_score = projected < 0 ? 2 : projected < 100000 ? 1 : 0;
-  const risk_level = risk_score === 2 ? 'RED' : risk_score === 1 ? 'YELLOW' : 'GREEN';
+function calcRisk(projectedBalance30d: number) {
+  const risk_score =
+    projectedBalance30d < 0 ? 2 :
+    projectedBalance30d < 100000 ? 1 : 0;
+
+  const risk_level =
+    risk_score === 2 ? 'RED' :
+    risk_score === 1 ? 'YELLOW' : 'GREEN';
+
   return { risk_level, risk_score };
 }
 
 export async function GET(req: Request) {
+  // ❗ await しない
   const supabase = createSupabaseServerClient();
 
   const {
@@ -49,7 +59,10 @@ export async function GET(req: Request) {
   if (mode === 'account') {
     const cashAccountId = Number(cashAccountIdParam);
     if (!Number.isFinite(cashAccountId)) {
-      return NextResponse.json({ error: 'cashAccountId is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'cashAccountId is required' },
+        { status: 400 }
+      );
     }
 
     const { data, error } = await supabase
@@ -104,7 +117,7 @@ export async function GET(req: Request) {
       const t = r.computed_at ? Date.parse(r.computed_at) : NaN;
       if (Number.isFinite(t) && t > acc._latestTs) {
         acc._latestTs = t;
-        acc.computed_at = r.computed_at;
+        acc.computed_at = r.computed_at ?? null;
       }
       return acc;
     },
@@ -124,8 +137,14 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     mode: 'all',
-    ...agg,
+    current_balance: agg.current_balance,
+    income_mtd: agg.income_mtd,
+    expense_mtd: agg.expense_mtd,
+    planned_income_30d: agg.planned_income_30d,
+    planned_expense_30d: agg.planned_expense_30d,
+    projected_balance_30d: agg.projected_balance_30d,
     risk_level,
     risk_score,
+    computed_at: agg.computed_at,
   });
 }
