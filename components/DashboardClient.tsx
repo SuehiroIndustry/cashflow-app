@@ -86,15 +86,12 @@ export default function DashboardClient({ accounts }: Props) {
     ];
   }, [accounts, selection]);
 
-  const level = overview?.level ?? "GREEN";
-
   return (
     <div className="p-8 text-white">
       <h1 className="text-xl font-semibold mb-6">
         Cashflow Dashboard
       </h1>
 
-      {/* Pills */}
       <div className="flex gap-2 mb-6">
         {pills.map((p) => (
           <button
@@ -117,7 +114,6 @@ export default function DashboardClient({ accounts }: Props) {
         </div>
       )}
 
-      {/* Cards */}
       <div className="grid grid-cols-3 gap-6">
         <Card title="現在残高" value={yen(overview?.current_balance ?? 0)} loading={loading} />
         <Card title="今月の収入" value={yen(overview?.monthly_fixed_cost ?? 0)} loading={loading} />
@@ -127,10 +123,11 @@ export default function DashboardClient({ accounts }: Props) {
         <Card title="30日後残高" value={yen(overview?.projected_balance ?? 0)} loading={loading} />
       </div>
 
-      {/* Risk */}
       <div className="mt-6 border border-white/40 rounded p-4">
         <div className="text-xs opacity-70">Risk</div>
-        <div className="text-lg font-semibold">{level}</div>
+        <div className="text-lg font-semibold">
+          {overview?.level ?? "GREEN"}
+        </div>
       </div>
     </div>
   );
