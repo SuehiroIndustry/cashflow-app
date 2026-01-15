@@ -9,14 +9,6 @@ type CashAccount = {
   name: string | null;
 };
 
-type BalanceRow = {
-  user_id: string;
-  account_id: string | number;
-  income: number | null;
-  expense: number | null;
-  balance: number | null;
-};
-
 type CashFlowRow = {
   id: number;
   date: string; // yyyy-mm-dd
@@ -26,28 +18,12 @@ type CashFlowRow = {
   cash_account_id: string | number | null;
 };
 
-type OverviewRow = {
-  user_id: string;
-  current_balance: number | null;
-  monthly_fixed_cost: number | null;
-  month_expense: number | null;
-  planned_orders_30d: number | null;
-  projected_balance: number | null;
-  level: "RED" | "YELLOW" | "GREEN" | string;
-  computed_at: string | null;
-};
-
 function yen(n: number) {
   return new Intl.NumberFormat("ja-JP", {
     style: "currency",
     currency: "JPY",
     maximumFractionDigits: 0,
   }).format(n);
-}
-
-function fmtDate(s: string) {
-  // "2026-01-01" → "2026-01-01"（そのままでもOK。必要ならここで整形）
-  return s;
 }
 
 function pillClass(active: boolean) {
@@ -65,6 +41,17 @@ function cardClass() {
   ].join(" ");
 }
 
+function toNumber(v: unknown) {
+  const n = Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function startOfMonthYYYYMM(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`; // "2026-01"
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -72,6 +59,7 @@ export default async function DashboardPage({
 }) {
   const sp = (await searchParams) ?? {};
   const selectedAccount = sp.account ?? "all"; // "all" | account_id
+  const isAll = selectedAccount === "all" || !selectedAccount;
 
   const supabase = await createClient();
   const {
@@ -80,7 +68,6 @@ export default async function DashboardPage({
 
   if (!user) redirect("/login?next=/dashboard");
 
-  // server action: logout
   async function logout() {
     "use server";
     const sb = await createClient();
@@ -88,89 +75,66 @@ export default async function DashboardPage({
     redirect("/login");
   }
 
-  // ---- fetch master data ----
-  const [{ data: accounts, error: accountsErr }, { data: balances, error: balancesErr }] =
-    await Promise.all([
-      supabase
-        .from("cash_accounts")
-        .select("id,name")
-        .eq("user_id", user.id)
-        .order("id", { ascending: true }),
-      // VIEW: account_balances（user_id, account_id, income, expense, balance）
-      supabase
-        .from("account_balances")
-        .select("user_id,account_id,income,expense,balance")
-        .eq("user_id", user.id),
-    ]);
-
-  if (accountsErr) {
-    // ここで落とす（ダッシュボードが空なのに気づけない方が危険）
-    throw new Error(`cash_accounts load failed: ${accountsErr.message}`);
-  }
-  if (balancesErr) {
-    throw new Error(`account_balances load failed: ${balancesErr.message}`);
-  }
-
-  const accountList = (accounts ?? []) as CashAccount[];
-  const balanceRows = (balances ?? []) as BalanceRow[];
-
-  // ---- overview（dashboard_overview view）----
-  const { data: overviewData, error: overviewErr } = await supabase
-    .from("dashboard_overview")
-    .select(
-      "user_id,current_balance,monthly_fixed_cost,month_expense,planned_orders_30d,projected_balance,level,computed_at"
-    )
+  // ---- accounts ----
+  const { data: accounts, error: accountsErr } = await supabase
+    .from("cash_accounts")
+    .select("id,name")
     .eq("user_id", user.id)
-    .limit(1);
+    .order("id", { ascending: true });
 
-  if (overviewErr) {
-    throw new Error(`dashboard_overview load failed: ${overviewErr.message}`);
-  }
+  if (accountsErr) throw new Error(`cash_accounts load failed: ${accountsErr.message}`);
+  const accountList = (accounts ?? []) as CashAccount[];
 
-  const overview = (overviewData?.[0] ?? null) as OverviewRow | null;
+  const selectedAccountLabel = isAll
+    ? "All"
+    : accountList.find((a) => String(a.id) === String(selectedAccount))?.name ?? selectedAccount;
 
-  // ---- cash flows ----
-  // ※ account フィルタがあるなら DB 側で絞る（無駄に引かない）
+  // ---- cash flows (使うのはこれだけ) ----
   let cfQuery = supabase
     .from("cash_flows")
     .select("id,date,type,amount,description,cash_account_id")
     .eq("user_id", user.id)
     .order("date", { ascending: false })
     .order("id", { ascending: false })
-    .limit(100);
+    .limit(500); // まずは500で十分。必要なら増やす。
 
-  const isAll = selectedAccount === "all" || !selectedAccount;
   if (!isAll) {
-    // selectedAccount は query param なので数値/UUIDどちらでも string で来る
     cfQuery = cfQuery.eq("cash_account_id", selectedAccount);
   }
 
   const { data: cashFlowsData, error: cashFlowsErr } = await cfQuery;
-  if (cashFlowsErr) {
-    throw new Error(`cash_flows load failed: ${cashFlowsErr.message}`);
-  }
+  if (cashFlowsErr) throw new Error(`cash_flows load failed: ${cashFlowsErr.message}`);
 
   const cashFlows = (cashFlowsData ?? []) as CashFlowRow[];
 
-  // ---- summary（balancesから算出。all=合算 / 口座=該当行）----
-  const summaryRows = isAll
-    ? balanceRows
-    : balanceRows.filter((r) => String(r.account_id) === String(selectedAccount));
+  // ---- 集計（VIEWを使わない）----
+  const income = cashFlows.reduce((s, r) => (r.type === "income" ? s + toNumber(r.amount) : s), 0);
+  const expense = cashFlows.reduce((s, r) => (r.type === "expense" ? s + toNumber(r.amount) : s), 0);
+  const balance = income - expense;
 
-  const income = summaryRows.reduce((s, r) => s + Number(r.income ?? 0), 0);
-  const expense = summaryRows.reduce((s, r) => s + Number(r.expense ?? 0), 0);
-  const balance = summaryRows.reduce((s, r) => s + Number(r.balance ?? 0), 0);
+  // ---- 簡易 overview（今は最低限：今月支出だけは出す）----
+  const ym = startOfMonthYYYYMM(new Date());
+  const monthExpense = cashFlows.reduce((s, r) => {
+    if (r.type !== "expense") return s;
+    if (!r.date?.startsWith(ym)) return s;
+    return s + toNumber(r.amount);
+  }, 0);
 
-  const level = overview?.level ?? "GREEN";
+  // 固定費 / 30日予定 / 30日後は、ビューが直るまで0扱いにしておく（UIは壊さない）
+  const monthlyFixedCost = 0;
+  const plannedOrders30d = 0;
+  const projectedBalance = balance - plannedOrders30d;
+
+  // レベル（暫定）：予測残高がマイナスならRED、0〜固定費未満ならYELLOW、それ以外GREEN
+  const level =
+    projectedBalance < 0 ? "RED" : projectedBalance < Math.max(1, monthlyFixedCost) ? "YELLOW" : "GREEN";
+
   const levelBadge =
     level === "RED"
       ? "bg-red-500/20 border-red-400/30 text-red-200"
       : level === "YELLOW"
       ? "bg-yellow-500/20 border-yellow-400/30 text-yellow-200"
       : "bg-emerald-500/20 border-emerald-400/30 text-emerald-200";
-
-  const selectedAccountLabel =
-    isAll ? "All" : accountList.find((a) => String(a.id) === String(selectedAccount))?.name ?? selectedAccount;
 
   return (
     <main className="min-h-screen bg-black text-white">
@@ -209,7 +173,11 @@ export default async function DashboardPage({
             {accountList.map((a) => {
               const active = !isAll && String(a.id) === String(selectedAccount);
               return (
-                <a key={String(a.id)} href={`/dashboard?account=${encodeURIComponent(String(a.id))}`} className={pillClass(active)}>
+                <a
+                  key={String(a.id)}
+                  href={`/dashboard?account=${encodeURIComponent(String(a.id))}`}
+                  className={pillClass(active)}
+                >
                   {a.name ?? `Account ${a.id}`}
                 </a>
               );
@@ -222,7 +190,7 @@ export default async function DashboardPage({
           <div className={`${cardClass()} p-5`}>
             <div className="text-sm text-white/60">Balance</div>
             <div className="mt-2 text-3xl font-semibold">{yen(balance)}</div>
-            <div className="mt-2 text-xs text-white/40">via VIEW: account_balances</div>
+            <div className="mt-2 text-xs text-white/40">via cash_flows (temporary)</div>
           </div>
 
           <div className={`${cardClass()} p-5`}>
@@ -240,32 +208,28 @@ export default async function DashboardPage({
         <section className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className={`${cardClass()} p-5`}>
             <div className="text-sm text-white/60">現在残高</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(Number(overview?.current_balance ?? 0))}</div>
-            <div className="mt-2 text-xs text-white/40">computed_at: {overview?.computed_at ?? "-"}</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(balance)}</div>
+            <div className="mt-2 text-xs text-white/40">computed_at: -</div>
           </div>
 
           <div className={`${cardClass()} p-5`}>
             <div className="text-sm text-white/60">今月の支出</div>
-            <div className="mt-2 text-2xl font-semibold text-red-200">
-              {yen(Number(overview?.month_expense ?? 0))}
-            </div>
+            <div className="mt-2 text-2xl font-semibold text-red-200">{yen(monthExpense)}</div>
           </div>
 
           <div className={`${cardClass()} p-5`}>
             <div className="text-sm text-white/60">固定費（月）</div>
-            <div className="mt-2 text-2xl font-semibold text-amber-200">
-              {yen(Number(overview?.monthly_fixed_cost ?? 0))}
-            </div>
+            <div className="mt-2 text-2xl font-semibold text-amber-200">{yen(monthlyFixedCost)}</div>
           </div>
 
           <div className={`${cardClass()} p-5 md:col-span-2`}>
             <div className="text-sm text-white/60">30日以内の支払予定</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(Number(overview?.planned_orders_30d ?? 0))}</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(plannedOrders30d)}</div>
           </div>
 
           <div className={`${cardClass()} p-5`}>
             <div className="text-sm text-white/60">30日後予測残高</div>
-            <div className="mt-2 text-2xl font-semibold">{yen(Number(overview?.projected_balance ?? 0))}</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(projectedBalance)}</div>
           </div>
         </section>
 
@@ -273,7 +237,7 @@ export default async function DashboardPage({
         <section className={`${cardClass()} mt-8 p-5`}>
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Cash Flows</h2>
-            <div className="text-xs text-white/50">Latest: {cashFlows.length} rows (max 100)</div>
+            <div className="text-xs text-white/50">Latest: {cashFlows.length} rows (max 500)</div>
           </div>
 
           <div className="mt-4 overflow-x-auto">
@@ -300,9 +264,9 @@ export default async function DashboardPage({
 
                   return (
                     <tr key={r.id} className="text-sm">
-                      <td className="border-b border-white/5 py-2 pr-3 text-white/80">{fmtDate(r.date)}</td>
+                      <td className="border-b border-white/5 py-2 pr-3 text-white/80">{r.date}</td>
                       <td className={`border-b border-white/5 py-2 pr-3 ${typeBadge}`}>{t}</td>
-                      <td className="border-b border-white/5 py-2 pr-3">{yen(Number(r.amount ?? 0))}</td>
+                      <td className="border-b border-white/5 py-2 pr-3">{yen(toNumber(r.amount))}</td>
                       <td className="border-b border-white/5 py-2 pr-3 text-white/80">{r.description ?? ""}</td>
                       <td className="border-b border-white/5 py-2 pr-3 text-white/70">
                         {r.cash_account_id ?? ""}
@@ -323,7 +287,9 @@ export default async function DashboardPage({
             </table>
           </div>
 
-          <div className="mt-3 text-xs text-white/40">※ overview は view を読むだけ（落ちない設計）</div>
+          <div className="mt-3 text-xs text-white/40">
+            ※ いまはVIEWを信用しない。数字は cash_flows から直計算。
+          </div>
         </section>
       </div>
     </main>
