@@ -16,7 +16,7 @@ export default function Error({
   return (
     <div style={{ padding: 16 }}>
       <h2>Dashboard crashed</h2>
-      <p>原因は下に出してます（真っ黒卒業）。</p>
+      <p>原因は下に出ています。まずはここを直そう。</p>
 
       <pre
         style={{
