@@ -1,21 +1,17 @@
 // app/dashboard/page.tsx
+import { redirect } from "next/navigation";
 import DashboardClient from "@/components/DashboardClient";
-import { getDashboardOverview } from "@/lib/dashboard/getDashboardOverview";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
-  const { rows, computedAt } = await getDashboardOverview();
+  // 認証チェック（未ログインなら /login へ）
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.getUser();
 
-  // 口座名は仮。実データが別であるなら後で差し替えOK
-  // ここでは rows に出てきた cash_account_id をベースに作る
-  const accounts = Array.from(
-    new Map(rows.map((r) => [r.cash_account_id, { id: r.cash_account_id, name: `口座 ${r.cash_account_id}` }])).values()
-  ).sort((a, b) => a.id - b.id);
+  if (error || !data?.user) {
+    redirect("/login");
+  }
 
-  return (
-    <DashboardClient
-      rows={rows}
-      accounts={accounts}
-      computedAt={computedAt}
-    />
-  );
+  // UIはクライアント側に任せる
+  return <DashboardClient />;
 }
