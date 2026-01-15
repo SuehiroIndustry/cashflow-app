@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createBrowserSupabaseClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 type DashboardOverview = {
   cash_account_id: number;
@@ -11,12 +16,11 @@ type DashboardOverview = {
   month_expense: number;
   planned_income_30d: number;
   planned_expense_30d: number;
-  risk_level: 'low' | 'medium' | 'high';
+  risk_level: 'green' | 'yellow' | 'red';
   computed_at: string;
 };
 
 export default function DashboardClient() {
-  const supabase = createBrowserSupabaseClient();
   const [data, setData] = useState<DashboardOverview[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +62,9 @@ export default function DashboardClient() {
             <h2 className="text-lg font-bold">
               {row.cash_account_name}
             </h2>
-            <span>{row.risk_level.toUpperCase()}</span>
+            <span className="font-bold">
+              {row.risk_level.toUpperCase()}
+            </span>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-4">
