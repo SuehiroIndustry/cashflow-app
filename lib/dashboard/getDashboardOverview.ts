@@ -1,77 +1,54 @@
-'use server'
-
-import { unstable_noStore as noStore } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
-
-/**
- * v_dashboard_overview_user_v2 の1行分（ユーザー×口座の集計）
- * ※ビュー側で auth.uid() フィルタ済みの想定
- */
+// lib/dashboard/getDashboardOverview.ts
 export type DashboardOverviewRow = {
   user_id: string
   cash_account_id: number
+
   current_balance: number
   income_mtd: number
   expense_mtd: number
-  planned_income: number
-  planned_expense: number
+
+  planned_income_30d: number
+  planned_expense_30d: number
   projected_balance_30d: number
-  risk_level: 'GREEN' | 'YELLOW' | 'RED' | string
+
+  risk_level: 'GREEN' | 'YELLOW' | 'RED'
+  risk_score: number
+
   computed_at: string
 }
 
-export type GetDashboardOverviewResult = {
-  rows: DashboardOverviewRow[]
-  computedAt: string | null
+export type DashboardOverviewFilter =
+  | { mode: 'all' }
+  | { mode: 'account'; cashAccountId: number }
+
+function toQuery(filter: DashboardOverviewFilter) {
+  const params = new URLSearchParams()
+  if (filter.mode === 'account') params.set('cashAccountId', String(filter.cashAccountId))
+  return params.toString()
 }
 
 /**
- * Dashboardの集計データを取得（口座ごとの一覧）
- * - サーバー専用（Supabase server client）
- * - キャッシュ無効（最新値を取りに行く）
+ * Client-safe:
+ * - Supabaseのcookieセッションが必要な処理は /api 側でやる
+ * - ここは単にAPIを叩くだけ
  */
-export async function getDashboardOverview(): Promise<GetDashboardOverviewResult> {
-  noStore()
+export async function getDashboardOverview(
+  filter: DashboardOverviewFilter
+): Promise<DashboardOverviewRow> {
+  const qs = toQuery(filter)
+  const res = await fetch(`/api/overview${qs ? `?${qs}` : ''}`, {
+    method: 'GET',
+    credentials: 'include',
+    cache: 'no-store',
+  })
 
-  const supabase = await createClient()
-
-  const { data, error } = await supabase
-    .from('v_dashboard_overview_user_v2')
-    .select(
-      [
-        'user_id',
-        'cash_account_id',
-        'current_balance',
-        'income_mtd',
-        'expense_mtd',
-        'planned_income',
-        'planned_expense',
-        'projected_balance_30d',
-        'risk_level',
-        'computed_at',
-      ].join(','),
-    )
-    .order('cash_account_id', { ascending: true })
-
-  if (error) {
-    throw new Error(`getDashboardOverview failed: ${error.message}`)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Failed to load overview: ${res.status} ${res.statusText} ${text}`)
   }
 
-  const rows = (data ?? []).map((r: any) => ({
-    user_id: String(r.user_id),
-    cash_account_id: Number(r.cash_account_id),
-    current_balance: Number(r.current_balance ?? 0),
-    income_mtd: Number(r.income_mtd ?? 0),
-    expense_mtd: Number(r.expense_mtd ?? 0),
-    planned_income: Number(r.planned_income ?? 0),
-    planned_expense: Number(r.planned_expense ?? 0),
-    projected_balance_30d: Number(r.projected_balance_30d ?? 0),
-    risk_level: (r.risk_level ?? 'GREEN') as DashboardOverviewRow['risk_level'],
-    computed_at: r.computed_at ? String(r.computed_at) : new Date().toISOString(),
-  })) as DashboardOverviewRow[]
+  const data = (await res.json()) as DashboardOverviewRow | null
 
-  return {
-    rows,
-    computedAt: rows.length ? rows[0].computed_at : null,
-  }
+  if (!data) throw new Error('No overview row returned')
+  return data
 }
