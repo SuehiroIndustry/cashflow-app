@@ -1,13 +1,15 @@
 // app/dashboard/page.tsx
 import { redirect } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+
 type Overview = {
   current_balance: number;
   monthly_fixed_cost: number;
   month_expense: number;
   planned_orders_30d: number;
   projected_balance: number;
-  level: "GREEN" | "YELLOW" | "RED";
+  level: "GREEN" | "YELLOW" | "RED" | string;
   computed_at: string | null;
 };
 
@@ -15,11 +17,12 @@ function yen(n: number) {
   return new Intl.NumberFormat("ja-JP", {
     style: "currency",
     currency: "JPY",
-  }).format(n);
+  }).format(Number.isFinite(n) ? n : 0);
 }
 
-export default async function DashboardPage() {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/overview`, {
+async function getOverview(): Promise<Overview> {
+  // ✅ 重要：相対パスで叩く（Cookie/Sessionが落ちない）
+  const res = await fetch("/api/overview", {
     cache: "no-store",
   });
 
@@ -28,21 +31,25 @@ export default async function DashboardPage() {
   }
 
   if (!res.ok) {
-    throw new Error("Failed to load overview");
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to load overview: ${res.status} ${text}`);
   }
 
-  const overview = (await res.json()) as Overview;
+  return (await res.json()) as Overview;
+}
+
+export default async function DashboardPage() {
+  const overview = await getOverview();
 
   return (
     <main className="mx-auto max-w-5xl p-6 space-y-6">
       <header>
-        <h1 className="text-3xl font-bold">経営ダッシュボード</h1>
+        <h1 className="text-3xl font-bold">Cashflow Dashboard</h1>
         <p className="text-sm text-neutral-400">
           最終更新: {overview.computed_at ?? "-"}
         </p>
       </header>
 
-      {/* ===== KPI ===== */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card title="現在残高">
           <span className="text-2xl font-semibold">
@@ -63,12 +70,9 @@ export default async function DashboardPage() {
         </Card>
       </section>
 
-      {/* ===== Projection ===== */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card title="30日以内の支払予定">
-          <span className="text-xl">
-            {yen(overview.planned_orders_30d)}
-          </span>
+          <span className="text-xl">{yen(overview.planned_orders_30d)}</span>
         </Card>
 
         <Card title="30日後予測残高">
@@ -76,7 +80,7 @@ export default async function DashboardPage() {
             <span className="text-2xl font-bold">
               {yen(overview.projected_balance)}
             </span>
-            <LevelBadge level={overview.level} />
+            <LevelBadge level={String(overview.level)} />
           </div>
         </Card>
       </section>
@@ -101,17 +105,16 @@ function Card({
   );
 }
 
-function LevelBadge({ level }: { level: "GREEN" | "YELLOW" | "RED" }) {
-  const map = {
-    GREEN: "bg-green-500/20 text-green-400",
-    YELLOW: "bg-yellow-500/20 text-yellow-400",
-    RED: "bg-red-500/20 text-red-400",
-  };
+function LevelBadge({ level }: { level: string }) {
+  const cls =
+    level === "RED"
+      ? "bg-red-500/20 text-red-400"
+      : level === "YELLOW"
+      ? "bg-yellow-500/20 text-yellow-400"
+      : "bg-green-500/20 text-green-400";
 
   return (
-    <span
-      className={`px-3 py-1 rounded-full text-xs font-semibold ${map[level]}`}
-    >
+    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${cls}`}>
       {level}
     </span>
   );
