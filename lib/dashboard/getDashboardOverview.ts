@@ -1,7 +1,7 @@
 'use server'
 
 import { unstable_noStore as noStore } from 'next/cache'
-import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 
 /**
  * v_dashboard_overview_user_v2 の1行分（ユーザー×口座の集計）
@@ -17,7 +17,7 @@ export type DashboardOverviewRow = {
   planned_expense: number
   projected_balance_30d: number
   risk_level: 'GREEN' | 'YELLOW' | 'RED' | string
-  computed_at: string // timestamp
+  computed_at: string
 }
 
 export type GetDashboardOverviewResult = {
@@ -31,10 +31,9 @@ export type GetDashboardOverviewResult = {
  * - キャッシュ無効（最新値を取りに行く）
  */
 export async function getDashboardOverview(): Promise<GetDashboardOverviewResult> {
-  // ダッシュボードは鮮度が命なので、Next.js のキャッシュを切る
   noStore()
 
-  const supabase = await createServerSupabaseClient()
+  const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('v_dashboard_overview_user_v2')
@@ -55,7 +54,6 @@ export async function getDashboardOverview(): Promise<GetDashboardOverviewResult
     .order('cash_account_id', { ascending: true })
 
   if (error) {
-    // ここで握りつぶすと地獄を見るので、はっきり落とす
     throw new Error(`getDashboardOverview failed: ${error.message}`)
   }
 
