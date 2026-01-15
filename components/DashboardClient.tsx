@@ -1,9 +1,9 @@
 // components/DashboardClient.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/client';   // ← これが正しい
 
 type CashAccount = {
   id: number;
@@ -33,65 +33,59 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
 
-  const accounts = useMemo(() => initialAccounts ?? [], [initialAccounts]);
-  const overview = useMemo(() => initialOverview ?? [], [initialOverview]);
-
   useEffect(() => {
-    let unsub: { data: { subscription: { unsubscribe: () => void } } } | null = null;
+    let unsub: any = null;
 
-    (async () => {
+    async function checkSession() {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
 
-        // セッション無しならログインへ
-        if (!data.session) {
+        if (!sessionData.session) {
           router.replace('/login');
           return;
         }
-
         setReady(true);
 
-        // auth変化を監視（ログアウトや期限切れ対策）
         unsub = supabase.auth.onAuthStateChange((_event, session) => {
           if (!session) router.replace('/login');
         });
       } catch (e: any) {
-        setFatal(e?.message ?? 'Unknown auth/session error');
+        setFatal(e.message ?? 'Failed to check session.');
       }
-    })();
+    }
+
+    checkSession();
 
     return () => {
-      try {
-        unsub?.data.subscription.unsubscribe();
-      } catch {}
+      if (unsub && typeof unsub?.unsubscribe === 'function') {
+        unsub.unsubscribe();
+      }
     };
   }, [router]);
 
   if (fatal) {
     return (
-      <div style={{ padding: 16 }}>
+      <div style={{ padding: 20 }}>
         <h2>Dashboard Error</h2>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{fatal}</pre>
       </div>
     );
   }
 
-  // 認証確定前に描画しない（これが “落ちる” を大幅に減らす）
   if (!ready) return null;
 
-  // ここからUI（仮：必要なら君のUIに差し替え）
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: 20 }}>
       <h1>Dashboard</h1>
 
-      <section style={{ marginTop: 16 }}>
+      <section>
         <h2>Accounts</h2>
-        {accounts.length === 0 ? (
+        {initialAccounts.length === 0 ? (
           <p>No accounts</p>
         ) : (
           <ul>
-            {accounts.map((a) => (
+            {initialAccounts.map((a) => (
               <li key={a.id}>
                 #{a.id} {a.name}
               </li>
@@ -100,15 +94,15 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
         )}
       </section>
 
-      <section style={{ marginTop: 16 }}>
+      <section>
         <h2>Overview</h2>
-        {overview.length === 0 ? (
+        {initialOverview.length === 0 ? (
           <p>No overview rows</p>
         ) : (
           <ul>
-            {overview.map((r) => (
+            {initialOverview.map((r) => (
               <li key={r.cash_account_id}>
-                {r.name} / balance: {r.balance} / month: +{r.month_income} -{r.month_expense} / risk: {r.risk_level}
+                {r.name} / balance: {r.balance} / risk: {r.risk_level}
               </li>
             ))}
           </ul>
