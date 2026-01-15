@@ -33,8 +33,32 @@ type BalanceRow = {
   balance: number | null;
 };
 
+type MonthlyRowUser = {
+  user_id: string;
+  month: string; // YYYY-MM-DD (date)
+  income: number | null;
+  expense: number | null;
+  balance: number | null;
+};
+
+type MonthlyRowAccount = {
+  user_id: string;
+  account_id: string;
+  month: string; // YYYY-MM-DD (date)
+  income: number | null;
+  expense: number | null;
+  balance: number | null;
+};
+
 function yen(n: number) {
   return new Intl.NumberFormat("ja-JP", { style: "currency", currency: "JPY" }).format(n);
+}
+
+function monthStartISO(d = new Date()) {
+  const x = new Date(d);
+  x.setDate(1);
+  x.setHours(0, 0, 0, 0);
+  return x.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 export default async function DashboardPage({
@@ -60,19 +84,14 @@ export default async function DashboardPage({
     .order("is_default", { ascending: false })
     .order("created_at", { ascending: true });
 
-  if (accountsErr) {
-    throw new Error(`Failed to load accounts: ${accountsErr.message}`);
-  }
+  if (accountsErr) throw new Error(`Failed to load accounts: ${accountsErr.message}`);
 
   const accounts = (accountsRaw ?? []) as Account[];
 
   const isAllView = sp.account === "all" || !sp.account;
   const defaultAccount = accounts.find((a) => a.is_default) ?? accounts[0] ?? null;
 
-  // 閲覧フィルタ
   const filterAccountId = !isAllView && sp.account ? sp.account : null;
-
-  // 登録用（Allは閲覧用なので、登録は必ず口座IDを持つ）
   const insertDefaultAccountId = defaultAccount?.id ?? "";
 
   // ---- server action: insert ----
@@ -97,9 +116,7 @@ export default async function DashboardPage({
     if (type !== "income" && type !== "expense") throw new Error("type is invalid");
 
     const amount = Number(amountRaw);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new Error("amount must be a positive number");
-    }
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("amount must be a positive number");
 
     const { error } = await supabase.from("transactions").insert({
       user_id: user.id,
@@ -117,27 +134,99 @@ export default async function DashboardPage({
   }
 
   // ---- summary (VIEW: account_balances) ----
-  // 期待カラム: user_id, account_id, income, expense, balance
   let balQ = supabase
     .from("account_balances")
     .select("user_id,account_id,income,expense,balance")
     .eq("user_id", user.id);
 
-  if (filterAccountId) {
-    balQ = balQ.eq("account_id", filterAccountId);
-  }
+  if (filterAccountId) balQ = balQ.eq("account_id", filterAccountId);
 
   const { data: balRaw, error: balErr } = await balQ;
-
-  if (balErr) {
-    throw new Error(`Failed to load balances(view): ${balErr.message}`);
-  }
+  if (balErr) throw new Error(`Failed to load balances(view): ${balErr.message}`);
 
   const balRows = (balRaw ?? []) as BalanceRow[];
 
-  const income = balRows.reduce((s, r) => s + Number(r.income ?? 0), 0);
-  const expense = balRows.reduce((s, r) => s + Number(r.expense ?? 0), 0);
-  const balance = balRows.reduce((s, r) => s + Number(r.balance ?? 0), 0);
+  const incomeTotal = balRows.reduce((s, r) => s + Number(r.income ?? 0), 0);
+  const expenseTotal = balRows.reduce((s, r) => s + Number(r.expense ?? 0), 0);
+  const balanceTotal = balRows.reduce((s, r) => s + Number(r.balance ?? 0), 0);
+
+  // ---- monthly (VIEW) ----
+  const thisMonth = monthStartISO();
+
+  // 今月1行（Allなら user view / 特定なら account view）
+  let monthIncome = 0;
+  let monthExpense = 0;
+  let monthBalance = 0;
+
+  if (isAllView) {
+    const { data, error } = await supabase
+      .from("monthly_user_balances")
+      .select("user_id,month,income,expense,balance")
+      .eq("user_id", user.id)
+      .eq("month", thisMonth)
+      .limit(1);
+
+    if (error) throw new Error(`Failed to load monthly_user_balances: ${error.message}`);
+
+    const row = (data?.[0] ?? null) as MonthlyRowUser | null;
+    monthIncome = Number(row?.income ?? 0);
+    monthExpense = Number(row?.expense ?? 0);
+    monthBalance = Number(row?.balance ?? 0);
+  } else {
+    const { data, error } = await supabase
+      .from("monthly_account_balances")
+      .select("user_id,account_id,month,income,expense,balance")
+      .eq("user_id", user.id)
+      .eq("account_id", filterAccountId!)
+      .eq("month", thisMonth)
+      .limit(1);
+
+    if (error) throw new Error(`Failed to load monthly_account_balances: ${error.message}`);
+
+    const row = (data?.[0] ?? null) as MonthlyRowAccount | null;
+    monthIncome = Number(row?.income ?? 0);
+    monthExpense = Number(row?.expense ?? 0);
+    monthBalance = Number(row?.balance ?? 0);
+  }
+
+  // 直近6ヶ月（Allなら user view / 特定なら account view）
+  const trendLimit = 6;
+  let monthlyTrend: Array<{ month: string; income: number; expense: number; balance: number }> = [];
+
+  if (isAllView) {
+    const { data, error } = await supabase
+      .from("monthly_user_balances")
+      .select("month,income,expense,balance")
+      .eq("user_id", user.id)
+      .order("month", { ascending: false })
+      .limit(trendLimit);
+
+    if (error) throw new Error(`Failed to load monthly trend (user): ${error.message}`);
+
+    monthlyTrend = (data ?? []).map((r: any) => ({
+      month: String(r.month),
+      income: Number(r.income ?? 0),
+      expense: Number(r.expense ?? 0),
+      balance: Number(r.balance ?? 0),
+    }));
+  } else {
+    const { data, error } = await supabase
+      .from("monthly_account_balances")
+      .select("month,income,expense,balance")
+      .eq("user_id", user.id)
+      .eq("account_id", filterAccountId!)
+      .order("month", { ascending: false })
+      .limit(trendLimit);
+
+    if (error) throw new Error(`Failed to load monthly trend (account): ${error.message}`);
+
+    monthlyTrend = (data ?? []).map((r: any) => ({
+      month: String(r.month),
+      income: Number(r.income ?? 0),
+      expense: Number(r.expense ?? 0),
+      balance: Number(r.balance ?? 0),
+    }));
+  }
 
   // ---- transactions ----
   let txQuery = supabase
@@ -148,15 +237,10 @@ export default async function DashboardPage({
     .order("created_at", { ascending: false })
     .limit(200);
 
-  if (filterAccountId) {
-    txQuery = txQuery.eq("account_id", filterAccountId);
-  }
+  if (filterAccountId) txQuery = txQuery.eq("account_id", filterAccountId);
 
   const { data: txRaw, error: txErr } = await txQuery;
-
-  if (txErr) {
-    throw new Error(`Failed to load transactions: ${txErr.message}`);
-  }
+  if (txErr) throw new Error(`Failed to load transactions: ${txErr.message}`);
 
   const transactions = (txRaw ?? []) as Txn[];
 
@@ -203,19 +287,81 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* Summary (VIEW参照) */}
-      <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-3">
+      {/* Total Summary (VIEW参照) */}
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-          <div className="text-xs text-neutral-400">Balance</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(balance)}</div>
+          <div className="text-xs text-neutral-400">Balance (Total)</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(balanceTotal)}</div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-          <div className="text-xs text-neutral-400">Income</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(income)}</div>
+          <div className="text-xs text-neutral-400">Income (Total)</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(incomeTotal)}</div>
         </div>
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-          <div className="text-xs text-neutral-400">Expense</div>
-          <div className="mt-2 text-2xl font-semibold">{yen(expense)}</div>
+          <div className="text-xs text-neutral-400">Expense (Total)</div>
+          <div className="mt-2 text-2xl font-semibold">{yen(expenseTotal)}</div>
+        </div>
+      </div>
+
+      {/* Monthly Summary (VIEW参照) */}
+      <div className="mb-8 rounded-2xl border border-neutral-800 bg-neutral-950/40 p-6">
+        <div className="mb-4 flex items-end justify-between">
+          <div>
+            <div className="text-lg font-semibold">This Month</div>
+            <div className="text-xs text-neutral-500">month = {thisMonth}</div>
+          </div>
+          <div className="text-xs text-neutral-500">
+            source: {isAllView ? "monthly_user_balances" : "monthly_account_balances"}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+            <div className="text-xs text-neutral-400">Income (This Month)</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(monthIncome)}</div>
+          </div>
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+            <div className="text-xs text-neutral-400">Expense (This Month)</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(monthExpense)}</div>
+          </div>
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+            <div className="text-xs text-neutral-400">Balance (This Month)</div>
+            <div className="mt-2 text-2xl font-semibold">{yen(monthBalance)}</div>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <div className="mb-2 text-sm font-medium text-neutral-300">Last {trendLimit} months</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-neutral-400">
+                <tr className="border-b border-neutral-800">
+                  <th className="py-2 text-left font-medium">month</th>
+                  <th className="py-2 text-right font-medium">income</th>
+                  <th className="py-2 text-right font-medium">expense</th>
+                  <th className="py-2 text-right font-medium">balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthlyTrend.length === 0 ? (
+                  <tr>
+                    <td className="py-4 text-neutral-500" colSpan={4}>
+                      No monthly data yet.
+                    </td>
+                  </tr>
+                ) : (
+                  monthlyTrend.map((r) => (
+                    <tr key={r.month} className="border-b border-neutral-900">
+                      <td className="py-2">{r.month}</td>
+                      <td className="py-2 text-right">{yen(r.income)}</td>
+                      <td className="py-2 text-right">{yen(r.expense)}</td>
+                      <td className="py-2 text-right">{yen(r.balance)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -317,7 +463,7 @@ export default async function DashboardPage({
               Add
             </button>
             <div className="mt-2 text-xs text-neutral-500">
-              ● まずは insert→VIEW→表示が全部繋がってることを確認。UIは後でOK。
+              ● insert → VIEW（月次含む） → 表示、の流れが繋がれば勝ち。UIは後で殴ればいい。
             </div>
           </div>
         </form>
