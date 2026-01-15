@@ -79,7 +79,7 @@ export default function DashboardClient() {
             >
               リスク：{row.risk_level}
             </span>
-          </div>
+          </div> 
 
           <div className="mt-4 grid grid-cols-2 gap-4">
             <Metric label="現在残高" value={row.balance} />
