@@ -1,54 +1,86 @@
 // lib/dashboard/getDashboardOverview.ts
+
 export type DashboardOverviewRow = {
-  user_id: string
-  cash_account_id: number
+  user_id: string;
+  // unified（All）には cash_account_id は無い想定
+  cash_account_id?: number | null;
 
-  current_balance: number
-  income_mtd: number
-  expense_mtd: number
+  current_balance: number;
+  income_mtd: number;
+  expense_mtd: number;
+  planned_income_30d: number;
+  planned_expense_30d: number;
+  projected_balance_30d: number;
 
-  planned_income_30d: number
-  planned_expense_30d: number
-  projected_balance_30d: number
+  risk_level: "GREEN" | "YELLOW" | "RED";
+  risk_score: number;
 
-  risk_level: 'GREEN' | 'YELLOW' | 'RED'
-  risk_score: number
+  computed_at: string; // ISO string
+};
 
-  computed_at: string
+export type DashboardSelection =
+  | { mode: "all" }
+  | { mode: "account"; cashAccountId: number };
+
+function toNumber(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string" && v.trim() !== "") return Number(v);
+  return 0;
 }
 
-export type DashboardOverviewFilter =
-  | { mode: 'all' }
-  | { mode: 'account'; cashAccountId: number }
+function normalizeRow(row: any): DashboardOverviewRow {
+  return {
+    user_id: String(row.user_id),
+    cash_account_id:
+      row.cash_account_id === undefined || row.cash_account_id === null
+        ? null
+        : Number(row.cash_account_id),
 
-function toQuery(filter: DashboardOverviewFilter) {
-  const params = new URLSearchParams()
-  if (filter.mode === 'account') params.set('cashAccountId', String(filter.cashAccountId))
-  return params.toString()
+    current_balance: toNumber(row.current_balance),
+    income_mtd: toNumber(row.income_mtd),
+    expense_mtd: toNumber(row.expense_mtd),
+    planned_income_30d: toNumber(row.planned_income_30d),
+    planned_expense_30d: toNumber(row.planned_expense_30d),
+    projected_balance_30d: toNumber(row.projected_balance_30d),
+
+    risk_level: (row.risk_level ?? "GREEN") as "GREEN" | "YELLOW" | "RED",
+    risk_score: toNumber(row.risk_score),
+
+    computed_at: String(row.computed_at ?? ""),
+  };
 }
 
 /**
- * Client-safe:
- * - Supabaseのcookieセッションが必要な処理は /api 側でやる
- * - ここは単にAPIを叩くだけ
+ * Client から呼ぶ想定（"use client" OK）
+ * API 側で認証cookieを使って Supabase へアクセスする
  */
 export async function getDashboardOverview(
-  filter: DashboardOverviewFilter
+  selection: DashboardSelection
 ): Promise<DashboardOverviewRow> {
-  const qs = toQuery(filter)
-  const res = await fetch(`/api/overview${qs ? `?${qs}` : ''}`, {
-    method: 'GET',
-    credentials: 'include',
-    cache: 'no-store',
-  })
+  const params = new URLSearchParams();
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Failed to load overview: ${res.status} ${res.statusText} ${text}`)
+  if (selection.mode === "all") {
+    params.set("mode", "all");
+  } else {
+    params.set("mode", "account");
+    params.set("cashAccountId", String(selection.cashAccountId));
   }
 
-  const data = (await res.json()) as DashboardOverviewRow | null
+  const res = await fetch(`/api/overview?${params.toString()}`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
 
-  if (!data) throw new Error('No overview row returned')
-  return data
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Failed to load overview (${res.status})`);
+  }
+
+  const json = await res.json();
+  // APIは { data: row } でも row直でも吸収
+  const row = json?.data ?? json;
+  if (!row) throw new Error("No overview data");
+
+  return normalizeRow(row);
 }
