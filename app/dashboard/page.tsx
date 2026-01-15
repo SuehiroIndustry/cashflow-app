@@ -1,6 +1,59 @@
+// app/dashboard/page.tsx
+import { redirect } from 'next/navigation';
 import DashboardClient from '@/components/DashboardClient';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-export default function DashboardPage() {
-  // UIはすべてクライアントに任せる
-  return <DashboardClient />;
+export const dynamic = 'force-dynamic';
+
+type CashAccount = {
+  id: number;
+  name: string;
+};
+
+type OverviewRow = {
+  cash_account_id: number;
+  name: string;
+  balance: number;
+  month_income: number;
+  month_expense: number;
+  planned_income_30d: number;
+  planned_expense_30d: number;
+  risk_level: string;
+  computed_at: string;
+};
+
+export default async function DashboardPage() {
+  const supabase = createSupabaseServerClient();
+
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData?.user) {
+    redirect('/login');
+  }
+
+  // accounts
+  const { data: accounts, error: accountsError } = await supabase
+    .from('cash_accounts')
+    .select('id, name')
+    .order('id');
+
+  if (accountsError) {
+    // Serverで落とすと「client-side exception」よりマシ（エラー表示に乗る）
+    throw new Error(`Failed to fetch cash_accounts: ${accountsError.message}`);
+  }
+
+  // overview (view)
+  const { data: overview, error: overviewError } = await supabase
+    .from('v_dashboard_overview_user_v2')
+    .select('*');
+
+  if (overviewError) {
+    throw new Error(`Failed to fetch dashboard overview: ${overviewError.message}`);
+  }
+
+  return (
+    <DashboardClient
+      initialAccounts={(accounts ?? []) as CashAccount[]}
+      initialOverview={(overview ?? []) as OverviewRow[]}
+    />
+  );
 }
