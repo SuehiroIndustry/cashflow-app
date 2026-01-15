@@ -23,7 +23,7 @@ type OverviewRow = {
 };
 
 export default async function DashboardPage() {
-  const supabase = await createSupabaseServerClient(); // ★ await 追加
+  const supabase = await createSupabaseServerClient();
 
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData?.user) {
