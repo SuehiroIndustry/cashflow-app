@@ -1,6 +1,6 @@
 // app/api/overview/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server"; // ← ここを統一（重要）
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +32,7 @@ function calcRisk(projectedBalance30d: number) {
 }
 
 export async function GET(req: Request) {
-  const supabase = await createClient();
+  const supabase = createSupabaseServerClient();
 
   const {
     data: { user },
