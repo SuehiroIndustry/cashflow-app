@@ -17,7 +17,7 @@ export default function DashboardError({
   return (
     <div style={{ padding: 16 }}>
       <h2>Dashboard crashed</h2>
-      <p>原因は下に出しています。ここで「真っ黒」から卒業。</p>
+      <p>原因は下に出してある。これで「真っ黒」から卒業。</p>
 
       <pre
         style={{
@@ -25,10 +25,10 @@ export default function DashboardError({
           background: '#111',
           color: '#f55',
           padding: 12,
-          borderRadius: 6,
+          borderRadius: 4,
         }}
       >
-        {error?.message}
+        {error.message}
       </pre>
 
       <button
