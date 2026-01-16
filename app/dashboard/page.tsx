@@ -1,14 +1,9 @@
 // app/dashboard/page.tsx
-import { redirect } from "next/navigation";
-import DashboardClient from "@/components/DashboardClient";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from 'next/navigation';
+import DashboardClient from '@/components/DashboardClient';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-export const dynamic = "force-dynamic";
-
-type CashAccount = {
-  id: number;
-  name: string;
-};
+export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   const supabase = await createSupabaseServerClient();
@@ -19,19 +14,28 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
 
   if (error || !user) {
-    redirect("/login");
+    redirect('/login');
   }
 
-  const { data: accounts, error: accErr } = await supabase
-    .from("cash_accounts")
-    .select("id,name")
-    .order("id");
+  const { data: accounts } = await supabase
+    .from('cash_accounts')
+    .select('id, name')
+    .order('id');
 
-  if (accErr) {
-    // ここは好みで error.tsx に投げてもいい
-    // とりあえず空配列でUIは動かす
-    return <DashboardClient initialAccounts={[]} />;
-  }
-
-  return <DashboardClient initialAccounts={(accounts ?? []) as CashAccount[]} />;
+  /**
+   * ✅ 重要ポイント
+   * DashboardClient の Props は
+   * - initialAccounts
+   * - initialOverview
+   * の両方が必須
+   *
+   * overview は CSR で /api/overview を叩くので
+   * ここでは null を渡す
+   */
+  return (
+    <DashboardClient
+      initialAccounts={accounts ?? []}
+      initialOverview={null}
+    />
+  );
 }
