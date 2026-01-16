@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 
 export async function createSupabaseServerClient() {
-  // 🔴 Next.js 15 では cookies() は Promise
+  // Next.jsのバージョンにより cookies() が Promise のことがある
   const cookieStore = await cookies();
 
   return createServerClient(
@@ -15,9 +15,13 @@ export async function createSupabaseServerClient() {
           return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Server Components / Route Handler で set が許可されないケース用
+          }
         },
       },
     }
