@@ -10,11 +10,23 @@ type CashAccount = {
   name: string;
 };
 
-export default async function DashboardPage() {
-  const supabase = await createSupabaseServerClient(); // ← ここ！
+type OverviewRow = {
+  cash_account_id: number;
+  name: string;
+  balance: number;
+  month_income: number;
+  month_expense: number;
+  planned_income_30d: number;
+  planned_expense_30d: number;
+  risk_level: string;
+  computed_at: string;
+};
 
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data?.user) {
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServerClient();
+
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData?.user) {
     redirect('/login');
   }
 
@@ -27,5 +39,12 @@ export default async function DashboardPage() {
     throw new Error(`Failed to fetch cash_accounts: ${accountsError.message}`);
   }
 
-  return <DashboardClient initialAccounts={(accounts ?? []) as CashAccount[]} />;
+  // ここは view 側の一覧を使ってもいいけど、今のUIは /api/overview を叩いてるはずなので
+  // 初期表示用にだけ “軽いデータ” を渡す（必要なら増やす）
+  return (
+    <DashboardClient
+      initialAccounts={(accounts ?? []) as CashAccount[]}
+      initialOverview={[] as OverviewRow[]}
+    />
+  );
 }
