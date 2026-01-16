@@ -1,25 +1,19 @@
-// lib/supabase/server.ts
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 
-export async function createSupabaseServerClient() {
-  const cookieStore = await cookies();
-
+export function createSupabaseServerClient() {
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          return cookies().getAll();
         },
         setAll(cookiesToSet) {
-          // Server Component では set できない場合があるので握りつぶす（公式推奨パターン）
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
-            });
-          } catch {}
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookies().set(name, value, options);
+          });
         },
       },
     }
