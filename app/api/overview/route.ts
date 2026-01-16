@@ -1,8 +1,8 @@
 // app/api/overview/route.ts
-import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { NextResponse } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 type Row = {
   user_id: string;
@@ -24,19 +24,12 @@ function n(v: unknown): number {
 }
 
 function calcRisk(projectedBalance30d: number) {
-  const risk_score =
-    projectedBalance30d < 0 ? 2 :
-    projectedBalance30d < 100000 ? 1 : 0;
-
-  const risk_level =
-    risk_score === 2 ? "RED" :
-    risk_score === 1 ? "YELLOW" : "GREEN";
-
+  const risk_score = projectedBalance30d < 0 ? 2 : projectedBalance30d < 100000 ? 1 : 0;
+  const risk_level = risk_score === 2 ? 'RED' : risk_score === 1 ? 'YELLOW' : 'GREEN';
   return { risk_level, risk_score };
 }
 
 export async function GET(req: Request) {
-  // ★★★ ここが最重要 ★★★
   const supabase = await createSupabaseServerClient();
 
   const {
@@ -47,30 +40,28 @@ export async function GET(req: Request) {
   if (userErr) {
     return NextResponse.json({ error: userErr.message }, { status: 500 });
   }
-
   if (!user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
   const url = new URL(req.url);
-  const mode = url.searchParams.get("mode") ?? "all";
-  const cashAccountIdParam = url.searchParams.get("cashAccountId");
+  const mode = url.searchParams.get('mode') ?? 'all';
+  const cashAccountIdParam = url.searchParams.get('cashAccountId');
 
   // ===== account mode =====
-  if (mode === "account") {
+  if (mode === 'account') {
     const cashAccountId = Number(cashAccountIdParam);
     if (!Number.isFinite(cashAccountId)) {
-      return NextResponse.json(
-        { error: "cashAccountId is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'cashAccountId is required' }, { status: 400 });
     }
 
     const { data, error } = await supabase
-      .from("v_dashboard_overview_user_v2")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("cash_account_id", cashAccountId)
+      .from('v_dashboard_overview_user_v2')
+      .select(
+        'user_id,cash_account_id,current_balance,income_mtd,expense_mtd,planned_income_30d,planned_expense_30d,projected_balance_30d,risk_level,risk_score,computed_at'
+      )
+      .eq('user_id', user.id)
+      .eq('cash_account_id', cashAccountId)
       .limit(1);
 
     if (error) {
@@ -80,7 +71,7 @@ export async function GET(req: Request) {
     const row = (data?.[0] ?? null) as Row | null;
 
     return NextResponse.json({
-      mode: "account",
+      mode: 'account',
       cash_account_id: cashAccountId,
       current_balance: n(row?.current_balance),
       income_mtd: n(row?.income_mtd),
@@ -88,17 +79,19 @@ export async function GET(req: Request) {
       planned_income_30d: n(row?.planned_income_30d),
       planned_expense_30d: n(row?.planned_expense_30d),
       projected_balance_30d: n(row?.projected_balance_30d),
-      risk_level: row?.risk_level ?? "GREEN",
+      risk_level: row?.risk_level ?? 'GREEN',
       risk_score: n(row?.risk_score),
       computed_at: row?.computed_at ?? null,
     });
   }
 
-  // ===== all mode =====
+  // ===== all mode (default) =====
   const { data, error } = await supabase
-    .from("v_dashboard_overview_user_v2")
-    .select("*")
-    .eq("user_id", user.id);
+    .from('v_dashboard_overview_user_v2')
+    .select(
+      'user_id,cash_account_id,current_balance,income_mtd,expense_mtd,planned_income_30d,planned_expense_30d,projected_balance_30d,computed_at'
+    )
+    .eq('user_id', user.id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -118,7 +111,7 @@ export async function GET(req: Request) {
       const t = r.computed_at ? Date.parse(r.computed_at) : NaN;
       if (Number.isFinite(t) && t > acc._latestTs) {
         acc._latestTs = t;
-        acc.computed_at = r.computed_at;
+        acc.computed_at = r.computed_at ?? null;
       }
       return acc;
     },
@@ -137,9 +130,15 @@ export async function GET(req: Request) {
   const { risk_level, risk_score } = calcRisk(agg.projected_balance_30d);
 
   return NextResponse.json({
-    mode: "all",
-    ...agg,
+    mode: 'all',
+    current_balance: agg.current_balance,
+    income_mtd: agg.income_mtd,
+    expense_mtd: agg.expense_mtd,
+    planned_income_30d: agg.planned_income_30d,
+    planned_expense_30d: agg.planned_expense_30d,
+    projected_balance_30d: agg.projected_balance_30d,
     risk_level,
     risk_score,
+    computed_at: agg.computed_at,
   });
 }
