@@ -37,18 +37,13 @@ export async function GET(req: Request) {
     error: userErr,
   } = await supabase.auth.getUser();
 
-  if (userErr) {
-    return NextResponse.json({ error: userErr.message }, { status: 500 });
-  }
-  if (!user) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
+  if (userErr) return NextResponse.json({ error: userErr.message }, { status: 500 });
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
   const url = new URL(req.url);
   const mode = url.searchParams.get('mode') ?? 'all';
   const cashAccountIdParam = url.searchParams.get('cashAccountId');
 
-  // ===== account mode =====
   if (mode === 'account') {
     const cashAccountId = Number(cashAccountIdParam);
     if (!Number.isFinite(cashAccountId)) {
@@ -64,9 +59,7 @@ export async function GET(req: Request) {
       .eq('cash_account_id', cashAccountId)
       .limit(1);
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     const row = (data?.[0] ?? null) as Row | null;
 
@@ -85,7 +78,7 @@ export async function GET(req: Request) {
     });
   }
 
-  // ===== all mode (default) =====
+  // all mode
   const { data, error } = await supabase
     .from('v_dashboard_overview_user_v2')
     .select(
@@ -93,9 +86,7 @@ export async function GET(req: Request) {
     )
     .eq('user_id', user.id);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const rows = (data ?? []) as Row[];
 
