@@ -5,22 +5,27 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
+type CashAccount = {
+  id: number;
+  name: string;
+};
+
 export default async function DashboardPage() {
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient(); // ← ここ！
 
   const { data, error } = await supabase.auth.getUser();
   if (error || !data?.user) {
     redirect('/login');
   }
 
-  const { data: accounts } = await supabase
+  const { data: accounts, error: accountsError } = await supabase
     .from('cash_accounts')
     .select('id, name')
     .order('id');
 
-  return (
-    <DashboardClient
-      initialAccounts={accounts ?? []}
-    />
-  );
+  if (accountsError) {
+    throw new Error(`Failed to fetch cash_accounts: ${accountsError.message}`);
+  }
+
+  return <DashboardClient initialAccounts={(accounts ?? []) as CashAccount[]} />;
 }
