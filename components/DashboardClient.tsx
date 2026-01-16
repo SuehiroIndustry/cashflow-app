@@ -10,35 +10,70 @@ type CashAccount = {
   name: string;
 };
 
-type OverviewRow = {
-  cash_account_id: number;
-  name: string;
-  balance: number;
-  month_income: number;
-  month_expense: number;
+type OverviewApiAll = {
+  mode: 'all';
+  current_balance: number;
+  income_mtd: number;
+  expense_mtd: number;
   planned_income_30d: number;
   planned_expense_30d: number;
+  projected_balance_30d: number;
   risk_level: string;
-  computed_at: string;
+  risk_score: number;
+  computed_at: string | null;
+};
+
+type OverviewApiAccount = {
+  mode: 'account';
+  cash_account_id: number;
+  current_balance: number;
+  income_mtd: number;
+  expense_mtd: number;
+  planned_income_30d: number;
+  planned_expense_30d: number;
+  projected_balance_30d: number;
+  risk_level: string;
+  risk_score: number;
+  computed_at: string | null;
 };
 
 type Props = {
   initialAccounts: CashAccount[];
-  initialOverview: OverviewRow[];
 };
 
-export default function DashboardClient({ initialAccounts, initialOverview }: Props) {
+function yen(n: number) {
+  try {
+    return new Intl.NumberFormat('ja-JP').format(n);
+  } catch {
+    return String(n);
+  }
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, { cache: 'no-store' });
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.error ?? `Request failed: ${res.status}`);
+  }
+  return json as T;
+}
+
+export default function DashboardClient({ initialAccounts }: Props) {
   const router = useRouter();
+
+  const accounts = useMemo(() => initialAccounts ?? [], [initialAccounts]);
+
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
 
-  const accounts = useMemo(() => initialAccounts ?? [], [initialAccounts]);
-  const overview = useMemo(() => initialOverview ?? [], [initialOverview]);
+  const [all, setAll] = useState<OverviewApiAll | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [accountDetail, setAccountDetail] = useState<OverviewApiAccount | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
+  // 認証 + ALL overview 読み込み
   useEffect(() => {
-    let unsub:
-      | { data: { subscription: { unsubscribe: () => void } } }
-      | null = null;
+    let unsub: { data: { subscription: { unsubscribe: () => void } } } | null = null;
 
     (async () => {
       try {
@@ -49,6 +84,10 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
           router.replace('/login');
           return;
         }
+
+        // ALL overview
+        const allRes = await fetchJson<OverviewApiAll>('/api/overview?mode=all');
+        setAll(allRes);
 
         setReady(true);
 
@@ -67,6 +106,29 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
     };
   }, [router]);
 
+  async function onSelectAccount(id: number) {
+    setSelectedId(id);
+    setLoadingDetail(true);
+    setAccountDetail(null);
+
+    try {
+      const detail = await fetchJson<OverviewApiAccount>(`/api/overview?mode=account&cashAccountId=${id}`);
+      setAccountDetail(detail);
+    } catch (e: any) {
+      setFatal(e?.message ?? 'Failed to load account detail');
+    } finally {
+      setLoadingDetail(false);
+    }
+  }
+
+  async function onLogout() {
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      router.replace('/login');
+    }
+  }
+
   if (fatal) {
     return (
       <div style={{ padding: 16 }}>
@@ -76,37 +138,32 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
     );
   }
 
-  if (!ready) {
-    return (
-      <div style={{ padding: 16 }}>
-        <p>Loading dashboard...</p>
-      </div>
-    );
-  }
+  if (!ready) return null;
 
   return (
     <div style={{ padding: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>Cashflow Dashboard</h1>
-        <button
-          onClick={async () => {
-            await supabase.auth.signOut();
-            router.replace('/login');
-          }}
-        >
-          Logout
-        </button>
+        <button onClick={onLogout}>Logout</button>
       </div>
 
       <section style={{ marginTop: 16 }}>
         <h2>Accounts</h2>
         {accounts.length === 0 ? (
-          <p>No accounts (cash_accounts is empty or RLS blocked)</p>
+          <p>No accounts</p>
         ) : (
           <ul>
             {accounts.map((a) => (
-              <li key={a.id}>
-                #{a.id} {a.name}
+              <li key={a.id} style={{ marginBottom: 6 }}>
+                <button
+                  onClick={() => onSelectAccount(a.id)}
+                  style={{
+                    cursor: 'pointer',
+                    textDecoration: selectedId === a.id ? 'underline' : 'none',
+                  }}
+                >
+                  #{a.id} {a.name}
+                </button>
               </li>
             ))}
           </ul>
@@ -114,18 +171,47 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
       </section>
 
       <section style={{ marginTop: 16 }}>
-        <h2>Overview</h2>
-        {overview.length === 0 ? (
-          <p>No overview rows (view is empty or RLS blocked)</p>
+        <h2>Overview (ALL)</h2>
+        {!all ? (
+          <p>Loading...</p>
         ) : (
-          <ul>
-            {overview.map((r) => (
-              <li key={r.cash_account_id}>
-                {r.name} / balance: {r.balance} / month: +{r.month_income} -{r.month_expense} / risk:{' '}
-                {r.risk_level}
-              </li>
-            ))}
-          </ul>
+          <div>
+            <div>current_balance: {yen(all.current_balance)}</div>
+            <div>
+              month: +{yen(all.income_mtd)} / -{yen(all.expense_mtd)}
+            </div>
+            <div>
+              30d planned: +{yen(all.planned_income_30d)} / -{yen(all.planned_expense_30d)}
+            </div>
+            <div>30d projected: {yen(all.projected_balance_30d)}</div>
+            <div>risk: {all.risk_level} (score {all.risk_score})</div>
+            <div>computed_at: {all.computed_at ?? '-'}</div>
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginTop: 16 }}>
+        <h2>Selected Account</h2>
+        {!selectedId ? (
+          <p>口座をクリックしてね</p>
+        ) : loadingDetail ? (
+          <p>Loading...</p>
+        ) : !accountDetail ? (
+          <p>No data</p>
+        ) : (
+          <div>
+            <div>cash_account_id: {accountDetail.cash_account_id}</div>
+            <div>current_balance: {yen(accountDetail.current_balance)}</div>
+            <div>
+              month: +{yen(accountDetail.income_mtd)} / -{yen(accountDetail.expense_mtd)}
+            </div>
+            <div>
+              30d planned: +{yen(accountDetail.planned_income_30d)} / -{yen(accountDetail.planned_expense_30d)}
+            </div>
+            <div>30d projected: {yen(accountDetail.projected_balance_30d)}</div>
+            <div>risk: {accountDetail.risk_level} (score {accountDetail.risk_score})</div>
+            <div>computed_at: {accountDetail.computed_at ?? '-'}</div>
+          </div>
         )}
       </section>
     </div>
