@@ -37,30 +37,31 @@ export async function GET() {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  // ✅ viewの実カラム名に合わせる
-  const { data, error } = await supabase
+  // ✅ viewの実カラム名に合わせる（あなたのDBのスクショ基準）
+  const selectCols = [
+    'cash_account_id',
+    'current_balance',
+    'month_income',
+    'month_expense',
+    'planned_income_30d',
+    'planned_expense_30d',
+    'projected_balance_30d',
+    'risk_score',
+    'risk_level',
+    'computed_at',
+  ].join(',');
+
+  // ✅ 型定義が追いついてない(viewがDatabase型に無い/古い)ので、ここだけ TS を黙らせる
+  const { data, error } = await (supabase as any)
     .from('v_dashboard_overview_user_v2')
-    .select(
-      [
-        'cash_account_id',
-        'current_balance',
-        'month_income',
-        'month_expense',
-        'planned_income_30d',
-        'planned_expense_30d',
-        'projected_balance_30d',
-        'risk_score',
-        'risk_level',
-        'computed_at',
-      ].join(',')
-    )
+    .select(selectCols)
     .eq('user_id', user.id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const rows = (data ?? []) as Row[];
+  const rows = ((data ?? []) as unknown) as Row[];
 
   const agg = rows.reduce(
     (acc, r) => {
@@ -71,7 +72,6 @@ export async function GET() {
       acc.planned_expense_30d += n(r.planned_expense_30d);
       acc.projected_balance_30d += n(r.projected_balance_30d);
 
-      // computed_at は最新を採用
       const t = r.computed_at ? Date.parse(r.computed_at) : NaN;
       if (Number.isFinite(t) && t > acc._latestTs) {
         acc._latestTs = t;
