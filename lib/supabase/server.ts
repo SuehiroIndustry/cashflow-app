@@ -1,67 +1,49 @@
 // lib/supabase/server.ts
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import type { CookieOptions } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-type NextSameSite = 'lax' | 'strict' | 'none';
+/**
+ * Next.js の cookies() はバージョン差で sync / async が揺れるので、
+ * await しておけば両対応できる（await 非Promiseはそのまま値になる）。
+ *
+ * また Next の cookieStore.set が要求する sameSite 型が厳しいので正規化する。
+ */
 
-type CookieSetOptions = {
-  path?: string;
-  domain?: string;
-  maxAge?: number;
-  expires?: Date;
-  httpOnly?: boolean;
-  secure?: boolean;
-  sameSite?: NextSameSite; // ✅ boolean を入れない（Nextのcookiesが拒否する）
-};
-
-function normalizeSameSite(v: unknown): NextSameSite | undefined {
-  // supabase/ssr 側が SerializeOptions 互換で boolean を渡してくる場合があるので吸収する
-  if (v === true) return 'strict';
-  if (v === false) return 'lax';
-  if (v === 'lax' || v === 'strict' || v === 'none') return v;
+function normalizeSameSite(
+  sameSite: CookieOptions["sameSite"]
+): "lax" | "strict" | "none" | undefined {
+  // supabase/ssr 側で boolean が混じるケースを吸収
+  if (sameSite === true) return "strict";
+  if (sameSite === false) return "lax";
+  if (sameSite === "lax" || sameSite === "strict" || sameSite === "none")
+    return sameSite;
   return undefined;
 }
 
-function normalizeCookieOptions(options: unknown): CookieSetOptions | undefined {
-  if (!options || typeof options !== 'object') return undefined;
-  const o = options as Record<string, unknown>;
-
+function normalizeCookieOptions(options?: CookieOptions): CookieOptions | undefined {
+  if (!options) return undefined;
   return {
-    path: typeof o.path === 'string' ? o.path : undefined,
-    domain: typeof o.domain === 'string' ? o.domain : undefined,
-    maxAge: typeof o.maxAge === 'number' ? o.maxAge : undefined,
-    expires: o.expires instanceof Date ? o.expires : undefined,
-    httpOnly: typeof o.httpOnly === 'boolean' ? o.httpOnly : undefined,
-    secure: typeof o.secure === 'boolean' ? o.secure : undefined,
-    sameSite: normalizeSameSite(o.sameSite),
+    ...options,
+    sameSite: normalizeSameSite(options.sameSite),
   };
 }
 
-// ✅ Next.js 15 で cookies() が Promise になり得るため async
-export async function createSupabaseServerClient() {
+export async function createSupabaseServerClient(): Promise<SupabaseClient> {
   const cookieStore = await cookies();
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  if (!url || !anonKey) {
-    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  }
-
-  return createServerClient(url, anonKey, {
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value, options }) => {
-          // ✅ cookies().set は (name,value,options) より object 形式が型で安全
-          const normalized = normalizeCookieOptions(options);
-          cookieStore.set({
-            name,
-            value,
-            ...(normalized ?? {}),
-          });
+          cookieStore.set(name, value, normalizeCookieOptions(options));
         });
       },
     },
