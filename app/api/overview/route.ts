@@ -4,28 +4,34 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-type OverviewViewRow = {
+type Row = {
   user_id: string;
-  cash_account_id: number;
-  current_balance: number;
-  month_income: number;
-  month_expense: number;
+  cash_account_id: number | null;
+  current_balance: number | null;
+  month_income: number | null;
+  month_expense: number | null;
+  planned_income: number | null;
+  planned_expense: number | null;
+  projected_balance: number | null;
+  // v2 によっては planned_income_30d / planned_expense_30d がある想定
+  planned_income_30d?: number | null;
+  planned_expense_30d?: number | null;
+  projected_balance_30d?: number | null;
   risk_score: number | null;
   risk_level: string | null;
-  computed_at: string;
+  computed_at: string | null;
 };
 
-function toNumber(v: unknown, fallback = 0): number {
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? n : fallback;
+function n(v: unknown): number {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
 }
 
-function toISODate(d: Date): string {
-  // YYYY-MM-DD
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+function pickNumber(obj: any, keys: string[]): number {
+  for (const k of keys) {
+    if (obj && obj[k] !== undefined && obj[k] !== null) return n(obj[k]);
+  }
+  return 0;
 }
 
 export async function GET(req: Request) {
@@ -44,38 +50,67 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const accountIdParam = url.searchParams.get('accountId');
-  const accountId = accountIdParam ? Number(accountIdParam) : null;
+  const accountId = url.searchParams.get('account_id'); // optional
+  const accountIdNum =
+    accountId && accountId !== 'all' ? Number(accountId) : null;
 
-  // ① view から「現状」と「今月」を取る（口座指定なら絞る）
-  let q = supabase.from('v_dashboard_overview_user_v2').select('*') as any;
-  q = q.eq('user_id', user.id);
-  if (accountId && Number.isFinite(accountId)) {
-    q = q.eq('cash_account_id', accountId);
+  // v_dashboard_overview_user_v2 を前提（スクショで使ってたやつ）
+  let q = supabase
+    .from('v_dashboard_overview_user_v2')
+    .select(
+      [
+        'user_id',
+        'cash_account_id',
+        'current_balance',
+        'month_income',
+        'month_expense',
+        'planned_income',
+        'planned_expense',
+        'projected_balance',
+        'planned_income_30d',
+        'planned_expense_30d',
+        'projected_balance_30d',
+        'risk_score',
+        'risk_level',
+        'computed_at',
+      ].join(',')
+    )
+    .eq('user_id', user.id);
+
+  if (accountIdNum && Number.isFinite(accountIdNum)) {
+    q = q.eq('cash_account_id', accountIdNum);
   }
 
-  const { data: viewRowsRaw, error: viewErr } = await q;
-  if (viewErr) {
-    return NextResponse.json({ error: viewErr.message }, { status: 500 });
+  const { data, error } = await q;
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const viewRows = (viewRowsRaw ?? []) as OverviewViewRow[];
+  const rows = (Array.isArray(data) ? data : []) as Row[];
 
-  // view が1行も返さないケース（初期状態）でも落とさない
-  const baseAgg = viewRows.reduce(
+  // 合算（All accounts / 1 account の両対応）
+  const agg = rows.reduce(
     (acc, r) => {
-      acc.current_balance += toNumber(r.current_balance);
-      acc.month_income += toNumber(r.month_income);
-      acc.month_expense += toNumber(r.month_expense);
+      acc.current_balance += n(r.current_balance);
+      acc.month_income += n(r.month_income);
+      acc.month_expense += n(r.month_expense);
+
+      // v2 の列名ブレを吸収（plain or *_30d）
+      acc.planned_income += pickNumber(r as any, ['planned_income']);
+      acc.planned_expense += pickNumber(r as any, ['planned_expense']);
+      acc.projected_balance += pickNumber(r as any, ['projected_balance']);
+
+      acc.planned_income_30d += pickNumber(r as any, ['planned_income_30d']);
+      acc.planned_expense_30d += pickNumber(r as any, ['planned_expense_30d']);
+      acc.projected_balance_30d += pickNumber(r as any, [
+        'projected_balance_30d',
+      ]);
 
       // computed_at は最新を採用
-      if (!acc.computed_at || new Date(r.computed_at) > new Date(acc.computed_at)) {
-        acc.computed_at = r.computed_at;
+      if (!acc.computed_at || (r.computed_at && r.computed_at > acc.computed_at)) {
+        acc.computed_at = r.computed_at ?? acc.computed_at;
       }
-
-      // risk は「代表値」として先頭優先（複数口座なら後で改善も可）
-      if (!acc.risk_level) acc.risk_level = r.risk_level ?? 'GREEN';
-      if (acc.risk_score === null || acc.risk_score === undefined) acc.risk_score = r.risk_score ?? 0;
 
       return acc;
     },
@@ -83,72 +118,37 @@ export async function GET(req: Request) {
       current_balance: 0,
       month_income: 0,
       month_expense: 0,
+      planned_income: 0,
+      planned_expense: 0,
+      projected_balance: 0,
+
+      planned_income_30d: 0,
+      planned_expense_30d: 0,
+      projected_balance_30d: 0,
+
       computed_at: null as string | null,
-      risk_level: null as string | null,
-      risk_score: null as number | null,
     }
   );
 
-  // ② planned_cash_flows から「今日〜30日」の予定を合算
-  const today = new Date();
-  const start = toISODate(today);
-  const end = toISODate(new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000)); // 30日後
-
-  let pq = supabase
-    .from('planned_cash_flows')
-    .select('flow_type, amount, planned_date, cash_account_id')
-    .eq('user_id', user.id)
-    .gte('planned_date', start)
-    .lte('planned_date', end);
-
-  if (accountId && Number.isFinite(accountId)) {
-    // planned 側も口座指定に合わせる（null は “全体予定” 扱いにしたい場合は OR にする）
-    pq = pq.eq('cash_account_id', accountId);
-  }
-
-  const { data: plannedRows, error: plannedErr } = await pq;
-  if (plannedErr) {
-    return NextResponse.json({ error: plannedErr.message }, { status: 500 });
-  }
-
-  const plannedAgg = (plannedRows ?? []).reduce(
-    (acc, r: any) => {
-      const amt = toNumber(r.amount);
-      if (r.flow_type === 'income') acc.income += amt;
-      if (r.flow_type === 'expense') acc.expense += amt;
-      return acc;
-    },
-    { income: 0, expense: 0 }
-  );
-
-  const planned_income_30d = plannedAgg.income;
-  const planned_expense_30d = plannedAgg.expense;
-
-  // 互換：既存UIが planned_income / planned_expense を参照してても死なないように同値で返す
-  const planned_income = planned_income_30d;
-  const planned_expense = planned_expense_30d;
-
-  const projected_balance_30d =
-    baseAgg.current_balance + planned_income_30d - planned_expense_30d;
-
-  // 互換：projected_balance も 30d と同じ扱い
-  const projected_balance = projected_balance_30d;
+  // リスクは rows[0] があればそれ（All の場合は将来ロジックで再計算してもOK）
+  const risk_level = rows[0]?.risk_level ?? 'GREEN';
+  const risk_score = n(rows[0]?.risk_score);
 
   return NextResponse.json({
-    current_balance: baseAgg.current_balance,
-    month_income: baseAgg.month_income,
-    month_expense: baseAgg.month_expense,
+    current_balance: agg.current_balance,
+    month_income: agg.month_income,
+    month_expense: agg.month_expense,
 
-    planned_income,
-    planned_expense,
-    planned_income_30d,
-    planned_expense_30d,
+    planned_income: agg.planned_income,
+    planned_expense: agg.planned_expense,
+    projected_balance: agg.projected_balance,
 
-    projected_balance,
-    projected_balance_30d,
+    planned_income_30d: agg.planned_income_30d,
+    planned_expense_30d: agg.planned_expense_30d,
+    projected_balance_30d: agg.projected_balance_30d,
 
-    risk_level: baseAgg.risk_level ?? 'GREEN',
-    risk_score: baseAgg.risk_score ?? 0,
-    computed_at: baseAgg.computed_at,
+    risk_level,
+    risk_score,
+    computed_at: agg.computed_at,
   });
 }
