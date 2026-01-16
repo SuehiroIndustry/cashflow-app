@@ -1,8 +1,9 @@
+// app/dashboard/error.tsx
 'use client';
 
 import { useEffect } from 'react';
 
-export default function Error({
+export default function DashboardError({
   error,
   reset,
 }: {
@@ -16,7 +17,7 @@ export default function Error({
   return (
     <div style={{ padding: 16 }}>
       <h2>Dashboard crashed</h2>
-      <p>原因は下に出ています。</p>
+      <p>原因は下に出しています。ここで「真っ黒」から卒業。</p>
 
       <pre
         style={{
@@ -24,10 +25,10 @@ export default function Error({
           background: '#111',
           color: '#f55',
           padding: 12,
-          borderRadius: 4,
+          borderRadius: 6,
         }}
       >
-        {error.message}
+        {error?.message}
       </pre>
 
       <button
