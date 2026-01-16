@@ -22,16 +22,8 @@ export default async function DashboardPage() {
     .select('id, name')
     .order('id');
 
-  /**
-   * ✅ 重要ポイント
-   * DashboardClient の Props は
-   * - initialAccounts
-   * - initialOverview
-   * の両方が必須
-   *
-   * overview は CSR で /api/overview を叩くので
-   * ここでは null を渡す
-   */
+  // ✅ 正しい設計：Overviewは「まだ無い」を表せるので null を許容
+  // 初期表示は null（DashboardClient側でフェッチ or Refreshで取得）
   return (
     <DashboardClient
       initialAccounts={accounts ?? []}
