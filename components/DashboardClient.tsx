@@ -20,16 +20,69 @@ export type Overview = {
   planned_expense_30d: number;
   projected_balance_30d: number;
 
-  risk_level: string; // "GREEN" | "YELLOW" | "RED" など運用に合わせてOK
+  risk_level: string; // "GREEN" | "YELLOW" | "RED" etc
   risk_score: number;
   computed_at: string | null;
 };
 
 type Props = {
   initialAccounts: CashAccount[];
-  // ✅ 正しい型：Overviewは「まだ取得していない」を表現する必要がある
   initialOverview: Overview | null;
 };
+
+function yen(n: number) {
+  return `¥${Math.round(n).toLocaleString()}`;
+}
+
+function net(income: number, expense: number) {
+  return income - expense;
+}
+
+function riskBadgeStyle(level: string) {
+  const base: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '6px 10px',
+    borderRadius: 999,
+    border: '1px solid #333',
+    background: '#0b0b0b',
+    fontSize: 12,
+    lineHeight: 1,
+    letterSpacing: 0.3,
+    userSelect: 'none',
+  };
+
+  // 色は極力控えめ（ダークUI前提）
+  if (level === 'RED') return { ...base, borderColor: '#6b1b1b' };
+  if (level === 'YELLOW') return { ...base, borderColor: '#6b5a1b' };
+  return { ...base, borderColor: '#1b6b2a' }; // GREEN/others
+}
+
+function cardStyle(): React.CSSProperties {
+  return {
+    border: '1px solid #222',
+    background: '#0b0b0b',
+    borderRadius: 14,
+    padding: 14,
+  };
+}
+
+function statLabelStyle(): React.CSSProperties {
+  return {
+    fontSize: 12,
+    color: '#a0a0a0',
+    marginBottom: 6,
+  };
+}
+
+function statValueStyle(): React.CSSProperties {
+  return {
+    fontSize: 22,
+    fontWeight: 700,
+    letterSpacing: 0.2,
+  };
+}
 
 export default function DashboardClient({ initialAccounts, initialOverview }: Props) {
   const [accounts] = useState<CashAccount[]>(initialAccounts);
@@ -40,8 +93,10 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isDev = process.env.NODE_ENV !== 'production';
+
   const accountOptions = useMemo(() => {
-    return [{ id: 'all' as const, name: 'All accounts' }, ...accounts.map(a => ({ id: a.id, name: a.name }))];
+    return [{ id: 'all' as const, name: 'All accounts' }, ...accounts.map((a) => ({ id: a.id, name: a.name }))];
   }, [accounts]);
 
   const fetchOverview = useCallback(async (accountId: number | 'all') => {
@@ -55,11 +110,10 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const msg = typeof json?.error === 'string' ? json.error : 'Failed to fetch overview';
+        const msg = typeof (json as any)?.error === 'string' ? (json as any).error : 'Failed to fetch overview';
         throw new Error(msg);
       }
 
-      // APIは Overview 形式で返す前提
       setOverview(json as Overview);
     } catch (e) {
       setOverview(null);
@@ -69,10 +123,7 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
     }
   }, []);
 
-  // 初期表示で自動取得したいなら true にしてOK
-  // いまは「SSRでnull渡す」前提なので、最初に取っておくとUXが良い
   useEffect(() => {
-    // 初期overviewが無い場合だけ取得
     if (overview == null) {
       fetchOverview(selectedAccountId);
     }
@@ -87,20 +138,53 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
     await fetchOverview(selectedAccountId);
   };
 
-  return (
-    <div style={{ padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-        <h1 style={{ margin: 0 }}>Cashflow Dashboard</h1>
+  const monthNet = overview ? net(overview.month_income, overview.month_expense) : 0;
+  const planned30dNet = overview ? net(overview.planned_income_30d, overview.planned_expense_30d) : 0;
 
-        <button onClick={onRefresh} disabled={loading} style={{ padding: '8px 12px' }}>
-          {loading ? 'Refreshing...' : 'Refresh'}
-        </button>
+  // “今後30日” を主役として扱う（DBに month projected が無い前提でもUIが破綻しない）
+  const projectedMain = overview ? (overview.projected_balance_30d || overview.projected_balance) : 0;
+
+  return (
+    <div style={{ padding: 24, maxWidth: 980, margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 26 }}>Cashflow Dashboard</h1>
+          <div style={{ marginTop: 6, color: '#9a9a9a', fontSize: 12 }}>
+            {overview?.computed_at ? `computed_at: ${overview.computed_at}` : 'computed_at: (not yet)'}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {overview && (
+            <span style={riskBadgeStyle(overview.risk_level)}>
+              <strong style={{ fontSize: 12 }}>{overview.risk_level}</strong>
+              <span style={{ color: '#9a9a9a' }}>score: {overview.risk_score}</span>
+            </span>
+          )}
+
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid #2a2a2a',
+              background: '#111',
+              color: '#eaeaea',
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <label>
-            Accounts:&nbsp;
+      {/* Controls */}
+      <div style={{ marginTop: 16, ...cardStyle() }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: '#a0a0a0', fontSize: 12 }}>Accounts</span>
             <select
               value={selectedAccountId === 'all' ? 'all' : String(selectedAccountId)}
               onChange={(e) => {
@@ -108,6 +192,14 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
                 setSelectedAccountId(v === 'all' ? 'all' : Number(v));
               }}
               disabled={loading}
+              style={{
+                padding: '8px 10px',
+                borderRadius: 10,
+                border: '1px solid #2a2a2a',
+                background: '#0f0f0f',
+                color: '#eaeaea',
+                minWidth: 220,
+              }}
             >
               {accountOptions.map((o) => (
                 <option key={String(o.id)} value={String(o.id)}>
@@ -117,46 +209,112 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
             </select>
           </label>
 
-          <button onClick={onApply} disabled={loading} style={{ padding: '6px 10px' }}>
+          <button
+            onClick={onApply}
+            disabled={loading}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid #2a2a2a',
+              background: '#151515',
+              color: '#eaeaea',
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+          >
             Apply
           </button>
+
+          <div style={{ color: '#777', fontSize: 12 }}>
+            {selectedAccountId === 'all' ? 'All accounts selected' : `Account ID: ${selectedAccountId}`}
+          </div>
         </div>
       </div>
 
+      {/* Body */}
       <div style={{ marginTop: 16 }}>
         {error && (
-          <div style={{ padding: 12, border: '1px solid #a33', borderRadius: 8, marginBottom: 12 }}>
-            Dashboard Error<br />
-            {error}
+          <div style={{ padding: 14, border: '1px solid #6b1b1b', borderRadius: 14, background: '#0b0b0b' }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Dashboard Error</div>
+            <div style={{ color: '#e0b4b4' }}>{error}</div>
           </div>
         )}
 
         {!error && overview == null && (
-          <div style={{ padding: 12, border: '1px solid #555', borderRadius: 8 }}>
+          <div style={{ padding: 14, border: '1px solid #2a2a2a', borderRadius: 14, background: '#0b0b0b' }}>
             Overview is not loaded yet.
           </div>
         )}
 
         {!error && overview != null && (
-          <div style={{ padding: 12, border: '1px solid #555', borderRadius: 8 }}>
-            <div>current_balance: ¥{overview.current_balance.toLocaleString()}</div>
-            <div>
-              month: +¥{overview.month_income.toLocaleString()} / -¥{overview.month_expense.toLocaleString()}
-            </div>
-            <div>
-              planned(30d): +¥{overview.planned_income_30d.toLocaleString()} / -¥{overview.planned_expense_30d.toLocaleString()}
-            </div>
-            <div>projected_balance: ¥{overview.projected_balance.toLocaleString()}</div>
-            <div>
-              risk: {overview.risk_level} (score: {overview.risk_score})
-            </div>
-            <div>computed_at: {overview.computed_at ?? '(null)'}</div>
+          <>
+            {/* Stats Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                gap: 12,
+                marginTop: 12,
+              }}
+            >
+              <div style={cardStyle()}>
+                <div style={statLabelStyle()}>Current Balance</div>
+                <div style={statValueStyle()}>{yen(overview.current_balance)}</div>
+                <div style={{ marginTop: 6, color: '#777', fontSize: 12 }}>全口座合算 / 選択口座</div>
+              </div>
 
-            <details style={{ marginTop: 12 }}>
-              <summary>Debug (API response)</summary>
-              <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(overview, null, 2)}</pre>
-            </details>
-          </div>
+              <div style={cardStyle()}>
+                <div style={statLabelStyle()}>This Month</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#9a9a9a' }}>income</div>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{yen(overview.month_income)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#9a9a9a' }}>expense</div>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{yen(overview.month_expense)}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, color: '#9a9a9a', fontSize: 12 }}>
+                  net: <strong style={{ color: '#eaeaea' }}>{yen(monthNet)}</strong>
+                </div>
+              </div>
+
+              <div style={cardStyle()}>
+                <div style={statLabelStyle()}>Planned (Next 30d)</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#9a9a9a' }}>income</div>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{yen(overview.planned_income_30d)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: '#9a9a9a' }}>expense</div>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{yen(overview.planned_expense_30d)}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10, color: '#9a9a9a', fontSize: 12 }}>
+                  net: <strong style={{ color: '#eaeaea' }}>{yen(planned30dNet)}</strong>
+                </div>
+              </div>
+
+              <div style={{ ...cardStyle(), gridColumn: 'span 3' }}>
+                <div style={statLabelStyle()}>Projected Balance (Next 30d)</div>
+                <div style={{ fontSize: 26, fontWeight: 800 }}>{yen(projectedMain)}</div>
+                <div style={{ marginTop: 6, color: '#777', fontSize: 12 }}>
+                  ※ `projected_balance_30d` を優先表示。無ければ `projected_balance` を表示。
+                </div>
+              </div>
+            </div>
+
+            {/* Debug (dev only) */}
+            {isDev && (
+              <div style={{ marginTop: 12, ...cardStyle() }}>
+                <details>
+                  <summary style={{ cursor: 'pointer', color: '#9a9a9a' }}>Debug (API response) — dev only</summary>
+                  <pre style={{ whiteSpace: 'pre-wrap', marginTop: 10 }}>{JSON.stringify(overview, null, 2)}</pre>
+                </details>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
