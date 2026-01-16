@@ -1,51 +1,29 @@
-'use client';
+// app/dashboard/page.tsx
+import { redirect } from 'next/navigation';
+import DashboardClient from '@/components/DashboardClient';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
+export const dynamic = 'force-dynamic';
 
 type CashAccount = {
   id: number;
   name: string;
 };
 
-export default function DashboardClient({
-  initialAccounts,
-}: {
-  initialAccounts: CashAccount[];
-}) {
-  const [overview, setOverview] = useState<any>(null);
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServerClient();
 
-  useEffect(() => {
-    (async () => {
-      const res = await fetch('/api/overview');
-      const json = await res.json();
-      setOverview(json);
-    })();
-  }, []);
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) redirect('/login');
 
-  return (
-    <div style={{ padding: 16 }}>
-      <h1>Cashflow Dashboard</h1>
+  const { data: accounts, error: accountsError } = await supabase
+    .from('cash_accounts')
+    .select('id, name')
+    .order('id');
 
-      <h2>Accounts</h2>
-      <ul>
-        {initialAccounts.map((a) => (
-          <li key={a.id}>
-            #{a.id} {a.name}
-          </li>
-        ))}
-      </ul>
+  if (accountsError) {
+    throw new Error(`Failed to fetch cash_accounts: ${accountsError.message}`);
+  }
 
-      {overview && (
-        <>
-          <h2>Overview</h2>
-          <p>Balance: {overview.current_balance}</p>
-          <p>Month: +{overview.month_income} / -{overview.month_expense}</p>
-          <p>Planned: +{overview.planned_income} / -{overview.planned_expense}</p>
-          <p>Projected: {overview.projected_balance}</p>
-          <p>Risk: {overview.risk_level}</p>
-        </>
-      )}
-    </div>
-  );
+  return <DashboardClient initialAccounts={(accounts ?? []) as CashAccount[]} />;
 }
