@@ -1,9 +1,9 @@
 // components/DashboardClient.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';   // ← これが正しい
+import { supabase } from '@/lib/supabase/client';
 
 type CashAccount = {
   id: number;
@@ -29,63 +29,82 @@ type Props = {
 
 export default function DashboardClient({ initialAccounts, initialOverview }: Props) {
   const router = useRouter();
-
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<string | null>(null);
 
+  const accounts = useMemo(() => initialAccounts ?? [], [initialAccounts]);
+  const overview = useMemo(() => initialOverview ?? [], [initialOverview]);
+
   useEffect(() => {
-    let unsub: any = null;
+    let unsub:
+      | { data: { subscription: { unsubscribe: () => void } } }
+      | null = null;
 
-    async function checkSession() {
+    (async () => {
       try {
-        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) throw sessionError;
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
 
-        if (!sessionData.session) {
+        if (!data.session) {
           router.replace('/login');
           return;
         }
+
         setReady(true);
 
         unsub = supabase.auth.onAuthStateChange((_event, session) => {
           if (!session) router.replace('/login');
         });
       } catch (e: any) {
-        setFatal(e.message ?? 'Failed to check session.');
+        setFatal(e?.message ?? 'Unknown auth/session error');
       }
-    }
-
-    checkSession();
+    })();
 
     return () => {
-      if (unsub && typeof unsub?.unsubscribe === 'function') {
-        unsub.unsubscribe();
-      }
+      try {
+        unsub?.data.subscription.unsubscribe();
+      } catch {}
     };
   }, [router]);
 
   if (fatal) {
     return (
-      <div style={{ padding: 20 }}>
+      <div style={{ padding: 16 }}>
         <h2>Dashboard Error</h2>
         <pre style={{ whiteSpace: 'pre-wrap' }}>{fatal}</pre>
       </div>
     );
   }
 
-  if (!ready) return null;
+  if (!ready) {
+    return (
+      <div style={{ padding: 16 }}>
+        <p>Loading dashboard...</p>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>Dashboard</h1>
+    <div style={{ padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Cashflow Dashboard</h1>
+        <button
+          onClick={async () => {
+            await supabase.auth.signOut();
+            router.replace('/login');
+          }}
+        >
+          Logout
+        </button>
+      </div>
 
-      <section>
+      <section style={{ marginTop: 16 }}>
         <h2>Accounts</h2>
-        {initialAccounts.length === 0 ? (
-          <p>No accounts</p>
+        {accounts.length === 0 ? (
+          <p>No accounts (cash_accounts is empty or RLS blocked)</p>
         ) : (
           <ul>
-            {initialAccounts.map((a) => (
+            {accounts.map((a) => (
               <li key={a.id}>
                 #{a.id} {a.name}
               </li>
@@ -94,15 +113,16 @@ export default function DashboardClient({ initialAccounts, initialOverview }: Pr
         )}
       </section>
 
-      <section>
+      <section style={{ marginTop: 16 }}>
         <h2>Overview</h2>
-        {initialOverview.length === 0 ? (
-          <p>No overview rows</p>
+        {overview.length === 0 ? (
+          <p>No overview rows (view is empty or RLS blocked)</p>
         ) : (
           <ul>
-            {initialOverview.map((r) => (
+            {overview.map((r) => (
               <li key={r.cash_account_id}>
-                {r.name} / balance: {r.balance} / risk: {r.risk_level}
+                {r.name} / balance: {r.balance} / month: +{r.month_income} -{r.month_expense} / risk:{' '}
+                {r.risk_level}
               </li>
             ))}
           </ul>
