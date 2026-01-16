@@ -4,48 +4,31 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-type Row30d = {
+type OverviewViewRow = {
+  user_id: string;
   cash_account_id: number;
-  current_balance: number | null;
-  month_income: number | null;
-  month_expense: number | null;
-
-  planned_income_30d: number | null;
-  planned_expense_30d: number | null;
-  projected_balance_30d: number | null;
-
-  risk_level: string | null;
+  current_balance: number;
+  month_income: number;
+  month_expense: number;
   risk_score: number | null;
-  computed_at: string | null;
+  risk_level: string | null;
+  computed_at: string;
 };
 
-type RowPlain = {
-  cash_account_id: number;
-  current_balance: number | null;
-  month_income: number | null;
-  month_expense: number | null;
-
-  planned_income: number | null;
-  planned_expense: number | null;
-  projected_balance: number | null;
-
-  risk_level: string | null;
-  risk_score: number | null;
-  computed_at: string | null;
-};
-
-function n(v: unknown): number {
-  const x = Number(v);
-  return Number.isFinite(x) ? x : 0;
+function toNumber(v: unknown, fallback = 0): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function isMissingColumnError(e: any, columnName: string) {
-  const msg = String(e?.message ?? '');
-  // Postgres undefined_column: 42703
-  return e?.code === '42703' && msg.includes(`.${columnName}`) && msg.includes('does not exist');
+function toISODate(d: Date): string {
+  // YYYY-MM-DD
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const supabase = await createSupabaseServerClient();
 
   const {
@@ -53,164 +36,119 @@ export async function GET() {
     error: userErr,
   } = await supabase.auth.getUser();
 
-  if (userErr) return NextResponse.json({ error: userErr.message }, { status: 500 });
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-
-  // ---- 1) まずは *_30d を正として取りに行く（現状のあなたのDBに合ってる可能性が高い） ----
-  const select30d = [
-    'cash_account_id',
-    'current_balance',
-    'month_income',
-    'month_expense',
-    'planned_income_30d',
-    'planned_expense_30d',
-    'projected_balance_30d',
-    'risk_score',
-    'risk_level',
-    'computed_at',
-  ].join(',');
-
-  const q30d = await (supabase as any)
-    .from('v_dashboard_overview_user_v2')
-    .select(select30d)
-    .eq('user_id', user.id);
-
-  // ---- 2) planned_income_30d が無いDBもあり得るのでフォールバック ----
-  if (q30d.error && isMissingColumnError(q30d.error, 'planned_income_30d')) {
-    const selectPlain = [
-      'cash_account_id',
-      'current_balance',
-      'month_income',
-      'month_expense',
-      'planned_income',
-      'planned_expense',
-      'projected_balance',
-      'risk_score',
-      'risk_level',
-      'computed_at',
-    ].join(',');
-
-    const qPlain = await (supabase as any)
-      .from('v_dashboard_overview_user_v2')
-      .select(selectPlain)
-      .eq('user_id', user.id);
-
-    if (qPlain.error) {
-      return NextResponse.json({ error: qPlain.error.message }, { status: 500 });
-    }
-
-    const rows = (qPlain.data ?? []) as RowPlain[];
-
-    const agg = rows.reduce(
-      (acc, r) => {
-        acc.current_balance += n(r.current_balance);
-        acc.month_income += n(r.month_income);
-        acc.month_expense += n(r.month_expense);
-
-        acc.planned_income += n(r.planned_income);
-        acc.planned_expense += n(r.planned_expense);
-        acc.projected_balance += n(r.projected_balance);
-
-        const t = r.computed_at ? Date.parse(r.computed_at) : NaN;
-        if (Number.isFinite(t) && t > acc._latestTs) {
-          acc._latestTs = t;
-          acc.computed_at = r.computed_at ?? null;
-          acc.risk_level = r.risk_level ?? acc.risk_level;
-          acc.risk_score = n(r.risk_score);
-        }
-        return acc;
-      },
-      {
-        current_balance: 0,
-        month_income: 0,
-        month_expense: 0,
-        planned_income: 0,
-        planned_expense: 0,
-        projected_balance: 0,
-        risk_level: 'GREEN',
-        risk_score: 0,
-        computed_at: null as string | null,
-        _latestTs: -Infinity,
-      }
-    );
-
-    // ✅ 互換性のため“両方のキー”を返す
-    return NextResponse.json({
-      current_balance: agg.current_balance,
-      month_income: agg.month_income,
-      month_expense: agg.month_expense,
-
-      planned_income: agg.planned_income,
-      planned_expense: agg.planned_expense,
-      projected_balance: agg.projected_balance,
-
-      planned_income_30d: agg.planned_income,
-      planned_expense_30d: agg.planned_expense,
-      projected_balance_30d: agg.projected_balance,
-
-      risk_level: agg.risk_level,
-      risk_score: agg.risk_score,
-      computed_at: agg.computed_at,
-    });
+  if (userErr) {
+    return NextResponse.json({ error: userErr.message }, { status: 500 });
+  }
+  if (!user) {
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  // 30d側で別のエラーならそれはそのまま返す（原因潰しのため）
-  if (q30d.error) {
-    return NextResponse.json({ error: q30d.error.message }, { status: 500 });
+  const url = new URL(req.url);
+  const accountIdParam = url.searchParams.get('accountId');
+  const accountId = accountIdParam ? Number(accountIdParam) : null;
+
+  // ① view から「現状」と「今月」を取る（口座指定なら絞る）
+  let q = supabase.from('v_dashboard_overview_user_v2').select('*') as any;
+  q = q.eq('user_id', user.id);
+  if (accountId && Number.isFinite(accountId)) {
+    q = q.eq('cash_account_id', accountId);
   }
 
-  const rows = (q30d.data ?? []) as Row30d[];
+  const { data: viewRowsRaw, error: viewErr } = await q;
+  if (viewErr) {
+    return NextResponse.json({ error: viewErr.message }, { status: 500 });
+  }
 
-  const agg = rows.reduce(
+  const viewRows = (viewRowsRaw ?? []) as OverviewViewRow[];
+
+  // view が1行も返さないケース（初期状態）でも落とさない
+  const baseAgg = viewRows.reduce(
     (acc, r) => {
-      acc.current_balance += n(r.current_balance);
-      acc.month_income += n(r.month_income);
-      acc.month_expense += n(r.month_expense);
+      acc.current_balance += toNumber(r.current_balance);
+      acc.month_income += toNumber(r.month_income);
+      acc.month_expense += toNumber(r.month_expense);
 
-      acc.planned_income_30d += n(r.planned_income_30d);
-      acc.planned_expense_30d += n(r.planned_expense_30d);
-      acc.projected_balance_30d += n(r.projected_balance_30d);
-
-      const t = r.computed_at ? Date.parse(r.computed_at) : NaN;
-      if (Number.isFinite(t) && t > acc._latestTs) {
-        acc._latestTs = t;
-        acc.computed_at = r.computed_at ?? null;
-        acc.risk_level = r.risk_level ?? acc.risk_level;
-        acc.risk_score = n(r.risk_score);
+      // computed_at は最新を採用
+      if (!acc.computed_at || new Date(r.computed_at) > new Date(acc.computed_at)) {
+        acc.computed_at = r.computed_at;
       }
+
+      // risk は「代表値」として先頭優先（複数口座なら後で改善も可）
+      if (!acc.risk_level) acc.risk_level = r.risk_level ?? 'GREEN';
+      if (acc.risk_score === null || acc.risk_score === undefined) acc.risk_score = r.risk_score ?? 0;
+
       return acc;
     },
     {
       current_balance: 0,
       month_income: 0,
       month_expense: 0,
-      planned_income_30d: 0,
-      planned_expense_30d: 0,
-      projected_balance_30d: 0,
-      risk_level: 'GREEN',
-      risk_score: 0,
       computed_at: null as string | null,
-      _latestTs: -Infinity,
+      risk_level: null as string | null,
+      risk_score: null as number | null,
     }
   );
 
-  // ✅ 互換性のため“両方のキー”を返す
+  // ② planned_cash_flows から「今日〜30日」の予定を合算
+  const today = new Date();
+  const start = toISODate(today);
+  const end = toISODate(new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000)); // 30日後
+
+  let pq = supabase
+    .from('planned_cash_flows')
+    .select('flow_type, amount, planned_date, cash_account_id')
+    .eq('user_id', user.id)
+    .gte('planned_date', start)
+    .lte('planned_date', end);
+
+  if (accountId && Number.isFinite(accountId)) {
+    // planned 側も口座指定に合わせる（null は “全体予定” 扱いにしたい場合は OR にする）
+    pq = pq.eq('cash_account_id', accountId);
+  }
+
+  const { data: plannedRows, error: plannedErr } = await pq;
+  if (plannedErr) {
+    return NextResponse.json({ error: plannedErr.message }, { status: 500 });
+  }
+
+  const plannedAgg = (plannedRows ?? []).reduce(
+    (acc, r: any) => {
+      const amt = toNumber(r.amount);
+      if (r.flow_type === 'income') acc.income += amt;
+      if (r.flow_type === 'expense') acc.expense += amt;
+      return acc;
+    },
+    { income: 0, expense: 0 }
+  );
+
+  const planned_income_30d = plannedAgg.income;
+  const planned_expense_30d = plannedAgg.expense;
+
+  // 互換：既存UIが planned_income / planned_expense を参照してても死なないように同値で返す
+  const planned_income = planned_income_30d;
+  const planned_expense = planned_expense_30d;
+
+  const projected_balance_30d =
+    baseAgg.current_balance + planned_income_30d - planned_expense_30d;
+
+  // 互換：projected_balance も 30d と同じ扱い
+  const projected_balance = projected_balance_30d;
+
   return NextResponse.json({
-    current_balance: agg.current_balance,
-    month_income: agg.month_income,
-    month_expense: agg.month_expense,
+    current_balance: baseAgg.current_balance,
+    month_income: baseAgg.month_income,
+    month_expense: baseAgg.month_expense,
 
-    // plain も埋めて返す（UIがどっち参照でも死なない）
-    planned_income: agg.planned_income_30d,
-    planned_expense: agg.planned_expense_30d,
-    projected_balance: agg.projected_balance_30d,
+    planned_income,
+    planned_expense,
+    planned_income_30d,
+    planned_expense_30d,
 
-    planned_income_30d: agg.planned_income_30d,
-    planned_expense_30d: agg.planned_expense_30d,
-    projected_balance_30d: agg.projected_balance_30d,
+    projected_balance,
+    projected_balance_30d,
 
-    risk_level: agg.risk_level,
-    risk_score: agg.risk_score,
-    computed_at: agg.computed_at,
+    risk_level: baseAgg.risk_level ?? 'GREEN',
+    risk_score: baseAgg.risk_score ?? 0,
+    computed_at: baseAgg.computed_at,
   });
 }
