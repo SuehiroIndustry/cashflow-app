@@ -8,19 +8,16 @@ type RiskLevel = string;
 
 type ViewRow = {
   user_id: string;
-  cash_account_id: number | string; // bigint が string で返る場合あり
+  cash_account_id: number | string;
   current_balance: number | string | null;
-
   month_income: number | string | null;
   month_expense: number | string | null;
-
   planned_income_30d: number | string | null;
   planned_expense_30d: number | string | null;
   projected_balance_30d: number | string | null;
-
-  risk_score: number | string | null;
+  risk_score: number | null;
   risk_level: RiskLevel | null;
-  computed_at: string | null; // timestamptz
+  computed_at: string | null;
 };
 
 function toNumber(v: unknown): number {
@@ -35,7 +32,8 @@ function toNumber(v: unknown): number {
 }
 
 function toInt(v: unknown): number {
-  return Math.trunc(toNumber(v));
+  const n = toNumber(v);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
 
 function toDateMs(v: unknown): number {
@@ -53,21 +51,12 @@ function toViewRowArray(data: unknown): ViewRow[] {
   const rows: ViewRow[] = [];
   for (const item of data) {
     if (!isObjectRecord(item)) continue;
-    if (!("cash_account_id" in item) || !("current_balance" in item)) continue;
+    if (!("current_balance" in item) || !("month_income" in item) || !("month_expense" in item)) continue;
     rows.push(item as unknown as ViewRow);
   }
   return rows;
 }
 
-/**
- * ✅ API仕様（固定）
- * GET /api/overview
- * - accountId 未指定 or "all" → 全口座合算
- * - accountId=number → 単一口座
- * - debug=1 → debug_rows を返す
- *
- * 互換：cash_account_id でも受ける（古いフロントがいても壊さない）
- */
 export async function GET(req: Request) {
   const supabase = await createSupabaseServerClient();
 
@@ -82,19 +71,15 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
 
-  const accountIdRaw =
-    url.searchParams.get("accountId") ?? url.searchParams.get("cash_account_id"); // backward compat
+  // ✅ 両対応：古いフロントは accountId、新しいのは cash_account_id
+  const accountIdParam =
+    url.searchParams.get("cash_account_id") ?? url.searchParams.get("accountId");
 
   const debug = url.searchParams.get("debug") === "1";
-
-  const accountIdNormalized = (accountIdRaw ?? "").trim().toLowerCase();
-  const isAll =
-    accountIdNormalized === "" || accountIdNormalized === "all" || accountIdNormalized === "null";
-
-  const accountIdNum = isAll ? NaN : Number(accountIdRaw);
+  const accountIdNum = accountIdParam ? Number(accountIdParam) : NaN;
 
   let q = supabase
-    .from("v_dashboard_overview_user_v2")
+    .from("v_dashboard_overview_user_v2") // public は supabase 側で解決
     .select(
       [
         "user_id",
@@ -116,7 +101,6 @@ export async function GET(req: Request) {
     q = q.eq("cash_account_id", accountIdNum);
   }
 
-  // 複数行あっても「最新」を拾えるように
   const { data, error } = await q.order("computed_at", { ascending: false });
 
   if (error) {
@@ -131,37 +115,30 @@ export async function GET(req: Request) {
   const agg = rows.reduce(
     (acc, r) => {
       acc.current_balance += toNumber(r.current_balance);
-
       acc.month_income += toNumber(r.month_income);
       acc.month_expense += toNumber(r.month_expense);
 
       acc.planned_income_30d += toNumber(r.planned_income_30d);
       acc.planned_expense_30d += toNumber(r.planned_expense_30d);
 
-      // 30d見込み残高（ビュー計算済み前提）
       acc.projected_balance_30d += toNumber(r.projected_balance_30d);
 
-      // リスク系は「最新行」を採用
       const ms = toDateMs(r.computed_at);
       if (ms > acc._latestMs) {
         acc._latestMs = ms;
         acc.risk_level = r.risk_level ?? acc.risk_level;
-        acc.risk_score = toNumber(r.risk_score);
+        acc.risk_score = typeof r.risk_score === "number" ? r.risk_score : acc.risk_score;
         acc.computed_at = r.computed_at ?? acc.computed_at;
       }
-
       return acc;
     },
     {
       current_balance: 0,
-
       month_income: 0,
       month_expense: 0,
-
       planned_income_30d: 0,
       planned_expense_30d: 0,
       projected_balance_30d: 0,
-
       risk_level: "GREEN" as RiskLevel,
       risk_score: 0,
       computed_at: null as string | null,
@@ -170,40 +147,30 @@ export async function GET(req: Request) {
   );
 
   const net_month = agg.month_income - agg.month_expense;
+  const net_planned_30d = agg.planned_income_30d - agg.planned_expense_30d;
 
-  // ここは「30日見込み」を planned_* としても扱う（フロント互換＆分かりやすさ優先）
-  const planned_income = agg.planned_income_30d;
-  const planned_expense = agg.planned_expense_30d;
-  const net_planned_30d = planned_income - planned_expense;
-
-  // projected_balance は「見込み残高」：ビュー値があればそれ優先、無ければ自前で算出
   const projected_balance =
     agg.projected_balance_30d !== 0
       ? agg.projected_balance_30d
       : agg.current_balance + net_planned_30d;
 
   const payload = {
-    // ✅ DashboardClient の型に合わせる
-    current_balance: toInt(agg.current_balance),
+    current_balance: agg.current_balance,
 
-    month_income: toInt(agg.month_income),
-    month_expense: toInt(agg.month_expense),
+    month_income: agg.month_income,
+    month_expense: agg.month_expense,
+    net_month,
 
-    planned_income: toInt(planned_income),
-    planned_expense: toInt(planned_expense),
-    projected_balance: toInt(projected_balance),
+    planned_income_30d: agg.planned_income_30d,
+    planned_expense_30d: agg.planned_expense_30d,
+    net_planned_30d,
 
-    planned_income_30d: toInt(agg.planned_income_30d),
-    planned_expense_30d: toInt(agg.planned_expense_30d),
-    projected_balance_30d: toInt(agg.projected_balance_30d),
+    projected_balance,
+    projected_balance_30d: agg.projected_balance_30d,
 
     risk_level: agg.risk_level,
     risk_score: toInt(agg.risk_score),
     computed_at: agg.computed_at,
-
-    // ついでに：デバッグや確認用（フロントが欲しければ表示できる）
-    net_month: toInt(net_month),
-    net_planned_30d: toInt(net_planned_30d),
 
     ...(debug ? { debug_rows: rows } : {}),
   };
