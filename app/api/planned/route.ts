@@ -98,3 +98,37 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ item: data }, { status: 201 });
 }
+
+export async function DELETE(req: Request) {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr) return NextResponse.json({ error: userErr.message }, { status: 500 });
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+
+  const url = new URL(req.url);
+  const idParam = url.searchParams.get('id');
+
+  if (!idParam) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  }
+
+  const id = Number(idParam);
+  if (!Number.isFinite(id)) {
+    return NextResponse.json({ error: 'id must be a number' }, { status: 400 });
+  }
+
+  // RLSで user_id=auth.uid() しか消せないので、ここは id 指定でOK
+  const { error } = await supabase
+    .from('planned_cash_flows')
+    .delete()
+    .eq('id', id);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true });
+}
