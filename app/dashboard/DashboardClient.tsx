@@ -1,219 +1,300 @@
+// app/dashboard/DashboardClient.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
-import { OverviewCard } from "./OverviewCard";
+import { useRouter } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-type CashAccount = {
-  id: number;
-  name: string;
-};
+type RiskLevel = "GREEN" | "YELLOW" | "RED" | string;
 
-type Overview = {
+type OverviewPayload = {
   current_balance: number;
   month_income: number;
   month_expense: number;
   net_month: number;
+
   planned_income_30d: number;
   planned_expense_30d: number;
   net_planned_30d: number;
+
   projected_balance: number;
-  projected_balance_30d?: number;
-  risk_level: string;
+  projected_balance_30d: number;
+
+  risk_level: RiskLevel;
   risk_score: number;
   computed_at: string | null;
+
+  debug_rows?: unknown;
 };
 
-function toInt(v: unknown): number {
-  const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
-  return Number.isFinite(n) ? Math.trunc(n) : 0;
-}
+type AccountRow = {
+  id: number;
+  name: string;
+};
 
-function toOverview(v: any): Overview {
-  return {
-    current_balance: toInt(v?.current_balance),
-    month_income: toInt(v?.month_income),
-    month_expense: toInt(v?.month_expense),
-    net_month: toInt(v?.net_month),
-    planned_income_30d: toInt(v?.planned_income_30d),
-    planned_expense_30d: toInt(v?.planned_expense_30d),
-    net_planned_30d: toInt(v?.net_planned_30d),
-    projected_balance: toInt(v?.projected_balance),
-    projected_balance_30d: toInt(v?.projected_balance_30d),
-    risk_level: String(v?.risk_level ?? "GREEN"),
-    risk_score: toInt(v?.risk_score),
-    computed_at: v?.computed_at ?? null,
-  };
+function yen(n: number) {
+  try {
+    return new Intl.NumberFormat("ja-JP", {
+      style: "currency",
+      currency: "JPY",
+      maximumFractionDigits: 0,
+    }).format(n);
+  } catch {
+    return `¥${Math.trunc(n).toLocaleString("ja-JP")}`;
+  }
 }
 
 export default function DashboardClient() {
-  const supabase = useMemo(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    return createBrowserClient(url, key);
-  }, []);
+  const router = useRouter();
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
-  const [accounts, setAccounts] = useState<CashAccount[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("all");
-  const [appliedId, setAppliedId] = useState<string>("all");
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(""); // "" = all
+  const [appliedAccountId, setAppliedAccountId] = useState<string>(""); // 実際に API に投げてる値
 
   const [loading, setLoading] = useState(false);
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 口座一覧を Supabase から取得（RLS前提）
-  const loadAccounts = useCallback(async () => {
-    setError(null);
+  const [showDebug, setShowDebug] = useState(false);
 
+  const fetchAccounts = useCallback(async () => {
+    // ここは “とりあえず動く” を優先して、存在しそうな cash_accounts を読みに行く。
+    // もしテーブル名が違うなら、ここだけ差し替えでOK。
     const { data, error } = await supabase
       .from("cash_accounts")
       .select("id,name")
       .order("id", { ascending: true });
 
     if (error) {
-      setError(error.message);
+      // 口座取得に失敗してもダッシュボード自体は動かす
+      console.warn("[fetchAccounts] error:", error.message);
       setAccounts([]);
       return;
     }
 
-    const rows = Array.isArray(data) ? data : [];
-    const mapped: CashAccount[] = rows
-      .filter((r: any) => r && r.id != null)
-      .map((r: any) => ({ id: Number(r.id), name: String(r.name ?? `口座#${r.id}`) }));
+    const rows: AccountRow[] =
+      Array.isArray(data)
+        ? data
+            .filter((r: any) => r && (typeof r.id === "number" || typeof r.id === "string"))
+            .map((r: any) => ({
+              id: typeof r.id === "string" ? Number(r.id) : r.id,
+              name: typeof r.name === "string" && r.name ? r.name : `Account ${r.id}`,
+            }))
+        : [];
 
-    setAccounts(mapped);
+    setAccounts(rows);
   }, [supabase]);
 
-  const loadOverview = useCallback(async (accountId: string) => {
-    setLoading(true);
-    setError(null);
+  const fetchOverview = useCallback(
+    async (accountId: string) => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      const qs =
-        accountId === "all"
-          ? ""
-          : `?cash_account_id=${encodeURIComponent(accountId)}`;
+      try {
+        const params = new URLSearchParams();
+        if (accountId) params.set("cash_account_id", accountId);
+        // デバッグ見たいときだけ 1
+        // params.set("debug", "1");
 
-      const res = await fetch(`/api/overview${qs}`, { cache: "no-store" });
-      const json = await res.json();
+        const res = await fetch(`/api/overview?${params.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+        });
 
-      if (!res.ok) {
-        setError(json?.error ?? "API error");
+        if (res.status === 401) {
+          // セッション切れ等
+          router.push("/login");
+          return;
+        }
+
+        const json = (await res.json()) as any;
+
+        if (!res.ok) {
+          const msg = json?.error ? String(json.error) : `HTTP ${res.status}`;
+          setError(msg);
+          setOverview(null);
+          return;
+        }
+
+        setOverview(json as OverviewPayload);
+      } catch (e: any) {
+        setError(e?.message ? String(e.message) : "Unknown error");
         setOverview(null);
-        return;
+      } finally {
+        setLoading(false);
       }
+    },
+    [router]
+  );
 
-      // データが実質ゼロで computed_at も無いなら「未登録」扱いにしてカード側でメッセージ
-      const ov = toOverview(json);
-      const isEmpty =
-        (!ov.computed_at || ov.computed_at === "—") &&
-        ov.current_balance === 0 &&
-        ov.month_income === 0 &&
-        ov.month_expense === 0 &&
-        ov.planned_income_30d === 0 &&
-        ov.planned_expense_30d === 0;
+  const onApply = useCallback(() => {
+    setAppliedAccountId(selectedAccountId);
+  }, [selectedAccountId]);
 
-      setOverview(isEmpty ? null : ov);
-    } catch (e: any) {
-      setError(e?.message ?? "fetch failed");
-      setOverview(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const onRefresh = useCallback(() => {
+    void fetchOverview(appliedAccountId);
+  }, [appliedAccountId, fetchOverview]);
+
+  const onLogout = useCallback(async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  }, [router, supabase]);
+
+  const accountLabel = useMemo(() => {
+    if (!appliedAccountId) return "All accounts";
+    const idNum = Number(appliedAccountId);
+    const found = accounts.find((a) => a.id === idNum);
+    return found?.name ?? `Account ${appliedAccountId}`;
+  }, [accounts, appliedAccountId]);
 
   useEffect(() => {
-    // 初回ロード
-    (async () => {
-      await loadAccounts();
-      await loadOverview("all");
-    })();
-  }, [loadAccounts, loadOverview]);
+    void fetchAccounts();
+  }, [fetchAccounts]);
 
-  const appliedLabel = useMemo(() => {
-    if (appliedId === "all") return "All accounts";
-    const idNum = Number(appliedId);
-    const a = accounts.find((x) => x.id === idNum);
-    return a?.name ?? `口座#${appliedId}`;
-  }, [appliedId, accounts]);
+  useEffect(() => {
+    // 初期表示
+    void fetchOverview(appliedAccountId);
+  }, [appliedAccountId, fetchOverview]);
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="mx-auto max-w-5xl px-6 py-10">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">Cashflow Dashboard</h1>
-            <div className="mt-1 text-sm text-white/60">
-              経営者が“今”見るための画面
-            </div>
-          </div>
+    <div style={{ minHeight: "100vh", padding: 24, background: "#000", color: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 20, fontWeight: 700 }}>Cashflow Dashboard</div>
+        <button
+          onClick={onLogout}
+          style={{
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "transparent",
+            color: "#fff",
+            cursor: "pointer",
+          }}
+        >
+          Logout
+        </button>
+      </div>
 
-          <button
-            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/5"
-            onClick={async () => {
-              setAppliedId(selectedId);
-              await loadOverview(selectedId);
-            }}
-            disabled={loading}
-          >
-            Refresh
-          </button>
-        </div>
+      <div style={{ marginTop: 24, fontSize: 14, opacity: 0.85 }}>Cashflow Dashboard</div>
 
-        <div className="mt-8 flex flex-wrap items-center gap-3">
-          <div className="text-sm text-white/70">Accounts:</div>
-
+      <div style={{ marginTop: 12, display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ fontSize: 14 }}>
+          Accounts:&nbsp;
           <select
-            className="rounded-md border border-white/15 bg-black px-3 py-2 text-sm"
-            value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
+            value={selectedAccountId}
+            onChange={(e) => setSelectedAccountId(e.target.value)}
+            style={{
+              background: "transparent",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.25)",
+              borderRadius: 8,
+              padding: "6px 10px",
+            }}
           >
-            <option value="all">All accounts</option>
+            <option value="">All accounts</option>
             {accounts.map((a) => (
               <option key={a.id} value={String(a.id)}>
                 {a.name}
               </option>
             ))}
           </select>
-
-          <button
-            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/5"
-            onClick={async () => {
-              setAppliedId(selectedId);
-              await loadOverview(selectedId);
-            }}
-            disabled={loading}
-          >
-            Apply
-          </button>
-
-          <div className="ml-auto text-xs text-white/50">
-            表示中：{appliedLabel}
-          </div>
         </div>
 
-        {error && (
-          <div className="mt-4 rounded-md border border-red-500/40 bg-red-950/20 p-3 text-sm text-red-200">
-            {error}
+        <button
+          onClick={onApply}
+          style={{
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "transparent",
+            color: "#fff",
+            cursor: "pointer",
+          }}
+        >
+          Apply
+        </button>
+
+        <div style={{ flex: 1 }} />
+
+        <button
+          onClick={onRefresh}
+          style={{
+            padding: "6px 10px",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.25)",
+            background: "transparent",
+            color: "#fff",
+            cursor: "pointer",
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div
+        style={{
+          marginTop: 16,
+          border: "1px solid rgba(255,255,255,0.2)",
+          borderRadius: 10,
+          padding: 14,
+          maxWidth: 920,
+        }}
+      >
+        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 8 }}>
+          applied: <b>{accountLabel}</b> {loading ? " (loading...)" : ""}
+        </div>
+
+        {error ? (
+          <div style={{ color: "#ff8080", whiteSpace: "pre-wrap" }}>{error}</div>
+        ) : !overview ? (
+          <div style={{ opacity: 0.75 }}>No data.</div>
+        ) : (
+          <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 13 }}>
+            <div>current_balance: {yen(overview.current_balance)}</div>
+            <div>
+              month: {yen(overview.month_income)} / {yen(overview.month_expense)}
+            </div>
+            <div>
+              planned(30d): {yen(overview.planned_income_30d)} / {yen(overview.planned_expense_30d)}
+            </div>
+            <div>projected_balance: {yen(overview.projected_balance)}</div>
+            <div>
+              risk: {String(overview.risk_level)} (score: {String(overview.risk_score)})
+            </div>
+            <div>computed_at: {overview.computed_at ?? "(null)"}</div>
+
+            <div style={{ marginTop: 10 }}>
+              <button
+                onClick={() => setShowDebug((v) => !v)}
+                style={{
+                  padding: 0,
+                  border: "none",
+                  background: "transparent",
+                  color: "#fff",
+                  cursor: "pointer",
+                  opacity: 0.9,
+                }}
+              >
+                ▶ Debug (API response)
+              </button>
+              {showDebug ? (
+                <pre
+                  style={{
+                    marginTop: 8,
+                    padding: 10,
+                    borderRadius: 8,
+                    background: "rgba(255,255,255,0.06)",
+                    overflowX: "auto",
+                    maxHeight: 320,
+                  }}
+                >
+                  {JSON.stringify(overview, null, 2)}
+                </pre>
+              ) : null}
+            </div>
           </div>
         )}
-
-        <div className="mt-6">
-          {loading ? (
-            <div className="rounded-lg border border-white/15 p-5 text-white/70">
-              読み込み中…
-            </div>
-          ) : (
-            <OverviewCard
-              data={overview}
-              emptyMessage="まだ動きなし（取引データ未登録）"
-            />
-          )}
-        </div>
-
-        <div className="mt-8 text-xs text-white/35">
-          ※ ここは“意思決定用”。細かい明細や分析は別画面に逃がす。
-        </div>
       </div>
     </div>
   );
