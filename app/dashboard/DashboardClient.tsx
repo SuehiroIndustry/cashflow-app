@@ -4,96 +4,34 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
-// actions
-import { getAccounts } from "@/app/dashboard/_actions/getAccounts";
-import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
-import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
+// ✅ 型は _types からのみ import（ルール）
+import type { CashAccount, MonthlyCashBalanceRow } from "./_types";
 
-// 型は _types からだけ import（ルール遵守）
-import type { CashAccount, MonthAgg } from "./_types";
-
+/* =====================
+ * util
+ * ===================== */
 function ym(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
-
-/** "YYYY-MM" -> "YYYY-MM-01"（DBの month(date) に合わせる） */
 function ymToDate(ymStr: string) {
+  // DBの month(date) は YYYY-MM-01 で持つ前提
   return `${ymStr}-01`;
 }
-
 function addMonths(base: Date, delta: number) {
   const d = new Date(base);
   d.setMonth(d.getMonth() + delta);
   return d;
 }
-
 function yen(n: number) {
   const v = Number.isFinite(n) ? Math.trunc(n) : 0;
   return `¥${v.toLocaleString()}`;
 }
 
-/**
- * action 側の引数形式ゆれを吸収
- *  - ({ cash_account_id, month })
- *  - (cash_account_id, month)
- *  - (cash_account_id)
- */
-async function fetchMonthlyCashBalance(cashAccountId: number, monthDate: string): Promise<number> {
-  const fn: any = getMonthlyCashBalance as any;
-
-  // 1) object
-  try {
-    const r = await fn({ cash_account_id: cashAccountId, month: monthDate });
-    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
-    return Number.isFinite(v) ? v : 0;
-  } catch {}
-
-  // 2) 2 args
-  try {
-    const r = await fn(cashAccountId, monthDate);
-    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
-    return Number.isFinite(v) ? v : 0;
-  } catch {}
-
-  // 3) 1 arg
-  try {
-    const r = await fn(cashAccountId);
-    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
-    return Number.isFinite(v) ? v : 0;
-  } catch {}
-
-  return 0;
-}
-
-async function fetchMonthlyIncomeExpense(
-  cashAccountId: number,
-  monthDate: string
-): Promise<{ income: number; expense: number }> {
-  const fn: any = getMonthlyIncomeExpense as any;
-
-  // 1) object
-  try {
-    const r = await fn({ cash_account_id: cashAccountId, month: monthDate });
-    return { income: Number(r?.income ?? 0) || 0, expense: Number(r?.expense ?? 0) || 0 };
-  } catch {}
-
-  // 2) 2 args
-  try {
-    const r = await fn(cashAccountId, monthDate);
-    return { income: Number(r?.income ?? 0) || 0, expense: Number(r?.expense ?? 0) || 0 };
-  } catch {}
-
-  // 3) 1 arg
-  try {
-    const r = await fn(cashAccountId);
-    return { income: Number(r?.income ?? 0) || 0, expense: Number(r?.expense ?? 0) || 0 };
-  } catch {}
-
-  return { income: 0, expense: 0 };
-}
-
+/* =====================
+ * component
+ * ===================== */
 export default function DashboardClient() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -102,132 +40,123 @@ export default function DashboardClient() {
   const [error, setError] = useState("");
 
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
+    null
+  );
 
   const [range, setRange] = useState<6 | 12>(12);
-  const [currentMonth] = useState<string>(() => ym(new Date())); // "YYYY-MM"
+  const currentMonth = useMemo(() => ym(new Date()), []);
 
-  // Overview
+  // overview
   const [currentBalance, setCurrentBalance] = useState(0);
   const [monthIncome, setMonthIncome] = useState(0);
   const [monthExpense, setMonthExpense] = useState(0);
 
-  // Monthly card
+  // monthly card
   const [monthBalance, setMonthBalance] = useState(0);
   const [prevMonthBalance, setPrevMonthBalance] = useState(0);
 
-  // Chart
-  const [series, setSeries] = useState<MonthAgg[]>([]);
+  // chart
+  const [chartRows, setChartRows] = useState<MonthlyCashBalanceRow[]>([]);
 
-  // Auth & accounts
+  /* =====================
+   * init: accounts
+   * ===================== */
   useEffect(() => {
     (async () => {
-      setLoading(true);
-      setError("");
-
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth?.user) {
-        router.push("/login");
-        return;
-      }
-
       try {
-        const acc = await (getAccounts as any)();
-        const list: CashAccount[] = (acc ?? []).map((a: any) => ({
-          id: Number(a.id),
-          name: String(a.name),
-        }));
+        setLoading(true);
+        setError("");
 
-        setAccounts(list);
-        setSelectedAccountId(list[0]?.id ?? null);
+        const { data, error } = await supabase
+          .from("cash_accounts")
+          .select("id,name")
+          .order("id", { ascending: true });
+
+        if (error) throw error;
+
+        const accs = (data ?? []) as CashAccount[];
+        setAccounts(accs);
+        setSelectedAccountId(accs[0]?.id ?? null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load accounts");
+        console.error(e);
+        setError("口座一覧の取得に失敗しました");
       } finally {
         setLoading(false);
       }
     })();
-  }, [router, supabase]);
+  }, [supabase]);
 
-  // Load dashboard data
+  /* =====================
+   * load monthly balances
+   * ===================== */
   useEffect(() => {
     if (!selectedAccountId) return;
 
     (async () => {
-      setError("");
-
       try {
-        const thisYm = currentMonth; // "YYYY-MM"
-        const prevYm = ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -1));
+        setLoading(true);
+        setError("");
 
-        // ✅ DBの month(date) に合わせて "YYYY-MM-01" を渡す
-        const thisMonthDate = ymToDate(thisYm);
-        const prevMonthDate = ymToDate(prevYm);
+        const thisMonthKey = ymToDate(currentMonth);
+        const prevMonthKey = ymToDate(
+          ym(addMonths(new Date(currentMonth + "-01"), -1))
+        );
 
-        // 月次残高
-        const thisBal = await fetchMonthlyCashBalance(selectedAccountId, thisMonthDate);
-        const prevBal = await fetchMonthlyCashBalance(selectedAccountId, prevMonthDate);
+        const from = ymToDate(
+          ym(addMonths(new Date(currentMonth + "-01"), -(range - 1)))
+        );
 
-        setMonthBalance(thisBal);
-        setPrevMonthBalance(prevBal);
-        setCurrentBalance(thisBal);
+        // ✅ monthly_cash_account_balances から直接取る（RLS通る前提）
+        const { data, error } = await supabase
+          .from("monthly_cash_account_balances")
+          .select("month,income,expense,balance")
+          .eq("cash_account_id", selectedAccountId)
+          .gte("month", from)
+          .order("month", { ascending: true });
 
-        // 今月収支
-        const ie = await fetchMonthlyIncomeExpense(selectedAccountId, thisMonthDate);
-        setMonthIncome(ie.income);
-        setMonthExpense(ie.expense);
+        if (error) throw error;
 
-        // グラフ（月配列）
-        const months: string[] = [];
-        for (let i = range - 1; i >= 0; i--) {
-          months.push(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -i))); // "YYYY-MM"
-        }
+        const rows = (data ?? []) as MonthlyCashBalanceRow[];
+        setChartRows(rows);
 
-        const rows: MonthAgg[] = [];
-        for (const m of months) {
-          const monthDate = ymToDate(m); // "YYYY-MM-01"
-          const b = await fetchMonthlyCashBalance(selectedAccountId, monthDate);
-          const ie2 = await fetchMonthlyIncomeExpense(selectedAccountId, monthDate);
-          rows.push({ month: m, balance: b, income: ie2.income, expense: ie2.expense });
-        }
+        const thisMonth = rows.find((r) => r.month === thisMonthKey);
+        const prevMonth = rows.find((r) => r.month === prevMonthKey);
 
-        setSeries(rows);
+        const mb = thisMonth?.balance ?? 0;
+        const pb = prevMonth?.balance ?? 0;
+
+        setMonthBalance(mb);
+        setPrevMonthBalance(pb);
+
+        setCurrentBalance(mb);
+        setMonthIncome(thisMonth?.income ?? 0);
+        setMonthExpense(thisMonth?.expense ?? 0);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load dashboard data");
-        setMonthBalance(0);
-        setPrevMonthBalance(0);
-        setCurrentBalance(0);
-        setMonthIncome(0);
-        setMonthExpense(0);
-        setSeries([]);
+        console.error(e);
+        setError("データ取得中にエラーが発生しました");
+      } finally {
+        setLoading(false);
       }
     })();
-  }, [selectedAccountId, currentMonth, range]);
+  }, [selectedAccountId, range, currentMonth, supabase]);
 
-  const onLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
+  /* =====================
+   * render
+   * ===================== */
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div className="text-red-500">{error}</div>;
 
   return (
-    <main className="min-h-screen bg-black text-white p-6">
-      <div className="mx-auto w-full max-w-6xl">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Cashflow Dashboard</h1>
-          <button
-            onClick={onLogout}
-            className="rounded-md border border-white/20 px-3 py-2 text-sm hover:bg-white/10"
-          >
-            Logout
-          </button>
-        </div>
+    <div>
+      <h1>Cashflow Dashboard</h1>
 
-        <div className="mt-4 flex items-center gap-3 text-sm text-white/70">
-          <span>Account</span>
+      <div style={{ marginBottom: 16 }}>
+        <label>
+          Account:{" "}
           <select
             value={selectedAccountId ?? ""}
-            onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
-            className="rounded-md border border-white/20 bg-black px-3 py-2 text-white"
-            disabled={loading || accounts.length === 0}
+            onChange={(e) => setSelectedAccountId(Number(e.target.value))}
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -235,96 +164,64 @@ export default function DashboardClient() {
               </option>
             ))}
           </select>
-          {selectedAccountId ? <span className="text-xs text-white/40">id: {selectedAccountId}</span> : null}
-        </div>
-
-        {error ? (
-          <div className="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-            <h2 className="text-sm font-semibold text-white/80">Overview</h2>
-            <div className="mt-3 grid grid-cols-2 gap-y-2 text-sm">
-              <div className="text-white/60">Current Balance</div>
-              <div className="text-right">{yen(currentBalance)}</div>
-              <div className="text-white/60">This Month Income</div>
-              <div className="text-right">{yen(monthIncome)}</div>
-              <div className="text-white/60">This Month Expense</div>
-              <div className="text-right">{yen(monthExpense)}</div>
-              <div className="text-white/60">Net</div>
-              <div className="text-right">{yen(monthIncome - monthExpense)}</div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-            <h2 className="text-sm font-semibold text-white/80">月次残高</h2>
-            <div className="mt-2 text-2xl font-semibold">{yen(monthBalance)}</div>
-            <div className="mt-1 text-xs text-white/50">{currentMonth} 時点</div>
-            <div className="mt-4 flex items-center justify-between text-sm">
-              <div className="text-white/60">{currentMonth}</div>
-              <div className="text-white/60">前月比</div>
-            </div>
-            <div className="mt-1 flex items-center justify-between text-sm">
-              <div className="text-white/80">{yen(monthBalance)}</div>
-              <div className="text-white/80">{yen(monthBalance - prevMonthBalance)}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-white/80">Charts</div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setRange(6)}
-                className={`rounded-md border px-3 py-1 text-xs ${
-                  range === 6 ? "border-white/40 bg-white/10" : "border-white/20"
-                }`}
-              >
-                last 6 months
-              </button>
-              <button
-                onClick={() => setRange(12)}
-                className={`rounded-md border px-3 py-1 text-xs ${
-                  range === 12 ? "border-white/40 bg-white/10" : "border-white/20"
-                }`}
-              >
-                last 12 months
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-white/60">
-                <tr className="border-b border-white/10">
-                  <th className="py-2 pr-3">Month</th>
-                  <th className="py-2 pr-3">Balance</th>
-                  <th className="py-2 pr-3">Income</th>
-                  <th className="py-2 pr-3">Expense</th>
-                </tr>
-              </thead>
-              <tbody>
-                {series.map((r) => (
-                  <tr key={r.month} className="border-b border-white/5">
-                    <td className="py-2 pr-3 text-white/70">{r.month}</td>
-                    <td className="py-2 pr-3">{yen(r.balance)}</td>
-                    <td className="py-2 pr-3">{yen(r.income)}</td>
-                    <td className="py-2 pr-3">{yen(r.expense)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-3 text-xs text-white/40">
-            ※ DBの month は date（YYYY-MM-01）なので、フロントの "YYYY-MM" は内部で "-01" を付けて照合している。
-          </div>
-        </div>
+        </label>
+        <span style={{ marginLeft: 12 }}>id: {selectedAccountId ?? "-"}</span>
       </div>
-    </main>
+
+      <div style={{ marginBottom: 24 }}>
+        <h2>Overview</h2>
+        <div>Current Balance: {yen(currentBalance)}</div>
+        <div>This Month Income: {yen(monthIncome)}</div>
+        <div>This Month Expense: {yen(monthExpense)}</div>
+        <div>Net: {yen(monthIncome - monthExpense)}</div>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <h2>月次残高</h2>
+        <div>{yen(monthBalance)}</div>
+        <div>前月比: {yen(monthBalance - prevMonthBalance)}</div>
+      </div>
+
+      <div>
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setRange(6)}>last 6 months</button>{" "}
+          <button onClick={() => setRange(12)}>last 12 months</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", paddingRight: 16 }}>Month</th>
+              <th style={{ textAlign: "right", paddingRight: 16 }}>Balance</th>
+              <th style={{ textAlign: "right", paddingRight: 16 }}>Income</th>
+              <th style={{ textAlign: "right", paddingRight: 16 }}>Expense</th>
+            </tr>
+          </thead>
+          <tbody>
+            {chartRows.map((r) => (
+              <tr key={r.month}>
+                <td style={{ paddingRight: 16 }}>{r.month}</td>
+                <td style={{ textAlign: "right", paddingRight: 16 }}>
+                  {yen(r.balance)}
+                </td>
+                <td style={{ textAlign: "right", paddingRight: 16 }}>
+                  {yen(r.income)}
+                </td>
+                <td style={{ textAlign: "right", paddingRight: 16 }}>
+                  {yen(r.expense)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {!chartRows.length && (
+          <div style={{ marginTop: 12, opacity: 0.7 }}>
+            monthly_cash_account_balances に該当データがありません（RLS or
+            データ未作成の可能性）
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
