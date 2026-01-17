@@ -1,13 +1,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-export type MonthlyBalanceRow = {
-  month: string;
-  income: number;
-  expense: number;
-  balance: number;
-};
+import type { MonthlyBalanceRow } from "../_types";
 
 export async function getMonthlyBalance(accountId: string): Promise<MonthlyBalanceRow[]> {
   if (!accountId) return [];
