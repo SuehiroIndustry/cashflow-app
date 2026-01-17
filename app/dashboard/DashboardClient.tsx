@@ -4,75 +4,30 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
-// 既存 actions（収入/支出は cash_flows 集計の想定で残す）
-import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
+// actions
+import { getAccounts } from "@/app/dashboard/_actions/getAccounts";
+import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
 
-type Account = { id: string; name: string };
-
-type MonthAgg = {
-  month: string; // "YYYY-MM"
-  balance: number;
-  income: number;
-  expense: number;
-};
+// ✅ 型はここだけから import（DashboardClient.tsx のルール）
+import type { CashAccount, MonthlyCashBalanceRow, MonthAgg } from "./_types";
 
 function ym(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
+function ymToDate(ymStr: string) {
+  // "YYYY-MM" -> "YYYY-MM-01"
+  return `${ymStr}-01`;
+}
 function addMonths(base: Date, delta: number) {
   const d = new Date(base);
   d.setMonth(d.getMonth() + delta);
   return d;
 }
-function monthStartISO(ymStr: string) {
-  // v_cash_monthly_balance_by_account.month は date（= 月初日）想定
-  return `${ymStr}-01`;
-}
 function yen(n: number) {
-  return `¥${Math.trunc(n).toLocaleString()}`;
-}
-
-/**
- * getMonthlyIncomeExpense の引数形式揺れを吸収
- * - ({ cash_account_id, month })
- * - (cash_account_id, month)
- * - (cash_account_id)
- */
-async function fetchMonthlyIncomeExpense(
-  cashAccountId: string,
-  monthYm: string
-): Promise<{ income: number; expense: number }> {
-  const fn: any = getMonthlyIncomeExpense as any;
-
-  // month は action 側が 'YYYY-MM' を想定してる可能性があるので monthYm を渡す
-  // （もし action が 'YYYY-MM-01' を期待してたら、ここだけ monthStartISO(monthYm) に変えてOK）
-  try {
-    const r = await fn({ cash_account_id: cashAccountId, month: monthYm });
-    return {
-      income: Number(r?.income ?? 0) || 0,
-      expense: Number(r?.expense ?? 0) || 0,
-    };
-  } catch {}
-
-  try {
-    const r = await fn(cashAccountId, monthYm);
-    return {
-      income: Number(r?.income ?? 0) || 0,
-      expense: Number(r?.expense ?? 0) || 0,
-    };
-  } catch {}
-
-  try {
-    const r = await fn(cashAccountId);
-    return {
-      income: Number(r?.income ?? 0) || 0,
-      expense: Number(r?.expense ?? 0) || 0,
-    };
-  } catch {}
-
-  return { income: 0, expense: 0 };
+  const v = Number.isFinite(n) ? Math.trunc(n) : 0;
+  return `¥${v.toLocaleString()}`;
 }
 
 export default function DashboardClient() {
@@ -82,8 +37,8 @@ export default function DashboardClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+  const [accounts, setAccounts] = useState<CashAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   const [range, setRange] = useState<6 | 12>(12);
   const [currentMonth] = useState<string>(() => ym(new Date()));
@@ -100,7 +55,7 @@ export default function DashboardClient() {
   // Chart
   const [series, setSeries] = useState<MonthAgg[]>([]);
 
-  // Auth & accounts（cash_accounts を直接読む：RLSで user_id が効く前提）
+  // Auth & accounts
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -112,27 +67,24 @@ export default function DashboardClient() {
         return;
       }
 
-      const { data, error: accErr } = await supabase
-        .from("cash_accounts")
-        .select("id,name")
-        .order("id", { ascending: true });
+      try {
+        const acc = await getAccounts();
+        const list: CashAccount[] = (acc ?? []).map((a: any) => ({
+          id: Number(a.id),
+          name: String(a.name),
+        }));
 
-      if (accErr) {
-        setError(accErr.message);
+        setAccounts(list);
+        setSelectedAccountId(list[0]?.id ?? null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load accounts");
+      } finally {
         setLoading(false);
-        return;
       }
-
-      const list: Account[] =
-        (data ?? []).map((a: any) => ({ id: String(a.id), name: String(a.name) })) ?? [];
-
-      setAccounts(list);
-      setSelectedAccountId(list[0]?.id ?? "");
-      setLoading(false);
     })();
   }, [router, supabase]);
 
-  // Load dashboard data（残高は v_cash_monthly_balance_by_account を読む）
+  // Load dashboard data (✅ 1回の action 呼び出しで全部作る)
   useEffect(() => {
     if (!selectedAccountId) return;
 
@@ -140,70 +92,51 @@ export default function DashboardClient() {
       setError("");
 
       try {
-        const thisYm = currentMonth;
-        const prevYm = ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -1));
+        // action は「直近12件の配列」を返す前提（君の現状の実装）
+        const rows = (await getMonthlyCashBalance(selectedAccountId)) as MonthlyCashBalanceRow[];
 
-        const thisMonthDate = monthStartISO(thisYm);
-        const prevMonthDate = monthStartISO(prevYm);
-
-        // 1) 月次残高（ビュー）
-        const { data: balRows, error: balErr } = await supabase
-          .from("v_cash_monthly_balance_by_account")
-          .select("month,balance")
-          .eq("cash_account_id", Number(selectedAccountId))
-          .in("month", [thisMonthDate, prevMonthDate]);
-
-        if (balErr) throw new Error(balErr.message);
-
-        const balMap = new Map<string, number>();
-        for (const r of balRows ?? []) {
-          balMap.set(String((r as any).month).slice(0, 10), Number((r as any).balance ?? 0) || 0);
+        // month(date) をキーにMap化: "2026-01-01" -> row
+        const map = new Map<string, MonthlyCashBalanceRow>();
+        for (const r of rows ?? []) {
+          const k = String(r.month);
+          map.set(k, r);
         }
 
-        const thisBal = balMap.get(thisMonthDate) ?? 0;
-        const prevBal = balMap.get(prevMonthDate) ?? 0;
+        const thisYm = currentMonth;
+        const thisKey = ymToDate(thisYm); // "YYYY-MM-01"
+        const prevKey = ymToDate(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -1)));
+
+        const thisRow = map.get(thisKey);
+        const prevRow = map.get(prevKey);
+
+        const thisBal = Number(thisRow?.balance ?? 0) || 0;
+        const prevBal = Number(prevRow?.balance ?? 0) || 0;
 
         setMonthBalance(thisBal);
         setPrevMonthBalance(prevBal);
         setCurrentBalance(thisBal);
 
-        // 2) 今月の収入/支出（action）
-        const ie = await fetchMonthlyIncomeExpense(String(selectedAccountId), thisYm);
-        setMonthIncome(ie.income);
-        setMonthExpense(ie.expense);
+        setMonthIncome(Number(thisRow?.income ?? 0) || 0);
+        setMonthExpense(Number(thisRow?.expense ?? 0) || 0);
 
-        // 3) グラフ（月配列）
-        const monthsYm: string[] = [];
+        // グラフ用 months を作って、map から引く（無ければ0）
+        const months: string[] = [];
         for (let i = range - 1; i >= 0; i--) {
-          monthsYm.push(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -i)));
-        }
-        const monthsDate = monthsYm.map(monthStartISO);
-
-        // 3-1) バランス（ビューをまとめて取得）
-        const { data: chartBalRows, error: chartBalErr } = await supabase
-          .from("v_cash_monthly_balance_by_account")
-          .select("month,balance")
-          .eq("cash_account_id", Number(selectedAccountId))
-          .in("month", monthsDate)
-          .order("month", { ascending: true });
-
-        if (chartBalErr) throw new Error(chartBalErr.message);
-
-        const chartBalMap = new Map<string, number>();
-        for (const r of chartBalRows ?? []) {
-          const k = String((r as any).month).slice(0, 10); // YYYY-MM-01
-          chartBalMap.set(k, Number((r as any).balance ?? 0) || 0);
+          months.push(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -i)));
         }
 
-        // 3-2) 収入/支出（actionを月ごとに）
-        const rows: MonthAgg[] = [];
-        for (const m of monthsYm) {
-          const b = chartBalMap.get(monthStartISO(m)) ?? 0;
-          const ie2 = await fetchMonthlyIncomeExpense(String(selectedAccountId), m);
-          rows.push({ month: m, balance: b, income: ie2.income, expense: ie2.expense });
-        }
+        const chart: MonthAgg[] = months.map((m) => {
+          const key = ymToDate(m);
+          const r = map.get(key);
+          return {
+            month: m, // 表示は "YYYY-MM"
+            balance: Number(r?.balance ?? 0) || 0,
+            income: Number(r?.income ?? 0) || 0,
+            expense: Number(r?.expense ?? 0) || 0,
+          };
+        });
 
-        setSeries(rows);
+        setSeries(chart);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load dashboard data");
         setMonthBalance(0);
@@ -214,7 +147,7 @@ export default function DashboardClient() {
         setSeries([]);
       }
     })();
-  }, [selectedAccountId, currentMonth, range, supabase]);
+  }, [selectedAccountId, currentMonth, range]);
 
   const onLogout = async () => {
     await supabase.auth.signOut();
@@ -237,8 +170,8 @@ export default function DashboardClient() {
         <div className="mt-4 flex items-center gap-3 text-sm text-white/70">
           <span>Account</span>
           <select
-            value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(e.target.value)}
+            value={selectedAccountId ?? ""}
+            onChange={(e) => setSelectedAccountId(Number(e.target.value))}
             className="rounded-md border border-white/20 bg-black px-3 py-2 text-white"
             disabled={loading || accounts.length === 0}
           >
@@ -336,8 +269,7 @@ export default function DashboardClient() {
           </div>
 
           <div className="mt-3 text-xs text-white/40">
-            ※ 残高は <code>v_cash_monthly_balance_by_account</code>（ビュー）から取得。
-            monthly_cash_account_balances が 0件でも数字が出る。
+            ※ monthly_cash_account_balances（スナップショット）から表示しています。
           </div>
         </div>
       </div>
