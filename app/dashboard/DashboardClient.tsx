@@ -1,283 +1,220 @@
-// app/dashboard/DashboardClient.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@/utils/supabase/client";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { createBrowserClient } from "@supabase/ssr";
+import { OverviewCard } from "./OverviewCard";
 
-type CashAccountRow = {
-  id: string;
+type CashAccount = {
+  id: number;
   name: string;
 };
 
-type CashFlowRow = {
-  id: number;
-  cash_account_id: string;
-  date: string; // YYYY-MM-DD
-  type: "income" | "expense";
-  amount: number;
-  currency: string;
-  description: string | null;
-  cash_category_id: number | null;
-  created_at: string;
+type Overview = {
+  current_balance: number;
+  month_income: number;
+  month_expense: number;
+  net_month: number;
+  planned_income_30d: number;
+  planned_expense_30d: number;
+  net_planned_30d: number;
+  projected_balance: number;
+  projected_balance_30d?: number;
+  risk_level: string;
+  risk_score: number;
+  computed_at: string | null;
 };
 
-type Summary = {
-  account: "all" | string | null;
-  income: number;
-  expense: number;
-  balance: number;
-};
+function toInt(v: unknown): number {
+  const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : 0;
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
 
-export default function DashboardClient(props: {
-  userEmail: string;
-  accounts: CashAccountRow[];
-  initialFlows: CashFlowRow[];
-}) {
-  const { userEmail, accounts, initialFlows } = props;
+function toOverview(v: any): Overview {
+  return {
+    current_balance: toInt(v?.current_balance),
+    month_income: toInt(v?.month_income),
+    month_expense: toInt(v?.month_expense),
+    net_month: toInt(v?.net_month),
+    planned_income_30d: toInt(v?.planned_income_30d),
+    planned_expense_30d: toInt(v?.planned_expense_30d),
+    net_planned_30d: toInt(v?.net_planned_30d),
+    projected_balance: toInt(v?.projected_balance),
+    projected_balance_30d: toInt(v?.projected_balance_30d),
+    risk_level: String(v?.risk_level ?? "GREEN"),
+    risk_score: toInt(v?.risk_score),
+    computed_at: v?.computed_at ?? null,
+  };
+}
 
-  const supabase = useMemo(() => createClient(), []);
-  const [selectedAccountId, setSelectedAccountId] = useState<string | "all">(
-    "all"
-  );
+export default function DashboardClient() {
+  const supabase = useMemo(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    return createBrowserClient(url, key);
+  }, []);
 
-  const [summary, setSummary] = useState<Summary>({
-    account: "all",
-    income: 0,
-    expense: 0,
-    balance: 0,
-  });
-  const [summaryLoading, setSummaryLoading] = useState(false);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<CashAccount[]>([]);
+  const [selectedId, setSelectedId] = useState<string>("all");
+  const [appliedId, setAppliedId] = useState<string>("all");
 
-  const accountNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const a of accounts) m.set(a.id, a.name);
-    return m;
-  }, [accounts]);
+  const [loading, setLoading] = useState(false);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const accountLabel = useMemo(() => {
-    if (selectedAccountId === "all") return "All";
-    return accountNameById.get(selectedAccountId) ?? selectedAccountId;
-  }, [selectedAccountId, accountNameById]);
+  // 口座一覧を Supabase から取得（RLS前提）
+  const loadAccounts = useCallback(async () => {
+    setError(null);
 
-  const filteredFlows = useMemo(() => {
-    if (selectedAccountId === "all") return initialFlows;
-    return initialFlows.filter((f) => f.cash_account_id === selectedAccountId);
-  }, [initialFlows, selectedAccountId]);
+    const { data, error } = await supabase
+      .from("cash_accounts")
+      .select("id,name")
+      .order("id", { ascending: true });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setSummaryLoading(true);
-      setSummaryError(null);
-
-      try {
-        const url = new URL("/api/summary", window.location.origin);
-        url.searchParams.set(
-          "account",
-          selectedAccountId === "all" ? "all" : selectedAccountId
-        );
-
-        const res = await fetch(url.toString(), {
-          method: "GET",
-          cache: "no-store",
-          headers: { "Content-Type": "application/json" },
-        });
-
-        const json = await res.json();
-
-        if (!res.ok) {
-          const msg =
-            typeof json?.error === "string"
-              ? json.error
-              : `Failed to fetch summary (${res.status})`;
-          throw new Error(msg);
-        }
-
-        if (!cancelled) {
-          setSummary({
-            account: json.account ?? (selectedAccountId === "all" ? "all" : selectedAccountId),
-            income: Number(json.income ?? 0),
-            expense: Number(json.expense ?? 0),
-            balance: Number(json.balance ?? 0),
-          });
-        }
-      } catch (e: any) {
-        if (!cancelled) {
-          setSummary({
-            account: selectedAccountId === "all" ? "all" : selectedAccountId,
-            income: 0,
-            expense: 0,
-            balance: 0,
-          });
-          setSummaryError(e?.message ?? "Unknown error");
-        }
-      } finally {
-        if (!cancelled) setSummaryLoading(false);
-      }
+    if (error) {
+      setError(error.message);
+      setAccounts([]);
+      return;
     }
 
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedAccountId]);
+    const rows = Array.isArray(data) ? data : [];
+    const mapped: CashAccount[] = rows
+      .filter((r: any) => r && r.id != null)
+      .map((r: any) => ({ id: Number(r.id), name: String(r.name ?? `口座#${r.id}`) }));
 
-  const yen = (n: number) =>
-    new Intl.NumberFormat("ja-JP", {
-      style: "currency",
-      currency: "JPY",
-      maximumFractionDigits: 0,
-    }).format(Number.isFinite(n) ? n : 0);
+    setAccounts(mapped);
+  }, [supabase]);
 
-  async function onLogout() {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  }
+  const loadOverview = useCallback(async (accountId: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const qs =
+        accountId === "all"
+          ? ""
+          : `?cash_account_id=${encodeURIComponent(accountId)}`;
+
+      const res = await fetch(`/api/overview${qs}`, { cache: "no-store" });
+      const json = await res.json();
+
+      if (!res.ok) {
+        setError(json?.error ?? "API error");
+        setOverview(null);
+        return;
+      }
+
+      // データが実質ゼロで computed_at も無いなら「未登録」扱いにしてカード側でメッセージ
+      const ov = toOverview(json);
+      const isEmpty =
+        (!ov.computed_at || ov.computed_at === "—") &&
+        ov.current_balance === 0 &&
+        ov.month_income === 0 &&
+        ov.month_expense === 0 &&
+        ov.planned_income_30d === 0 &&
+        ov.planned_expense_30d === 0;
+
+      setOverview(isEmpty ? null : ov);
+    } catch (e: any) {
+      setError(e?.message ?? "fetch failed");
+      setOverview(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // 初回ロード
+    (async () => {
+      await loadAccounts();
+      await loadOverview("all");
+    })();
+  }, [loadAccounts, loadOverview]);
+
+  const appliedLabel = useMemo(() => {
+    if (appliedId === "all") return "All accounts";
+    const idNum = Number(appliedId);
+    const a = accounts.find((x) => x.id === idNum);
+    return a?.name ?? `口座#${appliedId}`;
+  }, [appliedId, accounts]);
 
   return (
-    <main className="min-h-screen bg-black text-white p-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Cashflow Dashboard</h1>
-        </div>
-        <button
-          onClick={onLogout}
-          className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
-        >
-          Logout
-        </button>
-      </header>
-
-      <section className="mt-10 max-w-5xl mx-auto">
-        <div className="mb-4">
-          <h2 className="text-3xl font-semibold">Dashboard</h2>
-          <div className="mt-2 text-sm text-white/60">
-            <div>Logged in: {userEmail}</div>
-            <div>Account: {accountLabel}</div>
+    <div className="min-h-screen bg-black text-white">
+      <div className="mx-auto max-w-5xl px-6 py-10">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold">Cashflow Dashboard</h1>
+            <div className="mt-1 text-sm text-white/60">
+              経営者が“今”見るための画面
+            </div>
           </div>
+
+          <button
+            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/5"
+            onClick={async () => {
+              setAppliedId(selectedId);
+              await loadOverview(selectedId);
+            }}
+            disabled={loading}
+          >
+            Refresh
+          </button>
         </div>
 
-        {/* Account filter */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="text-sm text-white/60 mb-3">Account filter</div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSelectedAccountId("all")}
-              className={[
-                "rounded-full border px-3 py-1 text-sm",
-                selectedAccountId === "all"
-                  ? "border-white/40 bg-white/10"
-                  : "border-white/10 bg-transparent hover:bg-white/5",
-              ].join(" ")}
-            >
-              All
-            </button>
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <div className="text-sm text-white/70">Accounts:</div>
 
+          <select
+            className="rounded-md border border-white/15 bg-black px-3 py-2 text-sm"
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+          >
+            <option value="all">All accounts</option>
             {accounts.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => setSelectedAccountId(a.id)}
-                className={[
-                  "rounded-full border px-3 py-1 text-sm",
-                  selectedAccountId === a.id
-                    ? "border-white/40 bg-white/10"
-                    : "border-white/10 bg-transparent hover:bg-white/5",
-                ].join(" ")}
-                title={a.id}
-              >
+              <option key={a.id} value={String(a.id)}>
                 {a.name}
-              </button>
+              </option>
             ))}
+          </select>
+
+          <button
+            className="rounded-md border border-white/15 px-3 py-2 text-sm hover:bg-white/5"
+            onClick={async () => {
+              setAppliedId(selectedId);
+              await loadOverview(selectedId);
+            }}
+            disabled={loading}
+          >
+            Apply
+          </button>
+
+          <div className="ml-auto text-xs text-white/50">
+            表示中：{appliedLabel}
           </div>
         </div>
 
-        {/* Summary cards */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div className="text-sm text-white/60">Balance</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {summaryLoading ? "…" : yen(summary.balance)}
-            </div>
-            <div className="mt-2 text-xs text-white/40">
-              via API: /api/summary
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div className="text-sm text-white/60">Income</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {summaryLoading ? "…" : yen(summary.income)}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div className="text-sm text-white/60">Expense</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {summaryLoading ? "…" : yen(summary.expense)}
-            </div>
-          </div>
-        </div>
-
-        {summaryError && (
-          <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-            Summary error: {summaryError}
+        {error && (
+          <div className="mt-4 rounded-md border border-red-500/40 bg-red-950/20 p-3 text-sm text-red-200">
+            {error}
           </div>
         )}
 
-        {/* Cash flows */}
-        <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Cash Flows</h3>
-            <div className="text-xs text-white/50">
-              Latest: {filteredFlows.length} rows (max 100)
+        <div className="mt-6">
+          {loading ? (
+            <div className="rounded-lg border border-white/15 p-5 text-white/70">
+              読み込み中…
             </div>
-          </div>
-
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-white/60">
-                <tr className="border-b border-white/10">
-                  <th className="py-2 text-left font-medium">date</th>
-                  <th className="py-2 text-left font-medium">type</th>
-                  <th className="py-2 text-right font-medium">amount</th>
-                  <th className="py-2 text-left font-medium">description</th>
-                  <th className="py-2 text-left font-medium">account_id</th>
-                  <th className="py-2 text-right font-medium">id</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFlows.map((f) => (
-                  <tr key={f.id} className="border-b border-white/5">
-                    <td className="py-2">{f.date}</td>
-                    <td className="py-2">{f.type}</td>
-                    <td className="py-2 text-right">
-                      {yen(Number(f.amount ?? 0))}
-                    </td>
-                    <td className="py-2">
-                      {f.description ?? ""}
-                    </td>
-                    <td className="py-2">{f.cash_account_id}</td>
-                    <td className="py-2 text-right">{f.id}</td>
-                  </tr>
-                ))}
-                {filteredFlows.length === 0 && (
-                  <tr>
-                    <td className="py-6 text-white/50" colSpan={6}>
-                      No rows.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mt-3 text-xs text-white/40">
-            ※ summaryは API を叩いて view を読む設計（重くしない）
-          </div>
+          ) : (
+            <OverviewCard
+              data={overview}
+              emptyMessage="まだ動きなし（取引データ未登録）"
+            />
+          )}
         </div>
-      </section>
-    </main>
+
+        <div className="mt-8 text-xs text-white/35">
+          ※ ここは“意思決定用”。細かい明細や分析は別画面に逃がす。
+        </div>
+      </div>
+    </div>
   );
 }
