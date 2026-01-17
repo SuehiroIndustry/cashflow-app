@@ -7,27 +7,91 @@ import { createClient } from "@/utils/supabase/client";
 // actions
 import { getAccounts } from "@/app/dashboard/_actions/getAccounts";
 import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
+import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
 
-// ✅ 型はここだけから import（DashboardClient.tsx のルール）
-import type { CashAccount, MonthlyCashBalanceRow, MonthAgg } from "./_types";
+// 型は _types からだけ import（ルール遵守）
+import type { CashAccount, MonthAgg } from "./_types";
 
 function ym(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
+
+/** "YYYY-MM" -> "YYYY-MM-01"（DBの month(date) に合わせる） */
 function ymToDate(ymStr: string) {
-  // "YYYY-MM" -> "YYYY-MM-01"
   return `${ymStr}-01`;
 }
+
 function addMonths(base: Date, delta: number) {
   const d = new Date(base);
   d.setMonth(d.getMonth() + delta);
   return d;
 }
+
 function yen(n: number) {
   const v = Number.isFinite(n) ? Math.trunc(n) : 0;
   return `¥${v.toLocaleString()}`;
+}
+
+/**
+ * action 側の引数形式ゆれを吸収
+ *  - ({ cash_account_id, month })
+ *  - (cash_account_id, month)
+ *  - (cash_account_id)
+ */
+async function fetchMonthlyCashBalance(cashAccountId: number, monthDate: string): Promise<number> {
+  const fn: any = getMonthlyCashBalance as any;
+
+  // 1) object
+  try {
+    const r = await fn({ cash_account_id: cashAccountId, month: monthDate });
+    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  } catch {}
+
+  // 2) 2 args
+  try {
+    const r = await fn(cashAccountId, monthDate);
+    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  } catch {}
+
+  // 3) 1 arg
+  try {
+    const r = await fn(cashAccountId);
+    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  } catch {}
+
+  return 0;
+}
+
+async function fetchMonthlyIncomeExpense(
+  cashAccountId: number,
+  monthDate: string
+): Promise<{ income: number; expense: number }> {
+  const fn: any = getMonthlyIncomeExpense as any;
+
+  // 1) object
+  try {
+    const r = await fn({ cash_account_id: cashAccountId, month: monthDate });
+    return { income: Number(r?.income ?? 0) || 0, expense: Number(r?.expense ?? 0) || 0 };
+  } catch {}
+
+  // 2) 2 args
+  try {
+    const r = await fn(cashAccountId, monthDate);
+    return { income: Number(r?.income ?? 0) || 0, expense: Number(r?.expense ?? 0) || 0 };
+  } catch {}
+
+  // 3) 1 arg
+  try {
+    const r = await fn(cashAccountId);
+    return { income: Number(r?.income ?? 0) || 0, expense: Number(r?.expense ?? 0) || 0 };
+  } catch {}
+
+  return { income: 0, expense: 0 };
 }
 
 export default function DashboardClient() {
@@ -41,7 +105,7 @@ export default function DashboardClient() {
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   const [range, setRange] = useState<6 | 12>(12);
-  const [currentMonth] = useState<string>(() => ym(new Date()));
+  const [currentMonth] = useState<string>(() => ym(new Date())); // "YYYY-MM"
 
   // Overview
   const [currentBalance, setCurrentBalance] = useState(0);
@@ -68,7 +132,7 @@ export default function DashboardClient() {
       }
 
       try {
-        const acc = await getAccounts();
+        const acc = await (getAccounts as any)();
         const list: CashAccount[] = (acc ?? []).map((a: any) => ({
           id: Number(a.id),
           name: String(a.name),
@@ -84,7 +148,7 @@ export default function DashboardClient() {
     })();
   }, [router, supabase]);
 
-  // Load dashboard data (✅ 1回の action 呼び出しで全部作る)
+  // Load dashboard data
   useEffect(() => {
     if (!selectedAccountId) return;
 
@@ -92,51 +156,41 @@ export default function DashboardClient() {
       setError("");
 
       try {
-        // action は「直近12件の配列」を返す前提（君の現状の実装）
-        const rows = (await getMonthlyCashBalance(selectedAccountId)) as MonthlyCashBalanceRow[];
+        const thisYm = currentMonth; // "YYYY-MM"
+        const prevYm = ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -1));
 
-        // month(date) をキーにMap化: "2026-01-01" -> row
-        const map = new Map<string, MonthlyCashBalanceRow>();
-        for (const r of rows ?? []) {
-          const k = String(r.month);
-          map.set(k, r);
-        }
+        // ✅ DBの month(date) に合わせて "YYYY-MM-01" を渡す
+        const thisMonthDate = ymToDate(thisYm);
+        const prevMonthDate = ymToDate(prevYm);
 
-        const thisYm = currentMonth;
-        const thisKey = ymToDate(thisYm); // "YYYY-MM-01"
-        const prevKey = ymToDate(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -1)));
-
-        const thisRow = map.get(thisKey);
-        const prevRow = map.get(prevKey);
-
-        const thisBal = Number(thisRow?.balance ?? 0) || 0;
-        const prevBal = Number(prevRow?.balance ?? 0) || 0;
+        // 月次残高
+        const thisBal = await fetchMonthlyCashBalance(selectedAccountId, thisMonthDate);
+        const prevBal = await fetchMonthlyCashBalance(selectedAccountId, prevMonthDate);
 
         setMonthBalance(thisBal);
         setPrevMonthBalance(prevBal);
         setCurrentBalance(thisBal);
 
-        setMonthIncome(Number(thisRow?.income ?? 0) || 0);
-        setMonthExpense(Number(thisRow?.expense ?? 0) || 0);
+        // 今月収支
+        const ie = await fetchMonthlyIncomeExpense(selectedAccountId, thisMonthDate);
+        setMonthIncome(ie.income);
+        setMonthExpense(ie.expense);
 
-        // グラフ用 months を作って、map から引く（無ければ0）
+        // グラフ（月配列）
         const months: string[] = [];
         for (let i = range - 1; i >= 0; i--) {
-          months.push(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -i)));
+          months.push(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -i))); // "YYYY-MM"
         }
 
-        const chart: MonthAgg[] = months.map((m) => {
-          const key = ymToDate(m);
-          const r = map.get(key);
-          return {
-            month: m, // 表示は "YYYY-MM"
-            balance: Number(r?.balance ?? 0) || 0,
-            income: Number(r?.income ?? 0) || 0,
-            expense: Number(r?.expense ?? 0) || 0,
-          };
-        });
+        const rows: MonthAgg[] = [];
+        for (const m of months) {
+          const monthDate = ymToDate(m); // "YYYY-MM-01"
+          const b = await fetchMonthlyCashBalance(selectedAccountId, monthDate);
+          const ie2 = await fetchMonthlyIncomeExpense(selectedAccountId, monthDate);
+          rows.push({ month: m, balance: b, income: ie2.income, expense: ie2.expense });
+        }
 
-        setSeries(chart);
+        setSeries(rows);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load dashboard data");
         setMonthBalance(0);
@@ -171,7 +225,7 @@ export default function DashboardClient() {
           <span>Account</span>
           <select
             value={selectedAccountId ?? ""}
-            onChange={(e) => setSelectedAccountId(Number(e.target.value))}
+            onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
             className="rounded-md border border-white/20 bg-black px-3 py-2 text-white"
             disabled={loading || accounts.length === 0}
           >
@@ -181,9 +235,7 @@ export default function DashboardClient() {
               </option>
             ))}
           </select>
-          {selectedAccountId ? (
-            <span className="text-xs text-white/40">id: {selectedAccountId}</span>
-          ) : null}
+          {selectedAccountId ? <span className="text-xs text-white/40">id: {selectedAccountId}</span> : null}
         </div>
 
         {error ? (
@@ -269,7 +321,7 @@ export default function DashboardClient() {
           </div>
 
           <div className="mt-3 text-xs text-white/40">
-            ※ monthly_cash_account_balances（スナップショット）から表示しています。
+            ※ DBの month は date（YYYY-MM-01）なので、フロントの "YYYY-MM" は内部で "-01" を付けて照合している。
           </div>
         </div>
       </div>
