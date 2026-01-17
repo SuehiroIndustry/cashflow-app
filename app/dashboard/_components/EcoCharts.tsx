@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import type { MonthlyBalanceRow } from "./_actions/getMonthlyBalance";
+import type { MonthlyBalanceRow } from "../_actions/getMonthlyBalance";
 
 export default function EcoCharts(props: {
   accountName: string;
