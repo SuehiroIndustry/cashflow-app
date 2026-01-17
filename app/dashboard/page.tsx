@@ -1,3 +1,4 @@
+// app/dashboard/page.tsx
 import DashboardClient from "./DashboardClient";
 
 export const dynamic = "force-dynamic";
