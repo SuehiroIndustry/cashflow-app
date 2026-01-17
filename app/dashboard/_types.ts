@@ -1,8 +1,7 @@
+// app/dashboard/_types.ts
+
 export type RiskLevel = "GREEN" | "YELLOW" | "RED" | string;
 
-/**
- * Overview（単月サマリ）
- */
 export type OverviewPayload = {
   current_balance: number;
   month_income: number;
@@ -23,13 +22,16 @@ export type OverviewPayload = {
   debug_rows?: unknown;
 };
 
-/**
- * Charts（月次推移用）
- * → EcoCharts.tsx で使用
- */
 export type MonthlyBalanceRow = {
-  month: string;     // '2026-01' or '2026-01-01'
-  income: number;    // 月間収入
-  expense: number;   // 月間支出（正の数）
-  balance: number;   // 月末残高
+  month: string;   // "2026-01" みたいな想定
+  income: number;
+  expense: number;
+  balance: number; // 月末残高（想定）
+};
+
+export type AccountRow = {
+  id: string;
+  name: string;
+  type: string;       // "cash" | "bank" | ...（DBに合わせる）
+  is_default: boolean;
 };
