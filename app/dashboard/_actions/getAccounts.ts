@@ -1,6 +1,6 @@
 "use server";
 
-import { createServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type AccountRow = {
   id: string;
@@ -13,7 +13,7 @@ export type AccountRow = {
 };
 
 export async function getAccounts(): Promise<AccountRow[]> {
-  const supabase = await createServerClient();
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("accounts")
