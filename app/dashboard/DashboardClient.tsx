@@ -7,10 +7,9 @@ import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
+import type { AccountRow, MonthlyBalanceRow, OverviewPayload } from "./_types";
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
-
-import type { AccountRow, MonthlyBalanceRow, OverviewPayload } from "./_types";
 
 type RiskLevel = "GREEN" | "YELLOW" | "RED" | string;
 
