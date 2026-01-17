@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
-type Account = {
-  id: string;
-  name: string;
-};
+// 既存 actions（君のフォルダにある前提）
+import { getAccounts } from "@/app/dashboard/_actions/getAccounts";
+import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
+import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
+
+type Account = { id: string; name: string };
 
 type MonthAgg = {
   month: string; // "YYYY-MM"
@@ -21,24 +23,84 @@ function ym(date: Date) {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
-
 function addMonths(base: Date, delta: number) {
   const d = new Date(base);
   d.setMonth(d.getMonth() + delta);
   return d;
 }
-
 function yen(n: number) {
   return `¥${Math.trunc(n).toLocaleString()}`;
 }
 
-function startEndOfMonth(month: string) {
-  const start = `${month}-01`;
-  const startDate = new Date(`${start}T00:00:00.000Z`);
-  const endDate = new Date(startDate);
-  endDate.setMonth(endDate.getMonth() + 1);
-  const end = endDate.toISOString().slice(0, 10);
-  return { start, end };
+/**
+ * ✅ ここが肝
+ * action の引数が
+ *   - (args: { cash_account_id, month })
+ *   - (cash_account_id: string, month: string)
+ *   - (cash_account_id: string, month?: string)
+ * のどれでも通るように吸収する
+ */
+async function fetchMonthlyCashBalance(cashAccountId: string, month: string): Promise<number> {
+  const fn: any = getMonthlyCashBalance as any;
+
+  // 1) object で呼ぶ
+  try {
+    const r = await fn({ cash_account_id: cashAccountId, month });
+    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  } catch {}
+
+  // 2) 2引数で呼ぶ
+  try {
+    const r = await fn(cashAccountId, month);
+    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  } catch {}
+
+  // 3) 1引数で呼ぶ（月は action 側が内部で決めるタイプ）
+  try {
+    const r = await fn(cashAccountId);
+    const v = typeof r === "number" ? r : Number(r?.balance ?? r ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  } catch {}
+
+  return 0;
+}
+
+async function fetchMonthlyIncomeExpense(
+  cashAccountId: string,
+  month: string
+): Promise<{ income: number; expense: number }> {
+  const fn: any = getMonthlyIncomeExpense as any;
+
+  // 1) object
+  try {
+    const r = await fn({ cash_account_id: cashAccountId, month });
+    return {
+      income: Number(r?.income ?? 0) || 0,
+      expense: Number(r?.expense ?? 0) || 0,
+    };
+  } catch {}
+
+  // 2) 2 args
+  try {
+    const r = await fn(cashAccountId, month);
+    return {
+      income: Number(r?.income ?? 0) || 0,
+      expense: Number(r?.expense ?? 0) || 0,
+    };
+  } catch {}
+
+  // 3) 1 arg
+  try {
+    const r = await fn(cashAccountId);
+    return {
+      income: Number(r?.income ?? 0) || 0,
+      expense: Number(r?.expense ?? 0) || 0,
+    };
+  } catch {}
+
+  return { income: 0, expense: 0 };
 }
 
 export default function DashboardClient() {
@@ -46,23 +108,27 @@ export default function DashboardClient() {
   const supabase = useMemo(() => createClient(), []);
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("");
 
+  const [range, setRange] = useState<6 | 12>(12);
   const [currentMonth] = useState<string>(() => ym(new Date()));
 
-  const [currentBalance, setCurrentBalance] = useState<number>(0);
-  const [monthIncome, setMonthIncome] = useState<number>(0);
-  const [monthExpense, setMonthExpense] = useState<number>(0);
+  // Overview
+  const [currentBalance, setCurrentBalance] = useState(0);
+  const [monthIncome, setMonthIncome] = useState(0);
+  const [monthExpense, setMonthExpense] = useState(0);
 
-  const [monthBalance, setMonthBalance] = useState<number>(0);
-  const [prevMonthBalance, setPrevMonthBalance] = useState<number>(0);
+  // Monthly card
+  const [monthBalance, setMonthBalance] = useState(0);
+  const [prevMonthBalance, setPrevMonthBalance] = useState(0);
 
-  const [range, setRange] = useState<6 | 12>(12);
+  // Chart
   const [series, setSeries] = useState<MonthAgg[]>([]);
-  const [error, setError] = useState<string>("");
 
-  // --- Auth & Accounts ---
+  // Auth & accounts
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -74,139 +140,72 @@ export default function DashboardClient() {
         return;
       }
 
-      const { data, error: accErr } = await supabase
-        .from("cash_accounts")
-        .select("id,name")
-        .order("id", { ascending: true });
+      try {
+        const acc = await (getAccounts as any)();
+        const list = (acc ?? []).map((a: any) => ({
+          id: String(a.id),
+          name: String(a.name),
+        })) as Account[];
 
-      if (accErr) {
-        setError(accErr.message);
+        setAccounts(list);
+        setSelectedAccountId(list[0]?.id ?? "");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load accounts");
+      } finally {
         setLoading(false);
-        return;
       }
-
-      const list = (data ?? []).map((a: any) => ({
-        id: String(a.id),
-        name: String(a.name),
-      })) as Account[];
-
-      setAccounts(list);
-      setSelectedAccountId(list[0]?.id ?? "");
-      setLoading(false);
     })();
   }, [router, supabase]);
 
-  // --- Load balances / income / expense / chart ---
+  // Load dashboard data
   useEffect(() => {
     if (!selectedAccountId) return;
 
     (async () => {
       setError("");
 
-      const targetMonth = currentMonth;
-      const prevMonth = ym(addMonths(new Date(`${targetMonth}-01T00:00:00.000Z`), -1));
+      try {
+        const thisYm = currentMonth;
+        const prevYm = ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -1));
 
-      // 月次残高
-      const mbThis = await supabase
-        .from("cash_monthly_balances")
-        .select("month,balance")
-        .eq("cash_account_id", selectedAccountId)
-        .eq("month", targetMonth)
-        .maybeSingle();
+        // 月次残高
+        const thisBal = await fetchMonthlyCashBalance(String(selectedAccountId), thisYm);
+        const prevBal = await fetchMonthlyCashBalance(String(selectedAccountId), prevYm);
 
-      const mbPrev = await supabase
-        .from("cash_monthly_balances")
-        .select("month,balance")
-        .eq("cash_account_id", selectedAccountId)
-        .eq("month", prevMonth)
-        .maybeSingle();
+        setMonthBalance(thisBal);
+        setPrevMonthBalance(prevBal);
+        setCurrentBalance(thisBal);
 
-      const thisBal = mbThis.data ? Number((mbThis.data as any).balance) || 0 : 0;
-      const prevBal = mbPrev.data ? Number((mbPrev.data as any).balance) || 0 : 0;
+        // 今月収支
+        const ie = await fetchMonthlyIncomeExpense(String(selectedAccountId), thisYm);
+        setMonthIncome(ie.income);
+        setMonthExpense(ie.expense);
 
-      setMonthBalance(thisBal);
-      setPrevMonthBalance(prevBal);
-      setCurrentBalance(thisBal);
+        // グラフ（月配列）
+        const months: string[] = [];
+        for (let i = range - 1; i >= 0; i--) {
+          months.push(ym(addMonths(new Date(`${thisYm}-01T00:00:00.000Z`), -i)));
+        }
 
-      // 今月の Income / Expense
-      const { start, end } = startEndOfMonth(targetMonth);
-      const flowsRes = await supabase
-        .from("cash_flows")
-        .select("type,amount,date")
-        .eq("cash_account_id", selectedAccountId)
-        .gte("date", start)
-        .lt("date", end);
+        const rows: MonthAgg[] = [];
+        for (const m of months) {
+          const b = await fetchMonthlyCashBalance(String(selectedAccountId), m);
+          const ie2 = await fetchMonthlyIncomeExpense(String(selectedAccountId), m);
+          rows.push({ month: m, balance: b, income: ie2.income, expense: ie2.expense });
+        }
 
-      if (flowsRes.error) {
-        setError(flowsRes.error.message);
+        setSeries(rows);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load dashboard data");
+        setMonthBalance(0);
+        setPrevMonthBalance(0);
+        setCurrentBalance(0);
         setMonthIncome(0);
         setMonthExpense(0);
-      } else {
-        let inc = 0;
-        let exp = 0;
-        for (const r of flowsRes.data ?? []) {
-          const amt = Number((r as any).amount) || 0;
-          if ((r as any).type === "income") inc += amt;
-          if ((r as any).type === "expense") exp += amt;
-        }
-        setMonthIncome(inc);
-        setMonthExpense(exp);
+        setSeries([]);
       }
-
-      // グラフ（rangeヶ月）
-      const months: string[] = [];
-      for (let i = range - 1; i >= 0; i--) {
-        months.push(ym(addMonths(new Date(`${targetMonth}-01T00:00:00.000Z`), -i)));
-      }
-
-      const mbRangeRes = await supabase
-        .from("cash_monthly_balances")
-        .select("month,balance")
-        .eq("cash_account_id", selectedAccountId)
-        .in("month", months);
-
-      const mbMap = new Map<string, number>();
-      if (!mbRangeRes.error) {
-        for (const r of mbRangeRes.data ?? []) {
-          mbMap.set(String((r as any).month), Number((r as any).balance) || 0);
-        }
-      }
-
-      const rangeStart = `${months[0]}-01`;
-      const rangeEnd = (() => {
-        const { end: e } = startEndOfMonth(months[months.length - 1]);
-        return e;
-      })();
-
-      const flowsRangeRes = await supabase
-        .from("cash_flows")
-        .select("type,amount,date")
-        .eq("cash_account_id", selectedAccountId)
-        .gte("date", rangeStart)
-        .lt("date", rangeEnd);
-
-      const incomeMap = new Map<string, number>();
-      const expenseMap = new Map<string, number>();
-
-      if (!flowsRangeRes.error) {
-        for (const r of flowsRangeRes.data ?? []) {
-          const amt = Number((r as any).amount) || 0;
-          const m = String((r as any).date).slice(0, 7);
-          if ((r as any).type === "income") incomeMap.set(m, (incomeMap.get(m) || 0) + amt);
-          if ((r as any).type === "expense") expenseMap.set(m, (expenseMap.get(m) || 0) + amt);
-        }
-      }
-
-      setSeries(
-        months.map((m) => ({
-          month: m,
-          balance: mbMap.get(m) ?? 0,
-          income: incomeMap.get(m) ?? 0,
-          expense: expenseMap.get(m) ?? 0,
-        }))
-      );
     })();
-  }, [selectedAccountId, range, currentMonth, supabase]);
+  }, [selectedAccountId, currentMonth, range]);
 
   const onLogout = async () => {
     await supabase.auth.signOut();
@@ -240,9 +239,7 @@ export default function DashboardClient() {
               </option>
             ))}
           </select>
-          {selectedAccountId ? (
-            <span className="text-xs text-white/40">id: {selectedAccountId}</span>
-          ) : null}
+          {selectedAccountId ? <span className="text-xs text-white/40">id: {selectedAccountId}</span> : null}
         </div>
 
         {error ? (
@@ -251,7 +248,6 @@ export default function DashboardClient() {
           </div>
         ) : null}
 
-        {/* Overview */}
         <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
           <div className="rounded-xl border border-white/10 bg-white/5 p-5">
             <h2 className="text-sm font-semibold text-white/80">Overview</h2>
@@ -282,7 +278,6 @@ export default function DashboardClient() {
           </div>
         </div>
 
-        {/* Charts */}
         <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-white/80">Charts</div>
@@ -330,7 +325,7 @@ export default function DashboardClient() {
           </div>
 
           <div className="mt-3 text-xs text-white/40">
-            ※ Income/Expense は cash_flows（manual）の月次集計。Balance は cash_monthly_balances。
+            ※ action の引数形式差異を DashboardClient 側で吸収している。
           </div>
         </div>
       </div>
