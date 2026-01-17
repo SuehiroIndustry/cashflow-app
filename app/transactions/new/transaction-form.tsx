@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import { createCashFlow } from "@/app/dashboard/_actions/cashflows"; // ←君の実パスに合わせて変更
+import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
 // 重要：型は _types からのみ import する方針なら、ここも合わせてね
 // import type { CashAccount, CashCategory } from "@/app/dashboard/_types";
 
