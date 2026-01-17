@@ -249,9 +249,10 @@ export default function DashboardClient() {
 
       {/* Chart（雛形） */}
       <EcoCharts
-        accountName={selectedAccount?.name ?? "(unknown)"}
-        monthly={monthly ?? []}
-      />
+  accountName={selectedAccount?.name ?? "(unknown)"}
+  monthly={monthly ?? []}
+  yen={yen}
+/>
     </div>
   );
 }
