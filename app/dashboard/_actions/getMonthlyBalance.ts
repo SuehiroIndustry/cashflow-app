@@ -1,10 +1,9 @@
 "use server";
 
-import { cookies } from "next/headers";
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { createServerClient } from "@/lib/supabase/server";
 
 export type MonthlyBalanceRow = {
-  month: string;   // '2026-01-01' のようなISO文字列で返る想定
+  month: string;
   income: number;
   expense: number;
   balance: number;
@@ -13,7 +12,7 @@ export type MonthlyBalanceRow = {
 export async function getMonthlyBalance(accountId: string): Promise<MonthlyBalanceRow[]> {
   if (!accountId) return [];
 
-  const supabase = createServerComponentClient({ cookies });
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("monthly_account_balances")
