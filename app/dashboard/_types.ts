@@ -1,5 +1,3 @@
-// app/dashboard/_types.ts
-
 export type RiskLevel = "GREEN" | "YELLOW" | "RED" | string;
 
 export type OverviewPayload = {
@@ -22,16 +20,16 @@ export type OverviewPayload = {
   debug_rows?: unknown;
 };
 
-export type MonthlyBalanceRow = {
-  month: string;   // "2026-01" みたいな想定
-  income: number;
-  expense: number;
-  balance: number; // 月末残高（想定）
-};
-
 export type AccountRow = {
   id: string;
   name: string;
-  type: string;       // "cash" | "bank" | ...（DBに合わせる）
+  type: string; // "cash" | "bank" など（DBの実値に合わせる）
   is_default: boolean;
+};
+
+export type MonthlyBalanceRow = {
+  month: string; // "YYYY-MM-01" など
+  income: number;
+  expense: number;
+  balance: number;
 };
