@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
-import TransactionForm from "./transaction-form";
+import TransactionForm from "../new/transaction-form";
 
 export default async function NewTransactionPage() {
   const supabase = await createClient();
