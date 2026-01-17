@@ -1,20 +1,19 @@
 "use server";
 
-import { cookies } from "next/headers";
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { createServerClient } from "@/lib/supabase/server";
 
 export type AccountRow = {
   id: string;
   name: string;
-  type: string; // 'cash' | 'bank' | ... (DBに合わせて)
-  currency: string; // 'JPY' etc
+  type: string;
+  currency: string;
   is_active: boolean;
   is_default: boolean;
   created_at?: string;
 };
 
 export async function getAccounts(): Promise<AccountRow[]> {
-  const supabase = createServerComponentClient({ cookies });
+  const supabase = await createServerClient();
 
   const { data, error } = await supabase
     .from("accounts")
@@ -23,7 +22,6 @@ export async function getAccounts(): Promise<AccountRow[]> {
     .order("created_at", { ascending: true });
 
   if (error) {
-    // ここでthrowしてもOKだけど、UI崩壊を防ぐなら空配列返すのが堅い
     console.error("[getAccounts] error:", error.message);
     return [];
   }
