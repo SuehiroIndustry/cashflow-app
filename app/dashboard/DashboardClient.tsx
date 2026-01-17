@@ -3,9 +3,9 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
-import OverviewCard from "./OverviewCard";
-import BalanceCard from "./BalanceCard";
-import EcoCharts from "./EcoCharts";
+import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
 
 import type { AccountRow } from "./_actions/getAccounts";
 import type { MonthlyBalanceRow } from "./_actions/getMonthlyBalance";
