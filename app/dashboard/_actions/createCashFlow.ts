@@ -1,32 +1,54 @@
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createClient } from "@/utils/supabase/server";
 
-export async function createCashFlow(input: {
-  cash_account_id: number;
-  occurred_on: string; // '2026-01-17'
-  amount: number; // + income / - expense
-  memo?: string | null;
-  cash_category_id?: number | null; // manual のとき必須なら入れる
-  source_type?: "manual" | "import";
-}) {
-  const supabase = await createSupabaseServerClient();
+type CashFlowType = "income" | "expense";
+type SourceType = "manual" | "import";
 
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userRes.user) throw new Error("Not authenticated");
+export type CreateCashFlowInput = {
+  type: CashFlowType;
+  cash_account_id: string;          // ★ string に統一
+  cash_category_id: string;         // ★ manual 前提なら必須でOK（運用に合わせて）
+  date: string;                     // YYYY-MM-DD
+  amount: number;
+  memo: string | null;
+  source_type: SourceType;          // manual / import
+};
 
-  const payload = {
-    user_id: userRes.user.id,
-    cash_account_id: input.cash_account_id,
-    occurred_on: input.occurred_on,
+export async function createCashFlow(input: CreateCashFlowInput) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr) return { error: userErr.message };
+  if (!user) return { error: "Not authenticated" };
+
+  // --- 最低限のバリデーション ---
+  if (!input.cash_account_id) return { error: "cash_account_id is required" };
+  if (!input.date) return { error: "date is required" };
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    return { error: "amount must be a positive number" };
+  }
+
+  // ★君のDB制約：manual の場合はカテゴリ必須
+  if (input.source_type === "manual" && !input.cash_category_id) {
+    return { error: "cash_category_id is required for manual" };
+  }
+
+  const { error } = await supabase.from("cash_flows").insert({
+    type: input.type,
+    cash_account_id: input.cash_account_id,     // ★ string のまま入れる
+    cash_category_id: input.cash_category_id,   // ★ string のまま入れる
+    date: input.date,
     amount: input.amount,
-    memo: input.memo ?? null,
-    source_type: input.source_type ?? "manual",
-    cash_category_id: input.cash_category_id ?? null,
-  };
+    memo: input.memo,
+    source_type: input.source_type,
+  });
 
-  const { error } = await supabase.from("cash_flows").insert(payload);
-  if (error) throw new Error(error.message);
+  if (error) return { error: error.message };
 
   return { ok: true };
 }

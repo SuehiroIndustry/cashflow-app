@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
-import TransactionForm from "../new/transaction-form";
+import TransactionForm from "./transaction-form";
 
 export default async function NewTransactionPage() {
   const supabase = await createClient();
@@ -20,6 +20,8 @@ export default async function NewTransactionPage() {
   if (accErr) throw new Error(accErr.message);
 
   // カテゴリ（※ cash_categories は user_id 無い想定）
+  // ここで type を select したい気持ちはあるが、
+  // 列が無い場合に即死するので、まずは id,name のみにして安全運用。
   const { data: categories, error: catErr } = await supabase
     .from("cash_categories")
     .select("id,name")
@@ -37,8 +39,14 @@ export default async function NewTransactionPage() {
 
         <div className="mt-6">
           <TransactionForm
-            accounts={accounts ?? []}
-            categories={categories ?? []}
+            accounts={(accounts ?? []).map((a) => ({
+              id: String(a.id),
+              name: String(a.name),
+            }))}
+            categories={(categories ?? []).map((c) => ({
+              id: String(c.id),
+              name: String(c.name),
+            }))}
           />
         </div>
       </div>
