@@ -1,16 +1,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-export type AccountRow = {
-  id: string;
-  name: string;
-  type: string;
-  currency: string;
-  is_active: boolean;
-  is_default: boolean;
-  created_at?: string;
-};
+import type { AccountRow } from "../_types";
 
 export async function getAccounts(): Promise<AccountRow[]> {
   const supabase = await createSupabaseServerClient();
