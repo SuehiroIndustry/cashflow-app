@@ -1,6 +1,5 @@
 // app/dashboard/_types.ts
 
-// DBから返る「口座行」想定（必要なら後で列増やせばOK）
 export type AccountRow = {
   id: number;
   name: string;
@@ -17,6 +16,9 @@ export type MonthlyCashBalanceRow = {
   expense: number;
   balance: number;
 };
+
+// ✅ これを追加：古い命名（MonthlyBalanceRow）を新命名に合わせて吸収する
+export type MonthlyBalanceRow = MonthlyCashBalanceRow;
 
 export type MonthAgg = {
   month: string; // "YYYY-MM"
