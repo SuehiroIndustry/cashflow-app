@@ -1,48 +1,62 @@
 "use client";
 
-import React from "react";
-import type { MonthlyBalanceRow } from "./_actions/getMonthlyBalance";
+import * as React from "react";
 
-export default function BalanceCard(props: {
+export type MonthlyBalanceRow = {
+  month: string;          // 'YYYY-MM-01' みたいなISO想定
+  balance: number;        // 月末残高
+};
+
+type Props = {
   accountName: string;
   monthly: MonthlyBalanceRow[];
   yen: (n: number) => string;
-}) {
-  const { accountName, monthly, yen } = props;
+};
+
+function toMonthLabel(iso: string): string {
+  // '2026-01-01' -> '2026-01'
+  if (!iso) return "";
+  return iso.slice(0, 7);
+}
+
+export default function BalanceCard({ accountName, monthly, yen }: Props) {
+  const latest = monthly?.length ? monthly[monthly.length - 1] : null;
+  const prev =
+    monthly && monthly.length >= 2 ? monthly[monthly.length - 2] : null;
+
+  const latestBalance = latest?.balance ?? 0;
+  const prevBalance = prev?.balance ?? 0;
+  const delta = latestBalance - prevBalance;
 
   return (
-    <div className="rounded-lg border p-4 space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="text-base font-semibold">Monthly Balances</div>
-        <div className="text-xs text-gray-500">{accountName}</div>
+    <div className="rounded-2xl border p-4">
+      <div className="text-sm text-muted-foreground">月次残高（{accountName}）</div>
+
+      <div className="mt-2 flex items-end justify-between gap-3">
+        <div>
+          <div className="text-2xl font-semibold">{yen(latestBalance)}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {latest ? `${toMonthLabel(latest.month)} 時点` : "データなし"}
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">前月比</div>
+          <div className="text-sm font-medium">
+            {yen(delta)}
+          </div>
+        </div>
       </div>
 
-      {(!monthly || monthly.length === 0) ? (
-        <div className="text-sm text-gray-500">No rows</div>
-      ) : (
-        <div className="overflow-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-600">
-                <th className="py-1">month</th>
-                <th className="py-1 text-right">income</th>
-                <th className="py-1 text-right">expense</th>
-                <th className="py-1 text-right">balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthly.map((r) => (
-                <tr key={r.month} className="border-t">
-                  <td className="py-1">{r.month}</td>
-                  <td className="py-1 text-right">{yen(r.income ?? 0)}</td>
-                  <td className="py-1 text-right">{yen(r.expense ?? 0)}</td>
-                  <td className="py-1 text-right font-medium">{yen(r.balance ?? 0)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {/* ざっくり履歴（必要なら後でグラフに差し替え） */}
+      <div className="mt-4 space-y-1">
+        {monthly?.slice(-6).map((r) => (
+          <div key={r.month} className="flex justify-between text-sm">
+            <span className="text-muted-foreground">{toMonthLabel(r.month)}</span>
+            <span>{yen(r.balance)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
