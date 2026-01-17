@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import type { OverviewPayload } from "./DashboardClient";
+import type { OverviewPayload } from "../DashboardClient";
 
 export default function OverviewCard(props: {
   accountName: string;
