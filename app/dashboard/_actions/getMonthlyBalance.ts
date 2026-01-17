@@ -1,6 +1,6 @@
 "use server";
 
-import { createServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type MonthlyBalanceRow = {
   month: string;
@@ -12,7 +12,7 @@ export type MonthlyBalanceRow = {
 export async function getMonthlyBalance(accountId: string): Promise<MonthlyBalanceRow[]> {
   if (!accountId) return [];
 
-  const supabase = await createServerClient();
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("monthly_account_balances")
