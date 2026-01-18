@@ -27,8 +27,7 @@ export type MonthlyCashBalanceRow = {
 };
 
 /**
- * 以前の命名が残っている箇所があっても落ちないように互換 alias を用意
- * （参照側を直し切ったら消してOK）
+ * 以前の命名が残っている箇所があっても落ちないように互換 alias
  */
 export type MonthlyCashAccountBalanceRow = MonthlyCashBalanceRow;
 
@@ -43,7 +42,10 @@ export type OverviewPayload = {
 };
 
 // ========== create cashflow (manual) ==========
-export type CashFlowSection = "income" | "expense";
+/**
+ * 画面側（DashboardClient.tsx）が "in" | "out" を使ってるので、それに合わせる。
+ */
+export type CashFlowSection = "in" | "out";
 
 export type CashFlowCreateInput = {
   cash_account_id: number;
