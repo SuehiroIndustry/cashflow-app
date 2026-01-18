@@ -8,7 +8,7 @@ export default function OverviewCard(props: {
 }) {
   const { accountName, payload } = props;
 
-  const yen = (n: number) => `¥${Number.isFinite(n) ? Math.trunc(n).toLocaleString() : "0"}`;
+  const yen = (n: number) => `¥${(Number.isFinite(n) ? Math.trunc(n) : 0).toLocaleString()}`;
 
   return (
     <div className="space-y-1">
