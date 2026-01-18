@@ -1,17 +1,13 @@
 // app/dashboard/_actions/_ensureMonthlyCashBalance.ts
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-/**
- * monthly_cash_account_balances に
- * (cash_account_id, month) の行が無ければ作る（0初期化）
- */
 export async function ensureMonthlyCashBalance(args: {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
 }): Promise<void> {
-  const supabase = await createClient();
+  const supabase = await createSupabaseServerClient();
 
   const {
     data: { user },
@@ -29,18 +25,18 @@ export async function ensureMonthlyCashBalance(args: {
     .maybeSingle();
 
   if (selErr) throw selErr;
+
   if (existing) return;
 
-  // 無ければ作る（RLSが user_id を見る想定なので埋める）
+  // 無ければ作る（初期値0）
   const { error: insErr } = await supabase
     .from("monthly_cash_account_balances")
     .insert({
       cash_account_id: args.cash_account_id,
       month: args.month,
+      balance: 0,
       income: 0,
       expense: 0,
-      balance: 0,
-      user_id: user.id,
     });
 
   if (insErr) throw insErr;

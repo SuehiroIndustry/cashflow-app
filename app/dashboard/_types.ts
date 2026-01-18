@@ -2,30 +2,24 @@
 
 export type CashFlowSection = "in" | "out";
 
-/** accounts */
 export type CashAccount = {
   id: number;
   name: string;
 };
 
-/** categories */
 export type CashCategory = {
   id: number;
   name: string;
 };
 
-/** monthly balances (table: monthly_cash_account_balances) */
 export type MonthlyCashBalanceRow = {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
-  income: number | null;
-  expense: number | null;
-  balance: number | null;
-  updated_at?: string | null;
-  user_id?: string | null;
+  balance: number;
+  income: number;
+  expense: number;
 };
 
-/** server action: income/expense for a month */
 export type MonthlyIncomeExpenseRow = {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
@@ -33,45 +27,37 @@ export type MonthlyIncomeExpenseRow = {
   expense: number;
 };
 
-/** create cash flow input */
-export type CashFlowCreateInput = {
-  cash_account_id: number;
-  date: string; // "YYYY-MM-DD"
-  section: CashFlowSection;
-  amount: number;
-  cash_category_id: number; // manual 必須運用
-  description: string | null;
-};
-
-/** delete cash flow input */
-export type CashFlowDeleteInput = {
-  id: number;
-  cash_account_id: number;
-};
-
-// app/dashboard/_types.ts
-
-/**
- * cash_flows 一覧表示用
- * Supabase join 結果と 1:1 で合わせる
- */
 export type CashFlowListRow = {
   id: number;
   cash_account_id: number;
-  date: string; // YYYY-MM-DD
-  section: "in" | "out";
+  date: string; // "YYYY-MM-DD"
+  section: CashFlowSection;
   amount: number;
   cash_category_id: number | null;
   description: string | null;
   created_at: string;
 
-  cash_category: {
-    id: number;
-    name: string;
-  } | null;
+  // join (alias) 想定: cash_category:cash_categories(...)
+  cash_category: { id: number; name: string } | null;
 };
 
-/** OverviewCard 用 */
+export type CashFlowCreateInput = {
+  cash_account_id: number;
+  date: string; // "YYYY-MM-DD"
+  section: CashFlowSection;
+  amount: number;
+  cash_category_id: number; // manual必須
+  description?: string | null;
+
+  // DB制約対策（source_type NOT NULL）
+  source_type?: "manual";
+};
+
+export type CashFlowDeleteInput = {
+  id: number;
+  cash_account_id: number;
+};
+
 export type OverviewPayload = {
   currentBalance: number;
   thisMonthIncome: number;

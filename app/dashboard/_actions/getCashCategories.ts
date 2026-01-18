@@ -1,19 +1,11 @@
 // app/dashboard/_actions/getCashCategories.ts
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CashCategory } from "../_types";
 
 export async function getCashCategories(): Promise<CashCategory[]> {
-  const supabase = await createClient();
-
-  // auth（ルールに合わせて一応チェック）
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-
-  if (userErr || !user) throw new Error("Not authenticated");
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("cash_categories")
@@ -22,8 +14,8 @@ export async function getCashCategories(): Promise<CashCategory[]> {
 
   if (error) throw error;
 
-  return (data ?? []).map((c) => ({
-    id: Number(c.id),
-    name: String(c.name),
+  return (data ?? []).map((r: any) => ({
+    id: Number(r.id),
+    name: String(r.name),
   }));
 }

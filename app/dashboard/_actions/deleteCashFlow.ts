@@ -1,13 +1,11 @@
 // app/dashboard/_actions/deleteCashFlow.ts
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CashFlowDeleteInput } from "../_types";
 
-export async function deleteCashFlow(
-  args: CashFlowDeleteInput
-): Promise<void> {
-  const supabase = await createClient();
+export async function deleteCashFlow(args: CashFlowDeleteInput): Promise<void> {
+  const supabase = await createSupabaseServerClient();
 
   const {
     data: { user },
