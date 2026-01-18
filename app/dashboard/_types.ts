@@ -1,78 +1,43 @@
 // app/dashboard/_types.ts
 
-/**
- * このファイルからのみ型を import するルールで統一する。
- * （_actions 側から型を import しない）
- */
-
-// ----------------------
-// 基本エンティティ
-// ----------------------
-
+// 口座
 export type CashAccount = {
-  id: number; // DB: bigint だけどフロントでは number 扱い（UI用途）
+  id: number;
   name: string;
 };
 
-// monthly_cash_account_balances の「行」っぽい形（一覧・グラフ用）
+// 月次スナップショット（monthly_cash_account_balances）
 export type MonthlyCashBalanceRow = {
-  user_id?: string; // uuid（ビュー/テーブルによっては返らないことがあるので optional）
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
-  income: number;
-  expense: number;
-  balance: number;
-  updated_at?: string;
+  income: number | null;
+  expense: number | null;
+  balance: number | null;
+  updated_at?: string | null;
 };
 
-// 収入・支出だけ欲しいときの戻り値（getMonthlyIncomeExpense）
+// 月次の収入・支出だけ欲しい時
 export type MonthlyIncomeExpenseRow = {
-  income: number;
-  expense: number;
+  income: number | null;
+  expense: number | null;
 };
 
-// ----------------------
-// Dashboard 表示用
-// ----------------------
-
-export type OverviewPayload = {
-  accountName: string;
-
-  currentBalance: number;
-
-  thisMonthIncome: number;
-  thisMonthExpense: number;
-
-  net: number;
-
-  // 画面に「月次残高」「前月比」を出してるので持たせる（必要なければ呼び出し側で 0 を入れる）
-  monthBalance: number;
-  momDelta: number; // month over month 差分
-};
-
-// ----------------------
-// createCashFlow 用
-// ----------------------
-
+// cash_flows 登録用（server action createCashFlow に渡す形）
 export type CashFlowCreateInput = {
   cash_account_id: number;
   date: string; // "YYYY-MM-DD"
   section: "in" | "out";
   amount: number;
-
-  // manual のときは必須（DB制約に合わせる）
-  cash_category_id?: number | null;
-
-  description?: string | null;
+  cash_category_id: number; // manual の場合必須（DB制約）
+  description: string | null;
 };
 
-// ----------------------
-// 互換エイリアス（過去参照を壊さない）
-// ----------------------
-
-// 以前 `MonthlyBalanceRow` を参照してる箇所が残ってもビルド落ちしないようにする。
-// （本当は参照側を全部 MonthlyCashBalanceRow に揃えるのが理想）
-export type MonthlyBalanceRow = MonthlyCashBalanceRow;
-
-// 以前 `AccountRow` を参照してる箇所が残ってもビルド落ちしないようにする。
-export type AccountRow = CashAccount;
+// OverviewCard 用（画面表示に都合のいい形）
+export type OverviewPayload = {
+  currentBalance: number; // 現在残高
+  thisMonthIncome: number;
+  thisMonthExpense: number;
+  net: number; // thisMonthIncome - thisMonthExpense
+  monthBalance: number; // 月次残高（スナップショットのbalance）
+  prevMonthDiff: number; // 当月balance - 前月balance
+};
