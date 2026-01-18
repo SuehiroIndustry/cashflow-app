@@ -4,28 +4,29 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CashFlowListRow } from "../_types";
 
+/**
+ * 指定した月（YYYY-MM-01）に属する cash_flows を返す
+ * - user_id は返さない（不要・型も持たない）
+ * - category 名は join して返す（cash_category）
+ */
 export async function getCashFlows(args: {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
 }): Promise<CashFlowListRow[]> {
   const supabase = await createSupabaseServerClient();
 
-  // auth（ルールに合わせて一応チェック）
   const {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
-
   if (userErr || !user) throw new Error("Not authenticated");
 
-  // month: "YYYY-MM-01"
+  // month: "YYYY-MM-01" -> start/end（次月の YYYY-MM-01）
   const start = args.month;
-
-  // end: 次月の "YYYY-MM-DD"（toISOStringでUTCズレするので slice）
   const d = new Date(`${args.month}T00:00:00.000Z`);
   if (Number.isNaN(d.getTime())) throw new Error("Invalid month format");
   d.setUTCMonth(d.getUTCMonth() + 1);
-  const end = d.toISOString().slice(0, 10); // "YYYY-MM-DD"
+  const end = d.toISOString().slice(0, 10); // "YYYY-MM-DD"（次月1日）
 
   const { data, error } = await supabase
     .from("cash_flows")
@@ -39,7 +40,7 @@ export async function getCashFlows(args: {
       cash_category_id,
       description,
       created_at,
-      cash_categories (
+      cash_category:cash_categories (
         id,
         name
       )
@@ -61,9 +62,10 @@ export async function getCashFlows(args: {
     amount: Number(r.amount ?? 0),
     cash_category_id: r.cash_category_id == null ? null : Number(r.cash_category_id),
     description: r.description ?? null,
-    created_at: String(r.created_at),
-    cash_category: r.cash_categories
-      ? { id: Number(r.cash_categories.id), name: String(r.cash_categories.name) }
+    created_at: r.created_at ?? null,
+    cash_category: r.cash_category
+      ? { id: Number(r.cash_category.id), name: String(r.cash_category.name) }
       : null,
+    cash_category_name: r.cash_category?.name ?? null, // 互換
   }));
 }

@@ -79,7 +79,7 @@ export default function DashboardClient() {
   // chart/table rows
   const [chartRows, setChartRows] = useState<MonthlyCashBalanceRow[]>([]);
 
-  // cash flow list (当月明細)
+  // cash flows list
   const [cashFlows, setCashFlows] = useState<CashFlowListRow[]>([]);
 
   // --- CashFlow input form state ---
@@ -95,13 +95,13 @@ export default function DashboardClient() {
   const [cfDesc, setCfDesc] = useState<string>("");
 
   async function reloadAll(accountId: number, monthKey: string, monthsBack: number) {
-    // categories（最初に一回取れればOKだが、雑にここで取っても問題ない）
+    // categories
     const cats = await getCashCategories();
     setCategories(cats);
     const initialCatId = cats[0]?.id ?? null;
     setSelectedCategoryId((prev) => prev ?? initialCatId);
 
-    // ① 今月・前月 snapshot（server action）
+    // ① 今月・前月 snapshot
     const prevMonthKey = ymToDate(ym(addMonths(new Date(monthKey), -1)));
 
     const thisSnap = await getMonthlyCashBalance({
@@ -118,7 +118,7 @@ export default function DashboardClient() {
     setPrevMonthBalance(Number(prevSnap?.balance ?? 0));
     setCurrentBalance(Number(thisSnap?.balance ?? 0));
 
-    // ② 今月の収入・支出（server action）
+    // ② 今月の収入・支出
     const ie = await getMonthlyIncomeExpense({
       cash_account_id: accountId,
       month: monthKey,
@@ -126,7 +126,7 @@ export default function DashboardClient() {
     setMonthIncome(Number(ie.income ?? 0));
     setMonthExpense(Number(ie.expense ?? 0));
 
-    // ③ 当月の明細（server action）
+    // ③ 当月の明細
     const flows = await getCashFlows({
       cash_account_id: accountId,
       month: monthKey,
@@ -134,11 +134,10 @@ export default function DashboardClient() {
     setCashFlows(flows);
 
     // ④ チャート/表（client select）
-    // user_id は取らない（使わないし、RLS事故の元）
     const from = ymToDate(ym(addMonths(new Date(monthKey), -(monthsBack - 1))));
     const { data, error: qErr } = await supabase
       .from("monthly_cash_account_balances")
-      .select("cash_account_id, month, income, expense, balance, updated_at")
+      .select("cash_account_id, month, income, expense, balance, updated_at, user_id")
       .eq("cash_account_id", accountId)
       .gte("month", from)
       .order("month", { ascending: true });
@@ -242,7 +241,7 @@ export default function DashboardClient() {
     if (!selectedAccountId) return;
 
     const ok = window.confirm(
-      `削除しますか？\n${row.date} / ${sectionLabel(row.section)} / ${yen(row.amount)}`
+      `削除しますか?\n${row.date} / ${sectionLabel(row.section)} / ${yen(row.amount)}`
     );
     if (!ok) return;
 
@@ -255,7 +254,6 @@ export default function DashboardClient() {
         cash_account_id: row.cash_account_id,
       });
 
-      // 反映
       const monthKey = ymToDate(currentMonth);
       await reloadAll(selectedAccountId, monthKey, range);
     } catch (e: any) {
@@ -433,9 +431,7 @@ export default function DashboardClient() {
                 <td style={{ paddingRight: 12 }}>
                   {r.cash_category?.name ?? "-"}
                 </td>
-                <td style={{ paddingRight: 12 }}>
-                  {r.description ?? ""}
-                </td>
+                <td style={{ paddingRight: 12 }}>{r.description ?? ""}</td>
                 <td>
                   <button
                     onClick={() => onDeleteCashFlow(r)}

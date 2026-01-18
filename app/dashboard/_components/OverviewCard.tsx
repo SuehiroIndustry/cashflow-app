@@ -8,14 +8,13 @@ export default function OverviewCard(props: {
 }) {
   const { accountName, payload } = props;
 
-  const yen = (n: number) => `¥${Number.isFinite(n) ? n.toLocaleString() : "0"}`;
+  const yen = (n: number) => `¥${Number.isFinite(n) ? Math.trunc(n).toLocaleString() : "0"}`;
 
   return (
     <div className="space-y-1">
       <div className="font-semibold">Overview</div>
 
       <div>Account: {accountName}</div>
-
       <div>Current Balance: {yen(payload.currentBalance)}</div>
       <div>This Month Income: {yen(payload.thisMonthIncome)}</div>
       <div>This Month Expense: {yen(payload.thisMonthExpense)}</div>
