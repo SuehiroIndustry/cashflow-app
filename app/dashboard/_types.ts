@@ -26,6 +26,14 @@ export type MonthlyCashBalanceRow = {
   updated_at: string | null;
 };
 
+
+export type MonthlyIncomeExpenseRow = {
+  cash_account_id: number;
+  month: string; // "YYYY-MM-01"
+  income: number;
+  expense: number;
+};
+
 /**
  * 以前の命名が残っている箇所があっても落ちないように互換 alias
  */
