@@ -2,22 +2,23 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { MonthlyCashBalanceRow } from "../_types";
+import type { MonthlyCashAccountBalanceRow } from "../_types";
 import { ensureMonthlyCashBalance } from "./ensureMonthlyCashBalance";
 
 export async function getMonthlyCashBalance(args: {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
-}): Promise<MonthlyCashBalanceRow> {
+}): Promise<MonthlyCashAccountBalanceRow> {
   const supabase = await createSupabaseServerClient();
 
   const {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
+
   if (userErr || !user) throw new Error("Not authenticated");
 
-  // ★ここが肝：まず行を作る（0でも作る）
+  // ここで「その月の行が必ずある」状態にしてから取りにいく
   await ensureMonthlyCashBalance({
     cash_account_id: args.cash_account_id,
     month: args.month,
