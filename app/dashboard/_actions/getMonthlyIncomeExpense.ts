@@ -2,8 +2,8 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { MonthlyIncomeExpense } from "../_types";
 import { ensureMonthlyCashBalance } from "./ensureMonthlyCashBalance";
+import type { MonthlyIncomeExpense } from "../_types";
 
 export async function getMonthlyIncomeExpense(args: {
   cash_account_id: number;
@@ -11,7 +11,7 @@ export async function getMonthlyIncomeExpense(args: {
 }): Promise<MonthlyIncomeExpense> {
   const supabase = await createSupabaseServerClient();
 
-  // auth（ルールに合わせて一応チェック）
+  // auth（RLS前提）
   const {
     data: { user },
     error: userErr,
@@ -19,7 +19,7 @@ export async function getMonthlyIncomeExpense(args: {
 
   if (userErr || !user) throw new Error("Not authenticated");
 
-  // 月次レコードが無ければ作る（既存方針に合わせる）
+  // 月次レコードが無ければ作る
   await ensureMonthlyCashBalance({
     cash_account_id: args.cash_account_id,
     month: args.month,

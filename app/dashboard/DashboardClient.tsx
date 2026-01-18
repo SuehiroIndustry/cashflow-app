@@ -7,10 +7,10 @@ import { createClient } from "@/utils/supabase/client";
 
 // actions
 import { getAccounts } from "@/app/dashboard/_actions/getAccounts";
-import { getCashCategories } from "@/app/dashboard/_actions/getCashCategories";
 import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
 import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
 import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
+import { getCashCategories } from "@/app/dashboard/_actions/getCashCategories";
 
 // types（ルール：_types からだけ）
 import type {
@@ -18,6 +18,7 @@ import type {
   CashCategory,
   MonthlyCashBalanceRow,
   CashFlowCreateInput,
+  CashFlowSection,
 } from "./_types";
 
 function ym(date: Date) {
@@ -52,10 +53,12 @@ export default function DashboardClient() {
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
-  const [categories, setCategories] = useState<CashCategory[]>([]);
-
   const [range, setRange] = useState<6 | 12>(12);
   const [currentMonth, setCurrentMonth] = useState<string>(() => ym(new Date()));
+
+  // categories（入力フォーム用）
+  const [categories, setCategories] = useState<CashCategory[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
 
   // overview
   const [currentBalance, setCurrentBalance] = useState(0);
@@ -77,15 +80,17 @@ export default function DashboardClient() {
     const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
   });
-  const [cfSection, setCfSection] = useState<"in" | "out">("in");
+  const [cfSection, setCfSection] = useState<CashFlowSection>("in");
   const [cfAmount, setCfAmount] = useState<string>("1000");
-
-  // ここが変更：カテゴリは select で選ぶ（ID手入力廃止）
-  const [cfCategoryId, setCfCategoryId] = useState<number | null>(null);
-
   const [cfDesc, setCfDesc] = useState<string>("");
 
   async function reloadAll(accountId: number, monthKey: string, monthsBack: number) {
+    // categories（最初に一回取れればOKだが、雑にここで取っても問題ない）
+    const cats = await getCashCategories();
+    setCategories(cats);
+    const initialCatId = cats[0]?.id ?? null;
+    setSelectedCategoryId((prev) => prev ?? initialCatId);
+
     // ① 今月・前月 snapshot（server action）
     const prevMonthKey = ymToDate(ym(addMonths(new Date(monthKey), -1)));
 
@@ -108,14 +113,14 @@ export default function DashboardClient() {
       cash_account_id: accountId,
       month: monthKey,
     });
-    setMonthIncome(ie.income ?? 0);
-    setMonthExpense(ie.expense ?? 0);
+    setMonthIncome(Number(ie.income ?? 0));
+    setMonthExpense(Number(ie.expense ?? 0));
 
     // ③ チャート/表（client select）
     const from = ymToDate(ym(addMonths(new Date(monthKey), -(monthsBack - 1))));
     const { data, error: qErr } = await supabase
       .from("monthly_cash_account_balances")
-      .select("month, income, expense, balance, updated_at")
+      .select("cash_account_id, month, income, expense, balance, updated_at, user_id")
       .eq("cash_account_id", accountId)
       .gte("month", from)
       .order("month", { ascending: true });
@@ -131,17 +136,11 @@ export default function DashboardClient() {
         setLoading(true);
         setError("");
 
-        // 口座
         const accs = await getAccounts();
         setAccounts(accs);
 
         const initialId = accs[0]?.id ?? null;
         setSelectedAccountId(initialId);
-
-        // カテゴリ（追加）
-        const cats = await getCashCategories();
-        setCategories(cats);
-        setCfCategoryId(cats[0]?.id ?? null);
 
         if (!initialId) {
           setLoading(false);
@@ -187,13 +186,12 @@ export default function DashboardClient() {
       setError("");
 
       const amount = Number(cfAmount);
-
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error("金額が不正です（1以上の数値）");
       }
 
-      // manual の制約：カテゴリ必須
-      if (!cfCategoryId) {
+      // manual はカテゴリ必須
+      if (!selectedCategoryId) {
         throw new Error("カテゴリが未選択です（manualは必須）");
       }
 
@@ -202,7 +200,7 @@ export default function DashboardClient() {
         date: cfDate,
         section: cfSection,
         amount,
-        cash_category_id: cfCategoryId,
+        cash_category_id: selectedCategoryId,
         description: cfDesc ? cfDesc : null,
       };
 
@@ -212,7 +210,7 @@ export default function DashboardClient() {
       const monthKey = ymToDate(currentMonth);
       await reloadAll(selectedAccountId, monthKey, range);
 
-      // ちょいご褒美：説明だけクリア（連続入力しやすい）
+      // 説明だけクリア
       setCfDesc("");
     } catch (e: any) {
       console.error(e);
@@ -286,7 +284,7 @@ export default function DashboardClient() {
           区分{" "}
           <select
             value={cfSection}
-            onChange={(e) => setCfSection(e.target.value as "in" | "out")}
+            onChange={(e) => setCfSection(e.target.value as CashFlowSection)}
             disabled={loading}
           >
             <option value="in">in（収入）</option>
@@ -305,15 +303,13 @@ export default function DashboardClient() {
           />
         </label>
 
-        {/* ここが変更：カテゴリ select */}
         <label>
           カテゴリ（manual必須）{" "}
           <select
-            value={cfCategoryId ?? ""}
-            onChange={(e) => setCfCategoryId(Number(e.target.value) || null)}
+            value={selectedCategoryId ?? ""}
+            onChange={(e) => setSelectedCategoryId(Number(e.target.value))}
             disabled={loading || categories.length === 0}
           >
-            <option value="">選択してください</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} / id:{c.id}
@@ -381,7 +377,7 @@ export default function DashboardClient() {
           </thead>
           <tbody>
             {chartRows.map((r) => (
-              <tr key={r.month}>
+              <tr key={`${r.cash_account_id}-${r.month}`}>
                 <td style={{ paddingRight: 16 }}>{r.month}</td>
                 <td style={{ textAlign: "right", paddingRight: 16 }}>
                   {yen(Number(r.balance ?? 0))}
