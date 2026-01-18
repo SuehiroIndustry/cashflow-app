@@ -7,23 +7,11 @@ import type { CashAccount } from "../_types";
 export async function getAccounts(): Promise<CashAccount[]> {
   const supabase = await createSupabaseServerClient();
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-
-  if (userErr || !user) return [];
-
   const { data, error } = await supabase
     .from("cash_accounts")
-    .select("id, name")
-    .eq("user_id", user.id)
+    .select("id,name")
     .order("id", { ascending: true });
 
   if (error) throw error;
-
-  return (data ?? []).map((r) => ({
-    id: Number(r.id),
-    name: String(r.name),
-  }));
+  return (data ?? []) as CashAccount[];
 }
