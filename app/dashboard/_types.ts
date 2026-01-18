@@ -49,19 +49,26 @@ export type CashFlowDeleteInput = {
   cash_account_id: number;
 };
 
-/** cash flow list row (for "当月の明細") */
+// app/dashboard/_types.ts
+
+/**
+ * cash_flows 一覧表示用
+ * Supabase join 結果と 1:1 で合わせる
+ */
 export type CashFlowListRow = {
   id: number;
   cash_account_id: number;
-  date: string; // "YYYY-MM-DD" (or timestamp string)
-  section: CashFlowSection;
+  date: string; // YYYY-MM-DD
+  section: "in" | "out";
   amount: number;
   cash_category_id: number | null;
   description: string | null;
   created_at: string;
 
-  // join result (alias)
-  cash_category: { id: number; name: string } | null;
+  cash_category: {
+    id: number;
+    name: string;
+  } | null;
 };
 
 /** OverviewCard 用 */
