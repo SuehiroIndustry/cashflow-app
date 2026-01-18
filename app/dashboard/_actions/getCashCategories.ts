@@ -1,11 +1,11 @@
 // app/dashboard/_actions/getCashCategories.ts
 "use server";
 
-import { createSupabaseServerClient } from "@/utils/supabase/server";
+import { createClient } from "@/utils/supabase/server";
 import type { CashCategory } from "../_types";
 
 export async function getCashCategories(): Promise<CashCategory[]> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createClient();
 
   // auth（ルールに合わせて一応チェック）
   const {
