@@ -1,34 +1,38 @@
 // app/dashboard/_types.ts
 
+/**
+ * Dashboard 周りで使う型はここに集約する。
+ * （DashboardClient.tsx などはここからだけ import する運用）
+ */
+
+// ========== master data ==========
 export type CashAccount = {
   id: number;
   name: string;
 };
 
+export type CashCategory = {
+  id: number;
+  name: string;
+};
+
+// ========== monthly_cash_account_balances ==========
 export type MonthlyCashBalanceRow = {
-  // NOTE: ここは「Aで行く」の方針に合わせて cash_account_id は持たない前提
-  // テーブル行そのものは client select で使うけど、UI側の key は month で足りる
+  cash_account_id: number;
   month: string; // "YYYY-MM-01"
-  income: number | null;
-  expense: number | null;
-  balance: number | null;
+  income: number;
+  expense: number;
+  balance: number;
   updated_at: string | null;
 };
 
-export type MonthlyIncomeExpenseRow = {
-  income: number;
-  expense: number;
-};
+/**
+ * 以前の命名が残っている箇所があっても落ちないように互換 alias を用意
+ * （参照側を直し切ったら消してOK）
+ */
+export type MonthlyCashAccountBalanceRow = MonthlyCashBalanceRow;
 
-export type CashFlowCreateInput = {
-  cash_account_id: number;
-  date: string; // YYYY-MM-DD
-  section: "in" | "out";
-  amount: number;
-  cash_category_id: number;
-  description: string | null;
-};
-
+// ========== dashboard summary payload ==========
 export type OverviewPayload = {
   currentBalance: number;
   thisMonthIncome: number;
@@ -38,7 +42,14 @@ export type OverviewPayload = {
   monthlyDiff: number;
 };
 
-export type CashCategory = {
-  id: number;
-  name: string;
+// ========== create cashflow (manual) ==========
+export type CashFlowSection = "income" | "expense";
+
+export type CashFlowCreateInput = {
+  cash_account_id: number;
+  date: string; // "YYYY-MM-DD"
+  section: CashFlowSection;
+  amount: number;
+  cash_category_id: number; // manual は必須
+  description: string | null;
 };

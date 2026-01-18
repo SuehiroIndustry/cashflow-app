@@ -1,7 +1,7 @@
 // app/dashboard/_actions/getMonthlyCashBalance.ts
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/utils/supabase/server";
 import type { MonthlyCashBalanceRow } from "../_types";
 import { ensureMonthlyCashBalance } from "./ensureMonthlyCashBalance";
 
@@ -9,7 +9,7 @@ export async function getMonthlyCashBalance(args: {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
 }): Promise<MonthlyCashBalanceRow | null> {
-  const supabase = await createClient();
+  const supabase = await createSupabaseServerClient();
 
   // 月次レコードが無ければ作る（既存方針）
   await ensureMonthlyCashBalance({
@@ -33,6 +33,6 @@ export async function getMonthlyCashBalance(args: {
     income: Number(data.income ?? 0),
     expense: Number(data.expense ?? 0),
     balance: Number(data.balance ?? 0),
-    updated_at: data.updated_at,
+    updated_at: data.updated_at ?? null,
   };
 }
