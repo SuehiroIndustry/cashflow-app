@@ -1,53 +1,51 @@
 // app/dashboard/_types.ts
 
-// =====================
-// Cash Accounts
-// =====================
+// ===== Domain / DB-ish types (dashboard 内だけで使う想定) =====
+
 export type CashAccount = {
   id: number;
   name: string;
 };
 
-// =====================
-// Monthly Cash Balance
-// （monthly_cash_account_balances テーブル / view）
-// =====================
 export type MonthlyCashBalanceRow = {
+  // monthly_cash_account_balances の1行を想定
   cash_account_id: number;
-  month: string; // YYYY-MM-01
-  income: number;
-  expense: number;
-  balance: number;
+  month: string; // "YYYY-MM-01"
+  income: number | null;
+  expense: number | null;
+  balance: number | null;
+  updated_at?: string | null;
 };
 
-// =====================
-// Overview（ダッシュボード上部カード用）
-// =====================
-export type OverviewData = {
-  accountName: string;
-  currentBalance: number;
-  thisMonthIncome: number;
-  thisMonthExpense: number;
-  net: number;
-  prevMonthBalance: number;
-};
-
-// =====================
-// Monthly Income / Expense（server action戻り値）
-// =====================
 export type MonthlyIncomeExpenseRow = {
   income: number;
   expense: number;
 };
 
-// =====================
-// Cash Flow Create（transaction form → server action）
-// =====================
+export type OverviewPayload = {
+  currentBalance: number;
+  thisMonthIncome: number;
+  thisMonthExpense: number;
+  net: number;
+
+  // 画面に「月次残高」「前月比」を出してるならこれ
+  monthBalance: number;
+  prevMonthBalance: number;
+};
+
+export type CashFlowSection = "in" | "out";
+
 export type CashFlowCreateInput = {
   cash_account_id: number;
-  date: string; // YYYY-MM-DD
-  section: "in" | "out";
-  amount: number;
-  cash_category_id: number;
+  date: string; // "YYYY-MM-DD"
+  section: CashFlowSection; // "in" | "out"
+  amount: number; // numeric
+  cash_category_id: number | null; // manual の場合必須だが型としては null も許容
   description?: string | null;
+};
+
+// （必要なら）取引入力フォーム用の軽量Option型
+export type SelectOption = {
+  id: string;
+  name: string;
 };
