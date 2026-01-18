@@ -7,6 +7,7 @@ import { createClient } from "@/utils/supabase/client";
 
 // actions
 import { getAccounts } from "@/app/dashboard/_actions/getAccounts";
+import { getCashCategories } from "@/app/dashboard/_actions/getCashCategories";
 import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
 import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
 import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
@@ -14,6 +15,7 @@ import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
 // types（ルール：_types からだけ）
 import type {
   CashAccount,
+  CashCategory,
   MonthlyCashBalanceRow,
   CashFlowCreateInput,
 } from "./_types";
@@ -50,6 +52,8 @@ export default function DashboardClient() {
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
+  const [categories, setCategories] = useState<CashCategory[]>([]);
+
   const [range, setRange] = useState<6 | 12>(12);
   const [currentMonth, setCurrentMonth] = useState<string>(() => ym(new Date()));
 
@@ -67,7 +71,6 @@ export default function DashboardClient() {
 
   // --- CashFlow input form state ---
   const [cfDate, setCfDate] = useState<string>(() => {
-    // 今日の日付（ローカル）を YYYY-MM-DD
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -76,7 +79,10 @@ export default function DashboardClient() {
   });
   const [cfSection, setCfSection] = useState<"in" | "out">("in");
   const [cfAmount, setCfAmount] = useState<string>("1000");
-  const [cfCategoryId, setCfCategoryId] = useState<string>("1");
+
+  // ここが変更：カテゴリは select で選ぶ（ID手入力廃止）
+  const [cfCategoryId, setCfCategoryId] = useState<number | null>(null);
+
   const [cfDesc, setCfDesc] = useState<string>("");
 
   async function reloadAll(accountId: number, monthKey: string, monthsBack: number) {
@@ -105,12 +111,11 @@ export default function DashboardClient() {
     setMonthIncome(ie.income ?? 0);
     setMonthExpense(ie.expense ?? 0);
 
-    // ③ チャート/表：RLS を避けたいなら server action に寄せてもいいが、
-    //    いまは既存の “client select” を踏襲（動いてる前提）
+    // ③ チャート/表（client select）
     const from = ymToDate(ym(addMonths(new Date(monthKey), -(monthsBack - 1))));
     const { data, error: qErr } = await supabase
       .from("monthly_cash_account_balances")
-      .select("user_id, cash_account_id, month, income, expense, balance, updated_at")
+      .select("month, income, expense, balance, updated_at")
       .eq("cash_account_id", accountId)
       .gte("month", from)
       .order("month", { ascending: true });
@@ -126,11 +131,17 @@ export default function DashboardClient() {
         setLoading(true);
         setError("");
 
+        // 口座
         const accs = await getAccounts();
         setAccounts(accs);
 
         const initialId = accs[0]?.id ?? null;
         setSelectedAccountId(initialId);
+
+        // カテゴリ（追加）
+        const cats = await getCashCategories();
+        setCategories(cats);
+        setCfCategoryId(cats[0]?.id ?? null);
 
         if (!initialId) {
           setLoading(false);
@@ -176,13 +187,14 @@ export default function DashboardClient() {
       setError("");
 
       const amount = Number(cfAmount);
-      const cash_category_id = Number(cfCategoryId);
 
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error("金額が不正です（1以上の数値）");
       }
-      if (!Number.isFinite(cash_category_id) || cash_category_id <= 0) {
-        throw new Error("カテゴリIDが不正です（1以上の数値）");
+
+      // manual の制約：カテゴリ必須
+      if (!cfCategoryId) {
+        throw new Error("カテゴリが未選択です（manualは必須）");
       }
 
       const input: CashFlowCreateInput = {
@@ -190,7 +202,7 @@ export default function DashboardClient() {
         date: cfDate,
         section: cfSection,
         amount,
-        cash_category_id,
+        cash_category_id: cfCategoryId,
         description: cfDesc ? cfDesc : null,
       };
 
@@ -217,11 +229,7 @@ export default function DashboardClient() {
     <div style={{ padding: 24 }}>
       <h2>Cashflow Dashboard</h2>
 
-      {error ? (
-        <p style={{ color: "tomato" }}>
-          Error: {error}
-        </p>
-      ) : null}
+      {error ? <p style={{ color: "tomato" }}>Error: {error}</p> : null}
 
       <div style={{ marginTop: 12 }}>
         <div>
@@ -297,15 +305,21 @@ export default function DashboardClient() {
           />
         </label>
 
+        {/* ここが変更：カテゴリ select */}
         <label>
-          カテゴリID（manual必須）{" "}
-          <input
-            inputMode="numeric"
-            value={cfCategoryId}
-            onChange={(e) => setCfCategoryId(e.target.value)}
-            disabled={loading}
-            placeholder="例: 1"
-          />
+          カテゴリ（manual必須）{" "}
+          <select
+            value={cfCategoryId ?? ""}
+            onChange={(e) => setCfCategoryId(Number(e.target.value) || null)}
+            disabled={loading || categories.length === 0}
+          >
+            <option value="">選択してください</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} / id:{c.id}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label style={{ flex: "1 1 240px" }}>
@@ -336,7 +350,9 @@ export default function DashboardClient() {
 
       <h3>Overview</h3>
       <div>
-        <div>Account: {selectedName} / id: {selectedAccountId ?? "-"}</div>
+        <div>
+          Account: {selectedName} / id: {selectedAccountId ?? "-"}
+        </div>
         <div>Current Balance: {yen(currentBalance)}</div>
         <div>This Month Income: {yen(monthIncome)}</div>
         <div>This Month Expense: {yen(monthExpense)}</div>
