@@ -1,55 +1,52 @@
-import { redirect } from "next/navigation";
-import { createClient } from "@/utils/supabase/server";
+// app/transactions/new/page.tsx
 import TransactionForm from "./transaction-form";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+type Option = { id: number; name: string };
 
 export default async function NewTransactionPage() {
-  const supabase = await createClient();
+  const supabase = await createSupabaseServerClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
-
-  // 口座
-  const { data: accounts, error: accErr } = await supabase
+  // accounts
+  const { data: accountsData, error: accountsError } = await supabase
     .from("cash_accounts")
     .select("id,name")
     .order("id", { ascending: true });
 
-  if (accErr) throw new Error(accErr.message);
+  if (accountsError) throw accountsError;
 
-  // カテゴリ（※ cash_categories は user_id 無い想定）
-  // ここで type を select したい気持ちはあるが、
-  // 列が無い場合に即死するので、まずは id,name のみにして安全運用。
-  const { data: categories, error: catErr } = await supabase
+  // categories
+  const { data: categoriesData, error: categoriesError } = await supabase
     .from("cash_categories")
     .select("id,name")
     .order("id", { ascending: true });
 
-  if (catErr) throw new Error(catErr.message);
+  if (categoriesError) throw categoriesError;
+
+  const accounts: Option[] = (accountsData ?? []).map((a) => ({
+    id: Number(a.id),
+    name: String(a.name),
+  }));
+
+  const categories: Option[] = (categoriesData ?? []).map((c) => ({
+    id: Number(c.id),
+    name: String(c.name),
+  }));
+
+  // 初期表示は先頭アカウント（なければ null）
+  const initialCashAccountId = accounts.length > 0 ? accounts[0].id : null;
 
   return (
-    <main className="min-h-screen bg-black text-white p-6">
-      <div className="mx-auto w-full max-w-2xl">
-        <h1 className="text-xl font-semibold">New Transaction</h1>
-        <p className="text-sm text-white/60 mt-1">
-          収入/支出を1件登録します（manual）
-        </p>
+    <div className="p-6">
+      <h1 className="text-xl font-bold">New Transaction</h1>
 
-        <div className="mt-6">
-          <TransactionForm
-            accounts={(accounts ?? []).map((a) => ({
-              id: String(a.id),
-              name: String(a.name),
-            }))}
-            categories={(categories ?? []).map((c) => ({
-              id: String(c.id),
-              name: String(c.name),
-            }))}
-          />
-        </div>
+      <div className="mt-6">
+        <TransactionForm
+          accounts={accounts}
+          categories={categories}
+          initialCashAccountId={initialCashAccountId}
+        />
       </div>
-    </main>
+    </div>
   );
 }

@@ -3,79 +3,177 @@
 
 import React, { useMemo, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
 
-export default function TransactionForm(props: {
-  cashAccountId: number;
-}) {
+type Option = { id: number; name: string };
+
+type Props = {
+  accounts: Option[];
+  categories: Option[];
+  initialCashAccountId: number | null;
+};
+
+export default function TransactionForm({
+  accounts,
+  categories,
+  initialCashAccountId,
+}: Props) {
   const supabase = useMemo(() => createClient(), []);
-  const [date, setDate] = useState<string>("");
-  const [type, setType] = useState<"in" | "out">("in");
-  const [amount, setAmount] = useState<string>("");
-  const [cashCategoryId, setCashCategoryId] = useState<string>(""); // 入力は文字列でOK
+
+  const [cashAccountId, setCashAccountId] = useState<number | null>(
+    initialCashAccountId
+  );
+  const [section, setSection] = useState<"in" | "out">("in");
+  const [date, setDate] = useState<string>(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  });
+
+  const [amount, setAmount] = useState<string>("1000");
+  const [cashCategoryId, setCashCategoryId] = useState<number | null>(
+    categories.length ? categories[0].id : null
+  );
   const [description, setDescription] = useState<string>("");
 
-  const onSubmit = async () => {
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<string>("");
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setMessage("");
+
+    if (!cashAccountId) {
+      setMessage("cash_account_id が未選択です");
+      return;
+    }
+
+    // 金額
     const amountNum = Number(amount);
-    if (!Number.isFinite(amountNum)) {
-      alert("金額が不正");
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      setMessage("金額が不正です");
       return;
     }
 
-    const cash_account_id = Number(props.cashAccountId);
-    const cash_category_id = cashCategoryId ? Number(cashCategoryId) : null;
-
-    const payload: any = {
-      cash_account_id,
-      date,
-      type,
-      amount: amountNum,
-      description: description || null,
-      currency: "JPY",
-      source_type: "manual",
-      section: type, // 既存のCHECK制約に合わせる（in/out）
-      cash_category_id,
-    };
-
-    const { error } = await supabase.from("cash_flows").insert(payload);
-    if (error) {
-      console.error(error);
-      alert(error.message);
+    // manual の場合はカテゴリ必須（あなたのDB制約）
+    if (!cashCategoryId) {
+      setMessage("cash_category_id が未選択です（manualは必須）");
       return;
     }
-    alert("登録しました");
-  };
+
+    try {
+      setSubmitting(true);
+
+      await createCashFlow({
+        cash_account_id: cashAccountId,
+        date,
+        section,
+        amount: amountNum,
+        cash_category_id: cashCategoryId,
+        description: description.trim() ? description.trim() : null,
+      });
+
+      setMessage("登録しました");
+
+      // ついでにクライアント側のキャッシュを軽く揺らす（任意）
+      await supabase.auth.getSession();
+    } catch (err: any) {
+      console.error(err);
+      setMessage(err?.message ?? "登録に失敗しました");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
-    <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-      <label>
-        日付&nbsp;
-        <input value={date} onChange={(e) => setDate(e.target.value)} placeholder="YYYY-MM-DD" />
-      </label>
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="flex items-center gap-3">
+        <label className="w-24">口座</label>
+        <select
+          value={cashAccountId ?? ""}
+          onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
+          className="border px-2 py-1"
+        >
+          <option value="">選択してください</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name} / id:{a.id}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <label>
-        区分&nbsp;
-        <select value={type} onChange={(e) => setType(e.target.value as any)}>
+      <div className="flex items-center gap-3">
+        <label className="w-24">日付</label>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="border px-2 py-1"
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <label className="w-24">区分</label>
+        <select
+          value={section}
+          onChange={(e) => setSection(e.target.value as "in" | "out")}
+          className="border px-2 py-1"
+        >
           <option value="in">in（収入）</option>
           <option value="out">out（支出）</option>
         </select>
-      </label>
+      </div>
 
-      <label>
-        金額&nbsp;
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" />
-      </label>
+      <div className="flex items-center gap-3">
+        <label className="w-24">金額</label>
+        <input
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          inputMode="numeric"
+          className="border px-2 py-1"
+        />
+      </div>
 
-      <label>
-        カテゴリID（manual必須）&nbsp;
-        <input value={cashCategoryId} onChange={(e) => setCashCategoryId(e.target.value)} placeholder="1" />
-      </label>
+      <div className="flex items-center gap-3">
+        <label className="w-24">カテゴリ</label>
+        <select
+          value={cashCategoryId ?? ""}
+          onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
+          className="border px-2 py-1"
+        >
+          <option value="">選択してください</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} / id:{c.id}
+            </option>
+          ))}
+        </select>
+        <span className="text-sm opacity-70">manualは必須</span>
+      </div>
 
-      <label>
-        メモ（任意）&nbsp;
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="任意" />
-      </label>
+      <div className="flex items-center gap-3">
+        <label className="w-24">メモ</label>
+        <input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="border px-2 py-1 w-96"
+          placeholder="任意"
+        />
+      </div>
 
-      <button onClick={onSubmit}>登録</button>
-    </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="border px-3 py-1"
+        >
+          {submitting ? "登録中..." : "登録"}
+        </button>
+        {message ? <span className="text-sm">{message}</span> : null}
+      </div>
+    </form>
   );
 }
