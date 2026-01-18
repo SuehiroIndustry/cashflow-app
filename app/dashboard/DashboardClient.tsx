@@ -365,7 +365,7 @@ export default function DashboardClient() {
           </thead>
           <tbody>
             {chartRows.map((r) => (
-              <tr key={`${r.cash_account_id}-${r.month}`}>
+              <tr key={r.month}>
                 <td style={{ paddingRight: 16 }}>{r.month}</td>
                 <td style={{ textAlign: "right", paddingRight: 16 }}>
                   {yen(Number(r.balance ?? 0))}
