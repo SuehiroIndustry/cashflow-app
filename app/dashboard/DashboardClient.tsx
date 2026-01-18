@@ -11,6 +11,8 @@ import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBa
 import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
 import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
 import { getCashCategories } from "@/app/dashboard/_actions/getCashCategories";
+import { getCashFlows } from "@/app/dashboard/_actions/getCashFlows";
+import { deleteCashFlow } from "@/app/dashboard/_actions/deleteCashFlow";
 
 // types（ルール：_types からだけ）
 import type {
@@ -19,6 +21,7 @@ import type {
   MonthlyCashBalanceRow,
   CashFlowCreateInput,
   CashFlowSection,
+  CashFlowListRow,
 } from "./_types";
 
 function ym(date: Date) {
@@ -41,6 +44,10 @@ function addMonths(base: Date, delta: number) {
 function yen(n: number) {
   const v = Number.isFinite(n) ? Math.trunc(n) : 0;
   return `¥${v.toLocaleString()}`;
+}
+
+function sectionLabel(s: CashFlowSection) {
+  return s === "in" ? "in（収入）" : "out（支出）";
 }
 
 export default function DashboardClient() {
@@ -71,6 +78,9 @@ export default function DashboardClient() {
 
   // chart/table rows
   const [chartRows, setChartRows] = useState<MonthlyCashBalanceRow[]>([]);
+
+  // cash flow list (当月明細)
+  const [cashFlows, setCashFlows] = useState<CashFlowListRow[]>([]);
 
   // --- CashFlow input form state ---
   const [cfDate, setCfDate] = useState<string>(() => {
@@ -116,11 +126,19 @@ export default function DashboardClient() {
     setMonthIncome(Number(ie.income ?? 0));
     setMonthExpense(Number(ie.expense ?? 0));
 
-    // ③ チャート/表（client select）
+    // ③ 当月の明細（server action）
+    const flows = await getCashFlows({
+      cash_account_id: accountId,
+      month: monthKey,
+    });
+    setCashFlows(flows);
+
+    // ④ チャート/表（client select）
+    // user_id は取らない（使わないし、RLS事故の元）
     const from = ymToDate(ym(addMonths(new Date(monthKey), -(monthsBack - 1))));
     const { data, error: qErr } = await supabase
       .from("monthly_cash_account_balances")
-      .select("cash_account_id, month, income, expense, balance, updated_at, user_id")
+      .select("cash_account_id, month, income, expense, balance, updated_at")
       .eq("cash_account_id", accountId)
       .gte("month", from)
       .order("month", { ascending: true });
@@ -215,6 +233,34 @@ export default function DashboardClient() {
     } catch (e: any) {
       console.error(e);
       setError(e?.message ?? "登録中にエラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onDeleteCashFlow(row: CashFlowListRow) {
+    if (!selectedAccountId) return;
+
+    const ok = window.confirm(
+      `削除しますか？\n${row.date} / ${sectionLabel(row.section)} / ${yen(row.amount)}`
+    );
+    if (!ok) return;
+
+    try {
+      setLoading(true);
+      setError("");
+
+      await deleteCashFlow({
+        id: row.id,
+        cash_account_id: row.cash_account_id,
+      });
+
+      // 反映
+      const monthKey = ymToDate(currentMonth);
+      await reloadAll(selectedAccountId, monthKey, range);
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message ?? "削除中にエラーが発生しました");
     } finally {
       setLoading(false);
     }
@@ -360,6 +406,50 @@ export default function DashboardClient() {
         <div>{yen(monthBalance)}</div>
         <div>前月比: {yen(monthBalance - prevMonthBalance)}</div>
       </div>
+
+      <h3 style={{ marginTop: 16 }}>当月の明細</h3>
+      {cashFlows.length === 0 ? (
+        <p>当月の cash_flows がありません</p>
+      ) : (
+        <table style={{ marginTop: 8, width: "100%", maxWidth: 980 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", paddingRight: 12 }}>日付</th>
+              <th style={{ textAlign: "left", paddingRight: 12 }}>区分</th>
+              <th style={{ textAlign: "right", paddingRight: 12 }}>金額</th>
+              <th style={{ textAlign: "left", paddingRight: 12 }}>カテゴリ</th>
+              <th style={{ textAlign: "left", paddingRight: 12 }}>メモ</th>
+              <th style={{ textAlign: "left" }}>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cashFlows.map((r) => (
+              <tr key={r.id}>
+                <td style={{ paddingRight: 12 }}>{r.date}</td>
+                <td style={{ paddingRight: 12 }}>{sectionLabel(r.section)}</td>
+                <td style={{ textAlign: "right", paddingRight: 12 }}>
+                  {yen(Number(r.amount ?? 0))}
+                </td>
+                <td style={{ paddingRight: 12 }}>
+                  {r.cash_category?.name ?? "-"}
+                </td>
+                <td style={{ paddingRight: 12 }}>
+                  {r.description ?? ""}
+                </td>
+                <td>
+                  <button
+                    onClick={() => onDeleteCashFlow(r)}
+                    disabled={loading}
+                    title="削除"
+                  >
+                    削除
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       <h3 style={{ marginTop: 16 }}>last {range} months</h3>
 
