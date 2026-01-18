@@ -28,3 +28,10 @@ export type CashFlowCreateInput = {
   cash_category_id: number; // source_type='manual' のとき必須
   description?: string | null;
 };
+
+export type OverviewPayload = {
+  currentBalance: number;
+  monthIncome: number;
+  monthExpense: number;
+  net: number;
+};

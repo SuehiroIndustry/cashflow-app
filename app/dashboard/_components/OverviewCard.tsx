@@ -1,6 +1,17 @@
 // app/dashboard/_components/OverviewCard.tsx
 import React from "react";
-import type { OverviewPayload } from "../_types";
+
+type OverviewPayload = {
+  currentBalance: number;
+  monthIncome: number;
+  monthExpense: number;
+  net: number;
+};
+
+function yen(n: number) {
+  const v = Number.isFinite(n) ? Math.trunc(n) : 0;
+  return `¥${v.toLocaleString()}`;
+}
 
 export default function OverviewCard(props: {
   accountName: string;
@@ -9,12 +20,23 @@ export default function OverviewCard(props: {
   const { accountName, payload } = props;
 
   return (
-    <div>
-      <h3>Overview ({accountName})</h3>
-      <div>Current Balance: ¥{payload.currentBalance.toLocaleString()}</div>
-      <div>This Month Income: ¥{payload.monthIncome.toLocaleString()}</div>
-      <div>This Month Expense: ¥{payload.monthExpense.toLocaleString()}</div>
-      <div>Net: ¥{payload.net.toLocaleString()}</div>
+    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+      <h2 className="text-sm font-semibold text-white/80">Overview</h2>
+      <div className="mt-1 text-xs text-white/50">{accountName}</div>
+
+      <div className="mt-3 grid grid-cols-2 gap-y-2 text-sm">
+        <div className="text-white/60">Current Balance</div>
+        <div className="text-right">{yen(payload.currentBalance)}</div>
+
+        <div className="text-white/60">This Month Income</div>
+        <div className="text-right">{yen(payload.monthIncome)}</div>
+
+        <div className="text-white/60">This Month Expense</div>
+        <div className="text-right">{yen(payload.monthExpense)}</div>
+
+        <div className="text-white/60">Net</div>
+        <div className="text-right">{yen(payload.net)}</div>
+      </div>
     </div>
   );
 }
