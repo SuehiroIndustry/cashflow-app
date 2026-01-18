@@ -1,27 +1,32 @@
 // app/dashboard/_components/OverviewCard.tsx
+
 import React from "react";
+import type { OverviewData } from "../_types";
 
-export default function OverviewCard(props: {
-  accountName: string;
-  currentBalance: number;
-  income: number;
-  expense: number;
-  net: number;
-}) {
-  const { accountName, currentBalance, income, expense, net } = props;
+type Props = OverviewData;
 
-  const yen = (n: number) =>
-    `¥${Number.isFinite(n) ? Math.trunc(n).toLocaleString() : "0"}`;
+export default function OverviewCard(props: Props) {
+  const {
+    accountName,
+    currentBalance,
+    thisMonthIncome,
+    thisMonthExpense,
+    net,
+    prevMonthBalance,
+  } = props;
 
   return (
-    <div style={{ marginTop: 16 }}>
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>Overview</div>
-
+    <div className="space-y-2 text-sm">
       <div>Account: {accountName}</div>
-      <div>Current Balance: {yen(currentBalance)}</div>
-      <div>This Month Income: {yen(income)}</div>
-      <div>This Month Expense: {yen(expense)}</div>
-      <div>Net: {yen(net)}</div>
+
+      <div>Current Balance: ¥{currentBalance.toLocaleString()}</div>
+      <div>This Month Income: ¥{thisMonthIncome.toLocaleString()}</div>
+      <div>This Month Expense: ¥{thisMonthExpense.toLocaleString()}</div>
+      <div>Net: ¥{net.toLocaleString()}</div>
+
+      <div className="pt-2 text-xs opacity-70">
+        前月比: ¥{(currentBalance - prevMonthBalance).toLocaleString()}
+      </div>
     </div>
   );
 }
