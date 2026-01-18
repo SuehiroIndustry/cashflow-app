@@ -1,18 +1,18 @@
 // app/dashboard/_actions/deleteCashFlow.ts
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createClient } from "@/utils/supabase/server";
 import type { CashFlowDeleteInput } from "../_types";
 
 export async function deleteCashFlow(args: CashFlowDeleteInput): Promise<void> {
-  const supabase = await createSupabaseServerClient();
+  const supabase = createClient();
 
   const {
     data: { user },
-    error: userErr,
+    error: authError,
   } = await supabase.auth.getUser();
 
-  if (userErr || !user) throw new Error("Not authenticated");
+  if (authError || !user) throw new Error("Not authenticated");
 
   const { error } = await supabase
     .from("cash_flows")

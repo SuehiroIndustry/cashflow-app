@@ -1,5 +1,4 @@
 // app/dashboard/_components/OverviewCard.tsx
-
 import React from "react";
 import type { OverviewPayload } from "../_types";
 
@@ -9,13 +8,15 @@ export default function OverviewCard(props: {
 }) {
   const { accountName, payload } = props;
 
-  const yen = (n: number) => `¥${(Number.isFinite(n) ? Math.trunc(n) : 0).toLocaleString()}`;
+  const yen = (n: number) =>
+    `¥${(Number.isFinite(n) ? Math.trunc(n) : 0).toLocaleString()}`;
 
   return (
     <div className="space-y-1">
       <div className="font-semibold">Overview</div>
 
       <div>Account: {accountName}</div>
+
       <div>Current Balance: {yen(payload.currentBalance)}</div>
       <div>This Month Income: {yen(payload.thisMonthIncome)}</div>
       <div>This Month Expense: {yen(payload.thisMonthExpense)}</div>
