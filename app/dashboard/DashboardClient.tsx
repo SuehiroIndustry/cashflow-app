@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { ensureMonthlyCashBalance } from "@/app/dashboard/_actions/ensureMonthlyCashBalance";
 
 // ✅ 型は _types からのみ import（ルール）
 import type { CashAccount, MonthlyCashBalanceRow } from "./_types";
