@@ -4,18 +4,13 @@
 import { createClient } from "@/utils/supabase/server";
 import type { CashFlowListRow } from "../_types";
 
-/**
- * 指定月（YYYY-MM）に属する cash_flows を返す
- * - user_id は返さない（不要・あなたの前提）
- * - category 名は cash_categories を join して返す
- */
 export async function getCashFlows(args: {
   cash_account_id: number;
   month: string; // YYYY-MM
 }): Promise<CashFlowListRow[]> {
-  const supabase = createClient();
+  // ★createClient が Promise の実装なら await
+  const supabase = await createClient();
 
-  // auth（RLS 前提）
   const {
     data: { user },
     error: authError,
@@ -23,12 +18,11 @@ export async function getCashFlows(args: {
 
   if (authError || !user) throw new Error("Not authenticated");
 
-  // month: YYYY-MM -> start/end（YYYY-MM-DD）
   const start = `${args.month}-01`;
   const d = new Date(`${args.month}-01T00:00:00.000Z`);
   if (Number.isNaN(d.getTime())) throw new Error("Invalid month format");
   d.setUTCMonth(d.getUTCMonth() + 1);
-  const end = d.toISOString().slice(0, 10); // YYYY-MM-DD
+  const end = d.toISOString().slice(0, 10);
 
   const { data, error } = await supabase
     .from("cash_flows")
@@ -56,7 +50,5 @@ export async function getCashFlows(args: {
 
   if (error) throw error;
 
-  // Supabase の返却は型推論が弱いので、最終形だけ合わせる
-  // （ただし client 側で as 乱用しないため、ここで責任持つ）
   return (data ?? []) as unknown as CashFlowListRow[];
 }

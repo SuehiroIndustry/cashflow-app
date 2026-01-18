@@ -5,7 +5,8 @@ import { createClient } from "@/utils/supabase/server";
 import type { CashFlowDeleteInput } from "../_types";
 
 export async function deleteCashFlow(args: CashFlowDeleteInput): Promise<void> {
-  const supabase = createClient();
+  // ★ここが重要：createClient が Promise を返す実装になってるので await が必須
+  const supabase = await createClient();
 
   const {
     data: { user },
