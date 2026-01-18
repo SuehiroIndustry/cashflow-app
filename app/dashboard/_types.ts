@@ -2,18 +2,19 @@
 
 export type CashFlowSection = "in" | "out";
 
-// --- master ---
+/** accounts */
 export type CashAccount = {
   id: number;
   name: string;
 };
 
+/** categories */
 export type CashCategory = {
   id: number;
   name: string;
 };
 
-// --- monthly snapshot row (monthly_cash_account_balances) ---
+/** monthly balances (table: monthly_cash_account_balances) */
 export type MonthlyCashBalanceRow = {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
@@ -21,10 +22,10 @@ export type MonthlyCashBalanceRow = {
   expense: number | null;
   balance: number | null;
   updated_at?: string | null;
-  user_id?: string | null; // select で取る場合があるので optional
+  user_id?: string | null;
 };
 
-// --- getMonthlyIncomeExpense の戻り ---
+/** server action: income/expense for a month */
 export type MonthlyIncomeExpenseRow = {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
@@ -32,32 +33,38 @@ export type MonthlyIncomeExpenseRow = {
   expense: number;
 };
 
-// --- cash_flows create ---
+/** create cash flow input */
 export type CashFlowCreateInput = {
   cash_account_id: number;
   date: string; // "YYYY-MM-DD"
   section: CashFlowSection;
   amount: number;
-  cash_category_id: number; // manual 必須（現状ルール）
+  cash_category_id: number; // manual 必須運用
   description: string | null;
 };
 
-// --- cash_flows list row (getCashFlows の戻り) ---
+/** delete cash flow input */
+export type CashFlowDeleteInput = {
+  id: number;
+  cash_account_id: number;
+};
+
+/** cash flow list row (for "当月の明細") */
 export type CashFlowListRow = {
   id: number;
   cash_account_id: number;
-  date: string; // "YYYY-MM-DD"
+  date: string; // "YYYY-MM-DD" (or timestamp string)
   section: CashFlowSection;
   amount: number;
   cash_category_id: number | null;
   description: string | null;
-  created_at?: string | null;
+  created_at: string;
 
-  // join で cash_categories を取る想定
-  cash_category?: { id: number; name: string } | null;
+  // join result (alias)
+  cash_category: { id: number; name: string } | null;
 };
 
-// --- overview card payload (OverviewCard.tsx が参照) ---
+/** OverviewCard 用 */
 export type OverviewPayload = {
   currentBalance: number;
   thisMonthIncome: number;
@@ -66,9 +73,4 @@ export type OverviewPayload = {
 
   monthlyBalance: number;
   monthlyDiff: number;
-};
-
-export type CashFlowDeleteInput = {
-  id: number;
-  cash_account_id: number;
 };
