@@ -1,38 +1,45 @@
+// app/dashboard/DashboardClient.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-import { ensureMonthlyCashBalance } from "@/app/dashboard/_actions/ensureMonthlyCashBalance";
 
-// ✅ 型は _types からのみ import（ルール）
-import type { CashAccount, MonthlyCashBalanceRow } from "./_types";
+// actions
+import { getAccounts } from "@/app/dashboard/_actions/getAccounts";
+import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
+import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
+import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
 
-/* =====================
- * util
- * ===================== */
+// types（ルール：_types からだけ）
+import type {
+  CashAccount,
+  MonthlyCashBalanceRow,
+  CashFlowCreateInput,
+} from "./_types";
+
 function ym(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}`;
 }
+
+/** "YYYY-MM" -> "YYYY-MM-01" */
 function ymToDate(ymStr: string) {
-  // DBの month(date) は YYYY-MM-01 で持つ前提
   return `${ymStr}-01`;
 }
+
 function addMonths(base: Date, delta: number) {
   const d = new Date(base);
   d.setMonth(d.getMonth() + delta);
   return d;
 }
+
 function yen(n: number) {
   const v = Number.isFinite(n) ? Math.trunc(n) : 0;
   return `¥${v.toLocaleString()}`;
 }
 
-/* =====================
- * component
- * ===================== */
 export default function DashboardClient() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -41,12 +48,10 @@ export default function DashboardClient() {
   const [error, setError] = useState("");
 
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
-    null
-  );
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   const [range, setRange] = useState<6 | 12>(12);
-  const currentMonth = useMemo(() => ym(new Date()), []);
+  const [currentMonth, setCurrentMonth] = useState<string>(() => ym(new Date()));
 
   // overview
   const [currentBalance, setCurrentBalance] = useState(0);
@@ -57,172 +62,325 @@ export default function DashboardClient() {
   const [monthBalance, setMonthBalance] = useState(0);
   const [prevMonthBalance, setPrevMonthBalance] = useState(0);
 
-  // chart
+  // chart/table rows
   const [chartRows, setChartRows] = useState<MonthlyCashBalanceRow[]>([]);
 
-  /* =====================
-   * init: accounts
-   * ===================== */
+  // --- CashFlow input form state ---
+  const [cfDate, setCfDate] = useState<string>(() => {
+    // 今日の日付（ローカル）を YYYY-MM-DD
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  });
+  const [cfSection, setCfSection] = useState<"in" | "out">("in");
+  const [cfAmount, setCfAmount] = useState<string>("1000");
+  const [cfCategoryId, setCfCategoryId] = useState<string>("1");
+  const [cfDesc, setCfDesc] = useState<string>("");
+
+  async function reloadAll(accountId: number, monthKey: string, monthsBack: number) {
+    // ① 今月・前月 snapshot（server action）
+    const prevMonthKey = ymToDate(ym(addMonths(new Date(monthKey), -1)));
+
+    const thisSnap = await getMonthlyCashBalance({
+      cash_account_id: accountId,
+      month: monthKey,
+    });
+
+    const prevSnap = await getMonthlyCashBalance({
+      cash_account_id: accountId,
+      month: prevMonthKey,
+    });
+
+    setMonthBalance(Number(thisSnap?.balance ?? 0));
+    setPrevMonthBalance(Number(prevSnap?.balance ?? 0));
+    setCurrentBalance(Number(thisSnap?.balance ?? 0));
+
+    // ② 今月の収入・支出（server action）
+    const ie = await getMonthlyIncomeExpense({
+      cash_account_id: accountId,
+      month: monthKey,
+    });
+    setMonthIncome(ie.income ?? 0);
+    setMonthExpense(ie.expense ?? 0);
+
+    // ③ チャート/表：RLS を避けたいなら server action に寄せてもいいが、
+    //    いまは既存の “client select” を踏襲（動いてる前提）
+    const from = ymToDate(ym(addMonths(new Date(monthKey), -(monthsBack - 1))));
+    const { data, error: qErr } = await supabase
+      .from("monthly_cash_account_balances")
+      .select("user_id, cash_account_id, month, income, expense, balance, updated_at")
+      .eq("cash_account_id", accountId)
+      .gte("month", from)
+      .order("month", { ascending: true });
+
+    if (qErr) throw qErr;
+
+    setChartRows((data ?? []) as MonthlyCashBalanceRow[]);
+  }
+
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
         setError("");
 
-        const { data, error } = await supabase
-          .from("cash_accounts")
-          .select("id,name")
-          .order("id", { ascending: true });
-
-        if (error) throw error;
-
-        const accs = (data ?? []) as CashAccount[];
+        const accs = await getAccounts();
         setAccounts(accs);
-        setSelectedAccountId(accs[0]?.id ?? null);
-      } catch (e) {
+
+        const initialId = accs[0]?.id ?? null;
+        setSelectedAccountId(initialId);
+
+        if (!initialId) {
+          setLoading(false);
+          return;
+        }
+
+        const monthKey = ymToDate(currentMonth);
+        await reloadAll(initialId, monthKey, range);
+      } catch (e: any) {
         console.error(e);
-        setError("口座一覧の取得に失敗しました");
+        setError(e?.message ?? "読み込み中にエラーが発生しました");
       } finally {
         setLoading(false);
       }
     })();
-  }, [supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  /* =====================
-   * load monthly balances
-   * ===================== */
+  // account/month/range change
   useEffect(() => {
+    (async () => {
+      if (!selectedAccountId) return;
+      try {
+        setLoading(true);
+        setError("");
+        const monthKey = ymToDate(currentMonth);
+        await reloadAll(selectedAccountId, monthKey, range);
+      } catch (e: any) {
+        console.error(e);
+        setError(e?.message ?? "更新中にエラーが発生しました");
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAccountId, currentMonth, range]);
+
+  async function onSubmitCashFlow() {
     if (!selectedAccountId) return;
 
-    (async () => {
-      try {
-        setLoading(true);
-        setError("");
+    try {
+      setLoading(true);
+      setError("");
 
-        const thisMonthKey = ymToDate(currentMonth);
-        const prevMonthKey = ymToDate(
-          ym(addMonths(new Date(currentMonth + "-01"), -1))
-        );
+      const amount = Number(cfAmount);
+      const cash_category_id = Number(cfCategoryId);
 
-        const from = ymToDate(
-          ym(addMonths(new Date(currentMonth + "-01"), -(range - 1)))
-        );
-
-        // ✅ monthly_cash_account_balances から直接取る（RLS通る前提）
-        const { data, error } = await supabase
-          .from("monthly_cash_account_balances")
-          .select("month,income,expense,balance")
-          .eq("cash_account_id", selectedAccountId)
-          .gte("month", from)
-          .order("month", { ascending: true });
-
-        if (error) throw error;
-
-        const rows = (data ?? []) as MonthlyCashBalanceRow[];
-        setChartRows(rows);
-
-        const thisMonth = rows.find((r) => r.month === thisMonthKey);
-        const prevMonth = rows.find((r) => r.month === prevMonthKey);
-
-        const mb = thisMonth?.balance ?? 0;
-        const pb = prevMonth?.balance ?? 0;
-
-        setMonthBalance(mb);
-        setPrevMonthBalance(pb);
-
-        setCurrentBalance(mb);
-        setMonthIncome(thisMonth?.income ?? 0);
-        setMonthExpense(thisMonth?.expense ?? 0);
-      } catch (e) {
-        console.error(e);
-        setError("データ取得中にエラーが発生しました");
-      } finally {
-        setLoading(false);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("金額が不正です（1以上の数値）");
       }
-    })();
-  }, [selectedAccountId, range, currentMonth, supabase]);
+      if (!Number.isFinite(cash_category_id) || cash_category_id <= 0) {
+        throw new Error("カテゴリIDが不正です（1以上の数値）");
+      }
 
-  /* =====================
-   * render
-   * ===================== */
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div className="text-red-500">{error}</div>;
+      const input: CashFlowCreateInput = {
+        cash_account_id: selectedAccountId,
+        date: cfDate,
+        section: cfSection,
+        amount,
+        cash_category_id,
+        description: cfDesc ? cfDesc : null,
+      };
+
+      await createCashFlow(input);
+
+      // 反映
+      const monthKey = ymToDate(currentMonth);
+      await reloadAll(selectedAccountId, monthKey, range);
+
+      // ちょいご褒美：説明だけクリア（連続入力しやすい）
+      setCfDesc("");
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message ?? "登録中にエラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const selectedName =
+    accounts.find((a) => a.id === selectedAccountId)?.name ?? "";
 
   return (
-    <div>
-      <h1>Cashflow Dashboard</h1>
+    <div style={{ padding: 24 }}>
+      <h2>Cashflow Dashboard</h2>
 
-      <div style={{ marginBottom: 16 }}>
-        <label>
+      {error ? (
+        <p style={{ color: "tomato" }}>
+          Error: {error}
+        </p>
+      ) : null}
+
+      <div style={{ marginTop: 12 }}>
+        <div>
           Account:{" "}
           <select
             value={selectedAccountId ?? ""}
             onChange={(e) => setSelectedAccountId(Number(e.target.value))}
+            disabled={loading || accounts.length === 0}
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.name}
+                {a.name} / id:{a.id}
               </option>
             ))}
           </select>
-        </label>
-        <span style={{ marginLeft: 12 }}>id: {selectedAccountId ?? "-"}</span>
+        </div>
+
+        <div style={{ marginTop: 8 }}>
+          Month:{" "}
+          <input
+            type="month"
+            value={currentMonth}
+            onChange={(e) => setCurrentMonth(e.target.value)}
+            disabled={loading}
+          />
+          {"  "}
+          Range:{" "}
+          <select
+            value={range}
+            onChange={(e) => setRange(Number(e.target.value) as 6 | 12)}
+            disabled={loading}
+          >
+            <option value={6}>last 6 months</option>
+            <option value={12}>last 12 months</option>
+          </select>
+        </div>
       </div>
 
-      <div style={{ marginBottom: 24 }}>
-        <h2>Overview</h2>
+      <hr style={{ margin: "16px 0" }} />
+
+      <h3>入力（cash_flows）</h3>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <label>
+          日付{" "}
+          <input
+            type="date"
+            value={cfDate}
+            onChange={(e) => setCfDate(e.target.value)}
+            disabled={loading}
+          />
+        </label>
+
+        <label>
+          区分{" "}
+          <select
+            value={cfSection}
+            onChange={(e) => setCfSection(e.target.value as "in" | "out")}
+            disabled={loading}
+          >
+            <option value="in">in（収入）</option>
+            <option value="out">out（支出）</option>
+          </select>
+        </label>
+
+        <label>
+          金額{" "}
+          <input
+            inputMode="numeric"
+            value={cfAmount}
+            onChange={(e) => setCfAmount(e.target.value)}
+            disabled={loading}
+            placeholder="例: 1000"
+          />
+        </label>
+
+        <label>
+          カテゴリID（manual必須）{" "}
+          <input
+            inputMode="numeric"
+            value={cfCategoryId}
+            onChange={(e) => setCfCategoryId(e.target.value)}
+            disabled={loading}
+            placeholder="例: 1"
+          />
+        </label>
+
+        <label style={{ flex: "1 1 240px" }}>
+          メモ{" "}
+          <input
+            value={cfDesc}
+            onChange={(e) => setCfDesc(e.target.value)}
+            disabled={loading}
+            placeholder="任意"
+            style={{ width: "100%" }}
+          />
+        </label>
+
+        <button onClick={onSubmitCashFlow} disabled={loading || !selectedAccountId}>
+          {loading ? "..." : "登録"}
+        </button>
+
+        <button
+          onClick={() => router.refresh()}
+          disabled={loading}
+          title="UIが怪しい時の強制リフレッシュ"
+        >
+          refresh
+        </button>
+      </div>
+
+      <hr style={{ margin: "16px 0" }} />
+
+      <h3>Overview</h3>
+      <div>
+        <div>Account: {selectedName} / id: {selectedAccountId ?? "-"}</div>
         <div>Current Balance: {yen(currentBalance)}</div>
         <div>This Month Income: {yen(monthIncome)}</div>
         <div>This Month Expense: {yen(monthExpense)}</div>
         <div>Net: {yen(monthIncome - monthExpense)}</div>
       </div>
 
-      <div style={{ marginBottom: 24 }}>
-        <h2>月次残高</h2>
+      <h3 style={{ marginTop: 16 }}>月次残高</h3>
+      <div>
         <div>{yen(monthBalance)}</div>
         <div>前月比: {yen(monthBalance - prevMonthBalance)}</div>
       </div>
 
-      <div>
-        <div style={{ marginBottom: 12 }}>
-          <button onClick={() => setRange(6)}>last 6 months</button>{" "}
-          <button onClick={() => setRange(12)}>last 12 months</button>
-        </div>
+      <h3 style={{ marginTop: 16 }}>last {range} months</h3>
 
-        <table>
+      {chartRows.length === 0 ? (
+        <p>monthly_cash_account_balances に該当データがありません（RLS or データ未作成の可能性）</p>
+      ) : (
+        <table style={{ marginTop: 8 }}>
           <thead>
             <tr>
               <th style={{ textAlign: "left", paddingRight: 16 }}>Month</th>
               <th style={{ textAlign: "right", paddingRight: 16 }}>Balance</th>
               <th style={{ textAlign: "right", paddingRight: 16 }}>Income</th>
-              <th style={{ textAlign: "right", paddingRight: 16 }}>Expense</th>
+              <th style={{ textAlign: "right" }}>Expense</th>
             </tr>
           </thead>
           <tbody>
             {chartRows.map((r) => (
-              <tr key={r.month}>
+              <tr key={`${r.cash_account_id}-${r.month}`}>
                 <td style={{ paddingRight: 16 }}>{r.month}</td>
                 <td style={{ textAlign: "right", paddingRight: 16 }}>
-                  {yen(r.balance)}
+                  {yen(Number(r.balance ?? 0))}
                 </td>
                 <td style={{ textAlign: "right", paddingRight: 16 }}>
-                  {yen(r.income)}
+                  {yen(Number(r.income ?? 0))}
                 </td>
-                <td style={{ textAlign: "right", paddingRight: 16 }}>
-                  {yen(r.expense)}
+                <td style={{ textAlign: "right" }}>
+                  {yen(Number(r.expense ?? 0))}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-
-        {!chartRows.length && (
-          <div style={{ marginTop: 12, opacity: 0.7 }}>
-            monthly_cash_account_balances に該当データがありません（RLS or
-            データ未作成の可能性）
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

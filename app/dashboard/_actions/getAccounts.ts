@@ -1,21 +1,29 @@
+// app/dashboard/_actions/getAccounts.ts
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { AccountRow } from "../_types";
+import type { CashAccount } from "../_types";
 
-export async function getAccounts(): Promise<AccountRow[]> {
+export async function getAccounts(): Promise<CashAccount[]> {
   const supabase = await createSupabaseServerClient();
 
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr || !user) return [];
+
   const { data, error } = await supabase
-    .from("accounts")
-    .select("id, name, type, currency, is_active, is_default, created_at")
-    .order("is_default", { ascending: false })
-    .order("created_at", { ascending: true });
+    .from("cash_accounts")
+    .select("id, name")
+    .eq("user_id", user.id)
+    .order("id", { ascending: true });
 
-  if (error) {
-    console.error("[getAccounts] error:", error.message);
-    return [];
-  }
+  if (error) throw error;
 
-  return (data ?? []) as AccountRow[];
+  return (data ?? []).map((r) => ({
+    id: Number(r.id),
+    name: String(r.name),
+  }));
 }

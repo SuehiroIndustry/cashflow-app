@@ -1,35 +1,30 @@
 // app/dashboard/_types.ts
 
-export type AccountRow = {
-  id: number;
-  name: string;
-};
-
 export type CashAccount = {
   id: number;
   name: string;
 };
 
 export type MonthlyCashBalanceRow = {
+  user_id: string;
+  cash_account_id: number;
   month: string; // "YYYY-MM-01"
-  income: number;
-  expense: number;
-  balance: number;
+  income: number | null;
+  expense: number | null;
+  balance: number | null;
+  updated_at?: string | null;
 };
 
-// ✅ これを追加：古い命名（MonthlyBalanceRow）を新命名に合わせて吸収する
-export type MonthlyBalanceRow = MonthlyCashBalanceRow;
-
-export type MonthAgg = {
-  month: string; // "YYYY-MM"
+export type MonthlyAgg = {
   income: number;
   expense: number;
-  balance: number;
 };
 
-export type OverviewPayload = {
-  currentBalance: number;
-  monthIncome: number;
-  monthExpense: number;
-  net: number;
+export type CashFlowCreateInput = {
+  cash_account_id: number;
+  date: string; // "YYYY-MM-DD"
+  section: "in" | "out";
+  amount: number;
+  cash_category_id: number; // source_type='manual' のとき必須
+  description?: string | null;
 };
