@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import type { MonthlyBalanceRow } from "../_types";
+import type { MonthlyCashBalanceRow } from "../_types";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -22,7 +22,7 @@ function toLabel(month: string) {
 
 export default function EcoCharts(props: {
   accountName: string;
-  monthly: MonthlyBalanceRow[];
+  monthly: MonthlyCashBalanceRow[];
   yen: (n: number) => string;
 }) {
   const { accountName, monthly, yen } = props;
