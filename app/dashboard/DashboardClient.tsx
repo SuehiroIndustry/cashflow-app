@@ -50,10 +50,6 @@ function normalizeYmd(s: string) {
   return d.toISOString().slice(0, 10);
 }
 
-function isYmd(s: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 function yen(n: number) {
   const v = Number.isFinite(n) ? Math.trunc(n) : 0;
   return `¥${v.toLocaleString()}`;
@@ -63,31 +59,16 @@ function sectionLabel(s: CashFlowSection) {
   return s === "in" ? "収入" : "支出";
 }
 
-type UiCashFlowDraft = {
-  date: string;
-  section: CashFlowSection;
-  amountText: string; // inputは文字列で持つ
-  categoryIdText: string; // 未選択は "" 推奨
-  description: string;
-  sourceType: "manual";
-};
+// "1,000" / " 1000 " / "" を許容して number にする
+function parseAmount(input: string): number {
+  const raw = String(input ?? "").trim();
+  if (!raw) return NaN;
 
-function validateDraft(d: UiCashFlowDraft) {
-  const errors: string[] = [];
+  // カンマ除去（日本語入力の全角カンマは今回は未対応。必要ならここで置換追加）
+  const normalized = raw.replace(/,/g, "");
+  const n = Number(normalized);
 
-  const date = normalizeYmd(d.date);
-  if (!date || !isYmd(date)) errors.push("日付が不正です（YYYY-MM-DD）");
-
-  const amount = Number(d.amountText);
-  if (!Number.isFinite(amount)) errors.push("金額が数値ではありません");
-  if (Number.isFinite(amount) && amount <= 0) errors.push("金額は1以上にしてください");
-
-  // manual時のカテゴリ必須（DB制約に合わせる）
-  if (d.sourceType === "manual" && !d.categoryIdText) {
-    errors.push("カテゴリを選択してください（manual必須）");
-  }
-
-  return { ok: errors.length === 0, errors, amount, date };
+  return n;
 }
 
 export default function DashboardClient() {
@@ -118,8 +99,7 @@ export default function DashboardClient() {
     const net = thisMonthIncome - thisMonthExpense;
 
     const monthlyBalance = Number(chartRows.length ? chartRows[chartRows.length - 1].balance ?? 0 : 0);
-    const prevBalance =
-      chartRows.length >= 2 ? Number(chartRows[chartRows.length - 2].balance ?? 0) : 0;
+    const prevBalance = chartRows.length >= 2 ? Number(chartRows[chartRows.length - 2].balance ?? 0) : 0;
     const monthlyDiff = monthlyBalance - prevBalance;
 
     return {
@@ -135,23 +115,15 @@ export default function DashboardClient() {
   // form
   const [formDate, setFormDate] = useState<string>(() => normalizeYmd(new Date().toISOString().slice(0, 10)));
   const [formSection, setFormSection] = useState<CashFlowSection>("in");
-  const [formAmountText, setFormAmountText] = useState<string>(""); // ★ stringで持つ
+  const [formAmount, setFormAmount] = useState<string>(""); // ← 初期0はやめる（誤登録防止）
   const [formCategoryId, setFormCategoryId] = useState<number | null>(null);
   const [formMemo, setFormMemo] = useState<string>("");
 
-  const formSourceType: "manual" = "manual";
-
-  const canSubmit = useMemo(() => {
-    const draft: UiCashFlowDraft = {
-      date: formDate,
-      section: formSection,
-      amountText: formAmountText,
-      categoryIdText: formCategoryId ? String(formCategoryId) : "",
-      description: formMemo,
-      sourceType: formSourceType,
-    };
-    return validateDraft(draft).ok;
-  }, [formDate, formSection, formAmountText, formCategoryId, formMemo, formSourceType]);
+  const numericAmount = useMemo(() => parseAmount(formAmount), [formAmount]);
+  const isAmountValid = useMemo(
+    () => Number.isFinite(numericAmount) && numericAmount >= 1,
+    [numericAmount]
+  );
 
   const loadBase = useCallback(async () => {
     const [acc, cats] = await Promise.all([getAccounts(), getCashCategories()]);
@@ -163,20 +135,17 @@ export default function DashboardClient() {
     }
   }, [selectedAccountId]);
 
-  const reloadAll = useCallback(
-    async (cash_account_id: number, monthYYYYMM01: string, rangeN: number) => {
-      const [flows, rows, ie] = await Promise.all([
-        getCashFlows({ cash_account_id, month: monthYYYYMM01 }),
-        getMonthlyCashBalance({ cash_account_id, month: monthYYYYMM01, range: rangeN }),
-        getMonthlyIncomeExpense({ cash_account_id, month: monthYYYYMM01 }),
-      ]);
+  const reloadAll = useCallback(async (cash_account_id: number, monthYYYYMM01: string, rangeN: number) => {
+    const [flows, rows, ie] = await Promise.all([
+      getCashFlows({ cash_account_id, month: monthYYYYMM01 }),
+      getMonthlyCashBalance({ cash_account_id, month: monthYYYYMM01, range: rangeN }),
+      getMonthlyIncomeExpense({ cash_account_id, month: monthYYYYMM01 }),
+    ]);
 
-      setCashFlows(flows);
-      setChartRows(rows);
-      setIncomeExpense(ie);
-    },
-    []
-  );
+    setCashFlows(flows);
+    setChartRows(rows);
+    setIncomeExpense(ie);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -212,42 +181,47 @@ export default function DashboardClient() {
   async function onCreate() {
     if (!selectedAccountId) return;
 
-    const draft: UiCashFlowDraft = {
-      date: formDate,
-      section: formSection,
-      amountText: formAmountText,
-      categoryIdText: formCategoryId ? String(formCategoryId) : "",
-      description: formMemo,
-      sourceType: "manual",
-    };
-
-    const v = validateDraft(draft);
-    if (!v.ok) {
-      setErrorMsg(v.errors[0]);
-      return;
-    }
-
     try {
       setLoading(true);
       setErrorMsg("");
 
+      const ymdDate = normalizeYmd(formDate);
+
+      // manual 必須ルール
+      if (!formCategoryId) {
+        throw new Error("カテゴリを選択してください（manual必須）");
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) {
+        throw new Error("日付が不正です（YYYY-MM-DD で入力してください）");
+      }
+
+      // 金額は 1以上必須（0禁止）
+      const amount = parseAmount(formAmount);
+      if (!Number.isFinite(amount)) {
+        throw new Error("金額が不正です（数字で入力してください）");
+      }
+      if (amount < 1) {
+        throw new Error("金額は1以上で入力してください（0は登録できません）");
+      }
+
       const payload: CashFlowCreateInput = {
-        cash_account_id: selectedAccountId,
-        date: v.date,
-        section: draft.section,
-        amount: v.amount,
-        cash_category_id: Number(draft.categoryIdText),
-        description: draft.description || null,
+        cash_account_id: selectedAccountId, // number
+        date: ymdDate,
+        section: formSection,
+        amount,
+        cash_category_id: formCategoryId, // number
+        description: formMemo || null,
         source_type: "manual",
       };
 
       await createCashFlow(payload);
+
       await reloadAll(selectedAccountId, monthKey, rangeN);
 
       // reset（任意）
-      setFormAmountText("");
+      setFormAmount("");
       setFormMemo("");
-      // setFormCategoryId(null);
+      // setFormCategoryId(null); // 消したくなければコメントのままでOK
     } catch (e: any) {
       console.error(e);
       setErrorMsg(e?.message ?? "登録中にエラーが発生しました");
@@ -286,6 +260,15 @@ export default function DashboardClient() {
     const a = accounts.find((x) => x.id === selectedAccountId);
     return a?.name ?? "-";
   }, [accounts, selectedAccountId]);
+
+  const canCreate = useMemo(() => {
+    // ここでボタンの無効化条件をまとめる（UIで事故を潰す）
+    if (loading) return false;
+    if (!selectedAccountId) return false;
+    if (!formCategoryId) return false;
+    if (!isAmountValid) return false;
+    return true;
+  }, [loading, selectedAccountId, formCategoryId, isAmountValid]);
 
   return (
     <div style={{ padding: 24 }}>
@@ -348,16 +331,12 @@ export default function DashboardClient() {
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div>
           日付&nbsp;
-          <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} disabled={loading} />
+          <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
         </div>
 
         <div>
           区分&nbsp;
-          <select
-            value={formSection}
-            onChange={(e) => setFormSection(e.target.value as CashFlowSection)}
-            disabled={loading}
-          >
+          <select value={formSection} onChange={(e) => setFormSection(e.target.value as CashFlowSection)}>
             <option value="in">収入</option>
             <option value="out">支出</option>
           </select>
@@ -366,13 +345,19 @@ export default function DashboardClient() {
         <div>
           金額&nbsp;
           <input
-            value={formAmountText}
-            onChange={(e) => setFormAmountText(e.target.value)}
-            style={{ width: 120 }}
+            type="number"
             inputMode="numeric"
-            disabled={loading}
+            min={1}
+            step={1}
+            value={formAmount}
+            onChange={(e) => setFormAmount(e.target.value)}
             placeholder="例: 1000"
+            style={{ width: 140 }}
           />
+          {/* 補助表示（うざければ消してOK） */}
+          {formAmount !== "" && !isAmountValid ? (
+            <div style={{ color: "tomato", fontSize: 12, marginTop: 4 }}>金額は1以上（0禁止）</div>
+          ) : null}
         </div>
 
         <div>
@@ -380,7 +365,6 @@ export default function DashboardClient() {
           <select
             value={formCategoryId ?? ""}
             onChange={(e) => setFormCategoryId(e.target.value ? Number(e.target.value) : null)}
-            disabled={loading}
           >
             <option value="">（選択）</option>
             {categories.map((c) => (
@@ -398,11 +382,10 @@ export default function DashboardClient() {
             onChange={(e) => setFormMemo(e.target.value)}
             placeholder="任意"
             style={{ width: 240 }}
-            disabled={loading}
           />
         </div>
 
-        <button disabled={loading || !selectedAccountId || !canSubmit} onClick={onCreate}>
+        <button disabled={!canCreate} onClick={onCreate}>
           登録
         </button>
       </div>
