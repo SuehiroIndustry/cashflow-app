@@ -1,43 +1,56 @@
-// app/dashboard/_actions/createCashFlow.ts
+// app/transactions/_actions/createCashFlow.ts
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { CashFlowCreateInput } from "./_types";
+import type { CashFlowCreateInput } from "@/app/dashboard/_types";
 
 function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-export async function createCashFlow(
-  input: CashFlowCreateInput
-): Promise<{ ok: true }> {
+export async function createCashFlow(input: CashFlowCreateInput) {
   const supabase = await createSupabaseServerClient();
 
   const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-  if (userErr || !user) throw new Error("Not authenticated");
+    cash_account_id,
+    date,
+    section,
+    amount,
+    cash_category_id,
+    description = null,
+    source_type = "manual",
+  } = input;
 
-  // 入力ガード（落とすと原因が分かりやすい）
-  if (!Number.isFinite(input.cash_account_id))
-    throw new Error("cash_account_id is invalid");
-  if (!isYmd(input.date)) throw new Error("Invalid date format (YYYY-MM-DD)");
-  if (input.source_type === "manual" && !input.cash_category_id) {
-    throw new Error("カテゴリを選択してください（manual必須）");
+  // validate (最低限)
+  if (!Number.isFinite(cash_account_id) || cash_account_id <= 0) {
+    throw new Error("cash_account_id が不正です");
+  }
+  if (!isYmd(date)) {
+    throw new Error("date が不正です（YYYY-MM-DD）");
+  }
+  if (section !== "in" && section !== "out") {
+    throw new Error("section が不正です（in|out）");
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("amount が不正です（1以上）");
+  }
+
+  // 君のDB制約：manual はカテゴリ必須
+  if (source_type === "manual" && (cash_category_id == null || cash_category_id <= 0)) {
+    throw new Error("cash_category_id が未指定です（manualは必須）");
   }
 
   const { error } = await supabase.from("cash_flows").insert({
-    cash_account_id: input.cash_account_id, // number
-    date: input.date, // "YYYY-MM-DD"
-    section: input.section, // "in" | "out"
-    amount: input.amount,
-    cash_category_id: input.cash_category_id, // number | null
-    description: input.description ?? null,
-    source_type: input.source_type ?? "manual",
+    cash_account_id,
+    date,
+    section,
+    amount,
+    cash_category_id,
+    description: description && description.trim() ? description.trim() : null,
+    source_type,
   });
 
   if (error) throw error;
 
-  return { ok: true };
+  return { ok: true as const };
 }
