@@ -2,36 +2,48 @@
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
-import type { CashFlowUpdateInput } from "@/app/dashboard/_types";
+import type { CashFlowUpdateInput } from "../_types";
 
 export async function updateCashFlow(input: CashFlowUpdateInput) {
-  const supabase = await createClient();
+  const supabase = createClient();
 
-  const { id, cash_account_id, date, section, amount, cash_category_id, description } = input;
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
 
-  if (!id) throw new Error("id がありません");
-  if (!cash_account_id) throw new Error("cash_account_id がありません");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date が不正です（YYYY-MM-DD）");
-  if (section !== "in" && section !== "out") throw new Error("section が不正です");
-  if (!Number.isFinite(amount) || amount < 0) throw new Error("amount が不正です");
-  if (!cash_category_id) throw new Error("cash_category_id が必要です（manual必須）");
+  if (userErr) throw new Error(userErr.message);
+  if (!user) throw new Error("Not authenticated");
+
+  // 手入力運用の前提：カテゴリ必須
+  if (!input.cash_category_id) {
+    throw new Error("カテゴリを選択してください（manual必須）");
+  }
+
+  // YYYY-MM-DD ざっくり検証
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+    throw new Error("日付が不正です（YYYY-MM-DD）");
+  }
+
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount)) {
+    throw new Error("金額が不正です");
+  }
 
   const { error } = await supabase
     .from("cash_flows")
     .update({
-      date,
-      section,
+      date: input.date,
+      section: input.section,
       amount,
-      cash_category_id,
-      description,
+      cash_category_id: input.cash_category_id,
+      description: input.description ?? null,
+      // source_type は更新しない（手入力・CSVの区別は維持）
     })
-    .eq("id", id)
-    .eq("cash_account_id", cash_account_id);
+    .eq("id", input.id)
+    .eq("cash_account_id", input.cash_account_id);
 
-  if (error) {
-    console.error(error);
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
   return { ok: true };
 }
