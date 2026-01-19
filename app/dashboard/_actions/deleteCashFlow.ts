@@ -1,12 +1,12 @@
 // app/dashboard/_actions/deleteCashFlow.ts
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CashFlowDeleteInput } from "../_types";
 
-export async function deleteCashFlow(args: CashFlowDeleteInput): Promise<void> {
-  // ★ここが重要：createClient が Promise を返す実装になってるので await が必須
-  const supabase = await createClient();
+export default async function deleteCashFlow(args: CashFlowDeleteInput): Promise<void> {
+  // ★ここがポイント：createClient / createSupabaseServerClient が Promise を返すなら await 必須
+  const supabase = await createSupabaseServerClient();
 
   const {
     data: { user },

@@ -1,30 +1,43 @@
+// app/dashboard/_actions/createCashFlow.ts
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { CashFlowCreateInput } from "../_types";
 
-export async function createCashFlow(input: {
-  cash_account_id: string;
-  date: string; // yyyy-mm-dd
-  type: "income" | "expense";
-  amount: number;
-  description?: string;
-  source_type?: "manual";
-  cash_category_id?: string | null;
-}) {
-  const supabase = await createClient();
+function isYmd(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
 
-  const payload = {
-    cash_account_id: input.cash_account_id,
-    date: input.date,
-    type: input.type,
+export async function createCashFlow(
+  input: CashFlowCreateInput
+): Promise<{ ok: true }> {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) throw new Error("Not authenticated");
+
+  // 入力ガード（落とすと原因が分かりやすい）
+  if (!Number.isFinite(input.cash_account_id))
+    throw new Error("cash_account_id is invalid");
+  if (!isYmd(input.date)) throw new Error("Invalid date format (YYYY-MM-DD)");
+  if (input.source_type === "manual" && !input.cash_category_id) {
+    throw new Error("カテゴリを選択してください（manual必須）");
+  }
+
+  const { error } = await supabase.from("cash_flows").insert({
+    cash_account_id: input.cash_account_id, // number
+    date: input.date, // "YYYY-MM-DD"
+    section: input.section, // "in" | "out"
     amount: input.amount,
+    cash_category_id: input.cash_category_id, // number | null
     description: input.description ?? null,
     source_type: input.source_type ?? "manual",
-    cash_category_id: input.cash_category_id ?? null,
-  };
+  });
 
-  const { error } = await supabase.from("cash_flows").insert(payload);
-  if (error) throw new Error(error.message);
+  if (error) throw error;
 
   return { ok: true };
 }

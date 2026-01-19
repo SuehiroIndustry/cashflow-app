@@ -3,11 +3,23 @@
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { MonthlyIncomeExpenseRow } from "../_types";
-import { ensureMonthlyCashBalance } from "./_ensureMonthlyCashBalance";
+
+function normalizeMonthKey(month: string): string {
+  if (/^\d{4}-\d{2}$/.test(month)) return `${month}-01`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(month)) return month;
+  throw new Error("Invalid month format");
+}
+
+function nextMonthStart(monthStartYYYYMM01: string): string {
+  const d = new Date(`${monthStartYYYYMM01}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) throw new Error("Invalid month format");
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 export async function getMonthlyIncomeExpense(args: {
   cash_account_id: number;
-  month: string; // "YYYY-MM-01"
+  month: string; // "YYYY-MM" or "YYYY-MM-01"
 }): Promise<MonthlyIncomeExpenseRow> {
   const supabase = await createSupabaseServerClient();
 
@@ -18,25 +30,27 @@ export async function getMonthlyIncomeExpense(args: {
 
   if (userErr || !user) throw new Error("Not authenticated");
 
-  // 月次レコードが無いなら作る
-  await ensureMonthlyCashBalance({
-    cash_account_id: args.cash_account_id,
-    month: args.month,
-  });
+  const monthKey = normalizeMonthKey(args.month);
+  const monthEnd = nextMonthStart(monthKey);
 
   const { data, error } = await supabase
-    .from("monthly_cash_account_balances")
-    .select("cash_account_id, month, income, expense")
+    .from("cash_flows")
+    .select("section, amount")
     .eq("cash_account_id", args.cash_account_id)
-    .eq("month", args.month)
-    .maybeSingle();
+    .gte("date", monthKey)
+    .lt("date", monthEnd);
 
   if (error) throw error;
 
-  return {
-    cash_account_id: Number(data?.cash_account_id ?? args.cash_account_id),
-    month: String(data?.month ?? args.month),
-    income: Number(data?.income ?? 0),
-    expense: Number(data?.expense ?? 0),
-  };
+  let income = 0;
+  let expense = 0;
+
+  for (const r of data ?? []) {
+    const amount = Number((r as any).amount ?? 0);
+    const section = (r as any).section as "in" | "out";
+    if (section === "in") income += amount;
+    if (section === "out") expense += amount;
+  }
+
+  return { income, expense };
 }

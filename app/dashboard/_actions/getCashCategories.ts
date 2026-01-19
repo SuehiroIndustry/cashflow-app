@@ -7,6 +7,13 @@ import type { CashCategory } from "../_types";
 export async function getCashCategories(): Promise<CashCategory[]> {
   const supabase = await createSupabaseServerClient();
 
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr || !user) throw new Error("Not authenticated");
+
   const { data, error } = await supabase
     .from("cash_categories")
     .select("id, name")
@@ -14,8 +21,5 @@ export async function getCashCategories(): Promise<CashCategory[]> {
 
   if (error) throw error;
 
-  return (data ?? []).map((r: any) => ({
-    id: Number(r.id),
-    name: String(r.name),
-  }));
+  return (data ?? []) as CashCategory[];
 }
