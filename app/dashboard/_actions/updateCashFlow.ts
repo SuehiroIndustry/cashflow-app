@@ -5,7 +5,8 @@ import { createClient } from "@/utils/supabase/server";
 import type { CashFlowUpdateInput } from "../_types";
 
 export async function updateCashFlow(input: CashFlowUpdateInput) {
-  const supabase = createClient();
+  // ★ここがポイント：createClient() を await する
+  const supabase = await createClient();
 
   const {
     data: { user },
