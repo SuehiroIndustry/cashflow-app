@@ -61,6 +61,28 @@ function sectionLabel(s: CashFlowSection) {
   return s === "in" ? "収入" : "支出";
 }
 
+// 全角数字・全角記号を半角に寄せる（最低限）
+function toHalfWidth(s: string) {
+  return s
+    .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/[－ー]/g, "-")
+    .replace(/[，]/g, ",")
+    .replace(/[．]/g, ".");
+}
+
+function parseAmount(raw: string) {
+  const cleaned = toHalfWidth(String(raw ?? ""))
+    .trim()
+    .replace(/,/g, ""); // 1,000 -> 1000
+  if (cleaned === "") return 0;
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) throw new Error(`金額が不正です: "${raw}"`);
+  if (n < 0) throw new Error("金額は 0 以上で入力してください");
+  // 小数は許容しない（必要なら仕様変更）
+  if (!Number.isInteger(n)) throw new Error("金額は整数で入力してください");
+  return n;
+}
+
 export default function DashboardClient() {
   const router = useRouter();
 
@@ -179,15 +201,16 @@ export default function DashboardClient() {
 
       const ymdDate = normalizeYmd(formDate);
 
-      // manual 必須ルール
-      if (!formCategoryId) throw new Error("カテゴリを選択してください（manual必須）");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) throw new Error("日付が不正です（YYYY-MM-DD）");
+      if (!formCategoryId) throw new Error("カテゴリを選択してください（manual必須）");
+
+      const amountNum = parseAmount(formAmount);
 
       const payload: CashFlowCreateInput = {
         cash_account_id: selectedAccountId,
         date: ymdDate,
         section: formSection,
-        amount: Number(formAmount || 0),
+        amount: amountNum,
         cash_category_id: formCategoryId,
         description: formMemo || null,
         source_type: "manual",
@@ -236,8 +259,7 @@ export default function DashboardClient() {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) throw new Error("日付が不正です（YYYY-MM-DD）");
       if (!editCategoryId) throw new Error("カテゴリを選択してください（manual必須）");
 
-      const amountNum = Number(editAmount || 0);
-      if (!Number.isFinite(amountNum)) throw new Error("金額が不正です");
+      const amountNum = parseAmount(editAmount);
 
       const payload: CashFlowUpdateInput = {
         id: row.id,
@@ -368,7 +390,15 @@ export default function DashboardClient() {
 
         <div>
           金額&nbsp;
-          <input value={formAmount} onChange={(e) => setFormAmount(e.target.value)} style={{ width: 120 }} />
+          <input
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={toHalfWidth(formAmount)}
+            onChange={(e) => setFormAmount(e.target.value)}
+            style={{ width: 140, textAlign: "right" }}
+          />
         </div>
 
         <div>
@@ -462,9 +492,13 @@ export default function DashboardClient() {
 
                   <td style={{ paddingRight: 12, textAlign: "right" }}>
                     <input
-                      value={editAmount}
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="numeric"
+                      value={toHalfWidth(editAmount)}
                       onChange={(e) => setEditAmount(e.target.value)}
-                      style={{ width: 140, textAlign: "right" }}
+                      style={{ width: 160, textAlign: "right" }}
                     />
                   </td>
 
