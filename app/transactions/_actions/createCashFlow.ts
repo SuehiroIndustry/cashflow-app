@@ -2,7 +2,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { CashFlowCreateInput } from "../_types";
+import type { CashFlowCreateInput } from "./_types";
 
 function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
