@@ -50,6 +50,10 @@ function normalizeYmd(s: string) {
   return d.toISOString().slice(0, 10);
 }
 
+function isYmd(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
 function yen(n: number) {
   const v = Number.isFinite(n) ? Math.trunc(n) : 0;
   return `¥${v.toLocaleString()}`;
@@ -57,6 +61,33 @@ function yen(n: number) {
 
 function sectionLabel(s: CashFlowSection) {
   return s === "in" ? "収入" : "支出";
+}
+
+type UiCashFlowDraft = {
+  date: string;
+  section: CashFlowSection;
+  amountText: string; // inputは文字列で持つ
+  categoryIdText: string; // 未選択は "" 推奨
+  description: string;
+  sourceType: "manual";
+};
+
+function validateDraft(d: UiCashFlowDraft) {
+  const errors: string[] = [];
+
+  const date = normalizeYmd(d.date);
+  if (!date || !isYmd(date)) errors.push("日付が不正です（YYYY-MM-DD）");
+
+  const amount = Number(d.amountText);
+  if (!Number.isFinite(amount)) errors.push("金額が数値ではありません");
+  if (Number.isFinite(amount) && amount <= 0) errors.push("金額は1以上にしてください");
+
+  // manual時のカテゴリ必須（DB制約に合わせる）
+  if (d.sourceType === "manual" && !d.categoryIdText) {
+    errors.push("カテゴリを選択してください（manual必須）");
+  }
+
+  return { ok: errors.length === 0, errors, amount, date };
 }
 
 export default function DashboardClient() {
@@ -104,9 +135,23 @@ export default function DashboardClient() {
   // form
   const [formDate, setFormDate] = useState<string>(() => normalizeYmd(new Date().toISOString().slice(0, 10)));
   const [formSection, setFormSection] = useState<CashFlowSection>("in");
-  const [formAmount, setFormAmount] = useState<string>("0");
+  const [formAmountText, setFormAmountText] = useState<string>(""); // ★ stringで持つ
   const [formCategoryId, setFormCategoryId] = useState<number | null>(null);
   const [formMemo, setFormMemo] = useState<string>("");
+
+  const formSourceType: "manual" = "manual";
+
+  const canSubmit = useMemo(() => {
+    const draft: UiCashFlowDraft = {
+      date: formDate,
+      section: formSection,
+      amountText: formAmountText,
+      categoryIdText: formCategoryId ? String(formCategoryId) : "",
+      description: formMemo,
+      sourceType: formSourceType,
+    };
+    return validateDraft(draft).ok;
+  }, [formDate, formSection, formAmountText, formCategoryId, formMemo, formSourceType]);
 
   const loadBase = useCallback(async () => {
     const [acc, cats] = await Promise.all([getAccounts(), getCashCategories()]);
@@ -167,38 +212,42 @@ export default function DashboardClient() {
   async function onCreate() {
     if (!selectedAccountId) return;
 
+    const draft: UiCashFlowDraft = {
+      date: formDate,
+      section: formSection,
+      amountText: formAmountText,
+      categoryIdText: formCategoryId ? String(formCategoryId) : "",
+      description: formMemo,
+      sourceType: "manual",
+    };
+
+    const v = validateDraft(draft);
+    if (!v.ok) {
+      setErrorMsg(v.errors[0]);
+      return;
+    }
+
     try {
       setLoading(true);
       setErrorMsg("");
 
-      const ymdDate = normalizeYmd(formDate);
-
-      // manual 必須ルール
-      if (!formCategoryId) {
-        throw new Error("カテゴリを選択してください（manual必須）");
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) {
-        throw new Error("日付が不正です（YYYY-MM-DD で入力してください）");
-      }
-
       const payload: CashFlowCreateInput = {
-        cash_account_id: selectedAccountId, // number
-        date: ymdDate,
-        section: formSection,
-        amount: Number(formAmount || 0),
-        cash_category_id: formCategoryId, // number
-        description: formMemo || null,
+        cash_account_id: selectedAccountId,
+        date: v.date,
+        section: draft.section,
+        amount: v.amount,
+        cash_category_id: Number(draft.categoryIdText),
+        description: draft.description || null,
         source_type: "manual",
       };
 
       await createCashFlow(payload);
-
       await reloadAll(selectedAccountId, monthKey, rangeN);
 
       // reset（任意）
-      setFormAmount("0");
+      setFormAmountText("");
       setFormMemo("");
-      // setFormCategoryId(null); // 消したくなければコメントのままでOK
+      // setFormCategoryId(null);
     } catch (e: any) {
       console.error(e);
       setErrorMsg(e?.message ?? "登録中にエラーが発生しました");
@@ -299,12 +348,16 @@ export default function DashboardClient() {
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div>
           日付&nbsp;
-          <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />
+          <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} disabled={loading} />
         </div>
 
         <div>
           区分&nbsp;
-          <select value={formSection} onChange={(e) => setFormSection(e.target.value as CashFlowSection)}>
+          <select
+            value={formSection}
+            onChange={(e) => setFormSection(e.target.value as CashFlowSection)}
+            disabled={loading}
+          >
             <option value="in">収入</option>
             <option value="out">支出</option>
           </select>
@@ -312,7 +365,14 @@ export default function DashboardClient() {
 
         <div>
           金額&nbsp;
-          <input value={formAmount} onChange={(e) => setFormAmount(e.target.value)} style={{ width: 120 }} />
+          <input
+            value={formAmountText}
+            onChange={(e) => setFormAmountText(e.target.value)}
+            style={{ width: 120 }}
+            inputMode="numeric"
+            disabled={loading}
+            placeholder="例: 1000"
+          />
         </div>
 
         <div>
@@ -320,6 +380,7 @@ export default function DashboardClient() {
           <select
             value={formCategoryId ?? ""}
             onChange={(e) => setFormCategoryId(e.target.value ? Number(e.target.value) : null)}
+            disabled={loading}
           >
             <option value="">（選択）</option>
             {categories.map((c) => (
@@ -337,10 +398,11 @@ export default function DashboardClient() {
             onChange={(e) => setFormMemo(e.target.value)}
             placeholder="任意"
             style={{ width: 240 }}
+            disabled={loading}
           />
         </div>
 
-        <button disabled={loading || !selectedAccountId} onClick={onCreate}>
+        <button disabled={loading || !selectedAccountId || !canSubmit} onClick={onCreate}>
           登録
         </button>
       </div>
