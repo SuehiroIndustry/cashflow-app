@@ -1,32 +1,29 @@
-// app/dashboard/error.tsx
-'use client';
+"use client";
 
-import { useEffect } from 'react';
+import * as React from "react";
 
-export default function Error({
+export default function DashboardError({
   error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => {
-    console.error('Dashboard error boundary:', error);
-  }, [error]);
-
   return (
-    <div style={{ padding: 16 }}>
-      <h2>Dashboard Error</h2>
-      <p>原因は下に出してあります。これで「真っ黒」から卒業。</p>
+    <div style={{ padding: 24 }}>
+      <h2 style={{ marginBottom: 8 }}>Dashboard Error</h2>
 
-      <pre style={{ whiteSpace: 'pre-wrap' }}>{error.message}</pre>
+      <p style={{ color: "tomato" }}>
+        {error?.message || "Unknown error"}
+      </p>
 
-      <button
-        onClick={reset}
-        style={{ marginTop: 12, padding: '6px 12px', cursor: 'pointer' }}
-      >
-        Retry
-      </button>
+      {error?.digest ? (
+        <p style={{ opacity: 0.8 }}>digest: {error.digest}</p>
+      ) : null}
+
+      <div style={{ marginTop: 12 }}>
+        <button onClick={() => reset()}>Retry</button>
+      </div>
     </div>
   );
 }
