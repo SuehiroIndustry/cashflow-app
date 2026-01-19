@@ -15,6 +15,7 @@ import { getCashCategories } from "@/app/dashboard/_actions/getCashCategories";
 import { getCashFlows } from "@/app/dashboard/_actions/getCashFlows";
 import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
 import { deleteCashFlow } from "@/app/dashboard/_actions/deleteCashFlow";
+import { updateCashFlow } from "@/app/dashboard/_actions/updateCashFlow";
 import { getMonthlyCashBalance } from "@/app/dashboard/_actions/getMonthlyCashBalance";
 import { getMonthlyIncomeExpense } from "@/app/dashboard/_actions/getMonthlyIncomeExpense";
 
@@ -25,9 +26,10 @@ import type {
   CashFlowCreateInput,
   CashFlowListRow,
   CashFlowSection,
+  CashFlowUpdateInput,
   MonthlyCashBalanceRow,
-  OverviewPayload,
   MonthlyIncomeExpenseRow,
+  OverviewPayload,
 } from "./_types";
 
 function ym(date: Date) {
@@ -57,18 +59,6 @@ function yen(n: number) {
 
 function sectionLabel(s: CashFlowSection) {
   return s === "in" ? "収入" : "支出";
-}
-
-// "1,000" / " 1000 " / "" を許容して number にする
-function parseAmount(input: string): number {
-  const raw = String(input ?? "").trim();
-  if (!raw) return NaN;
-
-  // カンマ除去（日本語入力の全角カンマは今回は未対応。必要ならここで置換追加）
-  const normalized = raw.replace(/,/g, "");
-  const n = Number(normalized);
-
-  return n;
 }
 
 export default function DashboardClient() {
@@ -112,18 +102,20 @@ export default function DashboardClient() {
     };
   }, [chartRows, incomeExpense]);
 
-  // form
+  // create form
   const [formDate, setFormDate] = useState<string>(() => normalizeYmd(new Date().toISOString().slice(0, 10)));
   const [formSection, setFormSection] = useState<CashFlowSection>("in");
-  const [formAmount, setFormAmount] = useState<string>(""); // ← 初期0はやめる（誤登録防止）
+  const [formAmount, setFormAmount] = useState<string>("0");
   const [formCategoryId, setFormCategoryId] = useState<number | null>(null);
   const [formMemo, setFormMemo] = useState<string>("");
 
-  const numericAmount = useMemo(() => parseAmount(formAmount), [formAmount]);
-  const isAmountValid = useMemo(
-    () => Number.isFinite(numericAmount) && numericAmount >= 1,
-    [numericAmount]
-  );
+  // edit state (inline)
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDate, setEditDate] = useState<string>("");
+  const [editSection, setEditSection] = useState<CashFlowSection>("in");
+  const [editAmount, setEditAmount] = useState<string>("0");
+  const [editCategoryId, setEditCategoryId] = useState<number | null>(null);
+  const [editMemo, setEditMemo] = useState<string>("");
 
   const loadBase = useCallback(async () => {
     const [acc, cats] = await Promise.all([getAccounts(), getCashCategories()]);
@@ -188,43 +180,82 @@ export default function DashboardClient() {
       const ymdDate = normalizeYmd(formDate);
 
       // manual 必須ルール
-      if (!formCategoryId) {
-        throw new Error("カテゴリを選択してください（manual必須）");
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) {
-        throw new Error("日付が不正です（YYYY-MM-DD で入力してください）");
-      }
-
-      // 金額は 1以上必須（0禁止）
-      const amount = parseAmount(formAmount);
-      if (!Number.isFinite(amount)) {
-        throw new Error("金額が不正です（数字で入力してください）");
-      }
-      if (amount < 1) {
-        throw new Error("金額は1以上で入力してください（0は登録できません）");
-      }
+      if (!formCategoryId) throw new Error("カテゴリを選択してください（manual必須）");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) throw new Error("日付が不正です（YYYY-MM-DD）");
 
       const payload: CashFlowCreateInput = {
-        cash_account_id: selectedAccountId, // number
+        cash_account_id: selectedAccountId,
         date: ymdDate,
         section: formSection,
-        amount,
-        cash_category_id: formCategoryId, // number
+        amount: Number(formAmount || 0),
+        cash_category_id: formCategoryId,
         description: formMemo || null,
         source_type: "manual",
       };
 
       await createCashFlow(payload);
-
       await reloadAll(selectedAccountId, monthKey, rangeN);
 
-      // reset（任意）
-      setFormAmount("");
+      setFormAmount("0");
       setFormMemo("");
-      // setFormCategoryId(null); // 消したくなければコメントのままでOK
     } catch (e: any) {
       console.error(e);
       setErrorMsg(e?.message ?? "登録中にエラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function startEdit(row: CashFlowListRow) {
+    setErrorMsg("");
+    setEditingId(row.id);
+    setEditDate(row.date);
+    setEditSection(row.section);
+    setEditAmount(String(Number(row.amount ?? 0)));
+    setEditCategoryId(row.cash_category_id ?? row.cash_category?.id ?? null);
+    setEditMemo(row.description ?? "");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditDate("");
+    setEditSection("in");
+    setEditAmount("0");
+    setEditCategoryId(null);
+    setEditMemo("");
+  }
+
+  async function onSaveEdit(row: CashFlowListRow) {
+    if (!selectedAccountId) return;
+
+    try {
+      setLoading(true);
+      setErrorMsg("");
+
+      const ymdDate = normalizeYmd(editDate);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) throw new Error("日付が不正です（YYYY-MM-DD）");
+      if (!editCategoryId) throw new Error("カテゴリを選択してください（manual必須）");
+
+      const amountNum = Number(editAmount || 0);
+      if (!Number.isFinite(amountNum)) throw new Error("金額が不正です");
+
+      const payload: CashFlowUpdateInput = {
+        id: row.id,
+        cash_account_id: selectedAccountId,
+        date: ymdDate,
+        section: editSection,
+        amount: amountNum,
+        cash_category_id: editCategoryId,
+        description: editMemo ? editMemo : null,
+      };
+
+      await updateCashFlow(payload);
+      await reloadAll(selectedAccountId, monthKey, rangeN);
+
+      cancelEdit();
+    } catch (e: any) {
+      console.error(e);
+      setErrorMsg(e?.message ?? "更新中にエラーが発生しました");
     } finally {
       setLoading(false);
     }
@@ -248,6 +279,8 @@ export default function DashboardClient() {
       });
 
       await reloadAll(selectedAccountId, monthKey, rangeN);
+
+      if (editingId === row.id) cancelEdit();
     } catch (e: any) {
       console.error(e);
       setErrorMsg(e?.message ?? "削除中にエラーが発生しました");
@@ -260,15 +293,6 @@ export default function DashboardClient() {
     const a = accounts.find((x) => x.id === selectedAccountId);
     return a?.name ?? "-";
   }, [accounts, selectedAccountId]);
-
-  const canCreate = useMemo(() => {
-    // ここでボタンの無効化条件をまとめる（UIで事故を潰す）
-    if (loading) return false;
-    if (!selectedAccountId) return false;
-    if (!formCategoryId) return false;
-    if (!isAmountValid) return false;
-    return true;
-  }, [loading, selectedAccountId, formCategoryId, isAmountValid]);
 
   return (
     <div style={{ padding: 24 }}>
@@ -344,20 +368,7 @@ export default function DashboardClient() {
 
         <div>
           金額&nbsp;
-          <input
-            type="number"
-            inputMode="numeric"
-            min={1}
-            step={1}
-            value={formAmount}
-            onChange={(e) => setFormAmount(e.target.value)}
-            placeholder="例: 1000"
-            style={{ width: 140 }}
-          />
-          {/* 補助表示（うざければ消してOK） */}
-          {formAmount !== "" && !isAmountValid ? (
-            <div style={{ color: "tomato", fontSize: 12, marginTop: 4 }}>金額は1以上（0禁止）</div>
-          ) : null}
+          <input value={formAmount} onChange={(e) => setFormAmount(e.target.value)} style={{ width: 120 }} />
         </div>
 
         <div>
@@ -385,7 +396,7 @@ export default function DashboardClient() {
           />
         </div>
 
-        <button disabled={!canCreate} onClick={onCreate}>
+        <button disabled={loading || !selectedAccountId} onClick={onCreate}>
           登録
         </button>
       </div>
@@ -413,20 +424,84 @@ export default function DashboardClient() {
             </tr>
           </thead>
           <tbody>
-            {cashFlows.map((r) => (
-              <tr key={r.id}>
-                <td style={{ paddingRight: 12 }}>{r.date}</td>
-                <td style={{ paddingRight: 12 }}>{sectionLabel(r.section)}</td>
-                <td style={{ paddingRight: 12, textAlign: "right" }}>{yen(Number(r.amount ?? 0))}</td>
-                <td style={{ paddingRight: 12 }}>{r.cash_category?.name ?? "-"}</td>
-                <td style={{ paddingRight: 12 }}>{r.description ?? ""}</td>
-                <td>
-                  <button onClick={() => onDeleteCashFlow(r)} disabled={loading} title="削除">
-                    削除
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {cashFlows.map((r) => {
+              const isEditing = editingId === r.id;
+
+              if (!isEditing) {
+                return (
+                  <tr key={r.id}>
+                    <td style={{ paddingRight: 12 }}>{r.date}</td>
+                    <td style={{ paddingRight: 12 }}>{sectionLabel(r.section)}</td>
+                    <td style={{ paddingRight: 12, textAlign: "right" }}>{yen(Number(r.amount ?? 0))}</td>
+                    <td style={{ paddingRight: 12 }}>{r.cash_category?.name ?? "-"}</td>
+                    <td style={{ paddingRight: 12 }}>{r.description ?? ""}</td>
+                    <td style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => startEdit(r)} disabled={loading} title="編集">
+                        編集
+                      </button>
+                      <button onClick={() => onDeleteCashFlow(r)} disabled={loading} title="削除">
+                        削除
+                      </button>
+                    </td>
+                  </tr>
+                );
+              }
+
+              return (
+                <tr key={r.id}>
+                  <td style={{ paddingRight: 12 }}>
+                    <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+                  </td>
+
+                  <td style={{ paddingRight: 12 }}>
+                    <select value={editSection} onChange={(e) => setEditSection(e.target.value as CashFlowSection)}>
+                      <option value="in">収入</option>
+                      <option value="out">支出</option>
+                    </select>
+                  </td>
+
+                  <td style={{ paddingRight: 12, textAlign: "right" }}>
+                    <input
+                      value={editAmount}
+                      onChange={(e) => setEditAmount(e.target.value)}
+                      style={{ width: 140, textAlign: "right" }}
+                    />
+                  </td>
+
+                  <td style={{ paddingRight: 12 }}>
+                    <select
+                      value={editCategoryId ?? ""}
+                      onChange={(e) => setEditCategoryId(e.target.value ? Number(e.target.value) : null)}
+                    >
+                      <option value="">（選択）</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} / id:{c.id}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+
+                  <td style={{ paddingRight: 12 }}>
+                    <input
+                      value={editMemo}
+                      onChange={(e) => setEditMemo(e.target.value)}
+                      placeholder="任意"
+                      style={{ width: 240 }}
+                    />
+                  </td>
+
+                  <td style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => onSaveEdit(r)} disabled={loading} title="保存">
+                      保存
+                    </button>
+                    <button onClick={cancelEdit} disabled={loading} title="キャンセル">
+                      キャンセル
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

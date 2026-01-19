@@ -64,3 +64,13 @@ export type OverviewPayload = {
   monthlyBalance: number;
   monthlyDiff: number;
 };
+
+export type CashFlowUpdateInput = {
+  id: number;
+  cash_account_id: number;
+  date: string; // YYYY-MM-DD
+  section: CashFlowSection;
+  amount: number;
+  cash_category_id: number;
+  description: string | null;
+};

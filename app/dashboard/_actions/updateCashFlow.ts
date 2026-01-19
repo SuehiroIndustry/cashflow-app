@@ -7,22 +7,13 @@ import type { CashFlowUpdateInput } from "@/app/dashboard/_types";
 export async function updateCashFlow(input: CashFlowUpdateInput) {
   const supabase = await createClient();
 
-  const {
-    id,
-    cash_account_id,
-    date,
-    section,
-    amount,
-    cash_category_id,
-    description,
-  } = input;
+  const { id, cash_account_id, date, section, amount, cash_category_id, description } = input;
 
-  // 最低限のバリデーション（UIでもやるが、サーバーも守る）
   if (!id) throw new Error("id がありません");
   if (!cash_account_id) throw new Error("cash_account_id がありません");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date が不正です");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date が不正です（YYYY-MM-DD）");
   if (section !== "in" && section !== "out") throw new Error("section が不正です");
-  if (!Number.isFinite(amount) || amount < 1) throw new Error("amount は 1以上が必要です");
+  if (!Number.isFinite(amount) || amount < 0) throw new Error("amount が不正です");
   if (!cash_category_id) throw new Error("cash_category_id が必要です（manual必須）");
 
   const { error } = await supabase
@@ -33,7 +24,6 @@ export async function updateCashFlow(input: CashFlowUpdateInput) {
       amount,
       cash_category_id,
       description,
-      // source_type は更新しない（手動入力前提で維持）
     })
     .eq("id", id)
     .eq("cash_account_id", cash_account_id);
