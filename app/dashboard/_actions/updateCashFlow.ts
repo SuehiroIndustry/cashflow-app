@@ -5,8 +5,8 @@ import { createServerClient } from "@supabase/ssr";
 
 import type { CashFlowUpdateInput } from "../_types";
 
-function getSupabase() {
-  const cookieStore = cookies();
+async function getSupabase() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,7 +19,11 @@ function getSupabase() {
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              try {
+                cookieStore.set(name, value, options as any);
+              } catch {
+                // noop
+              }
             });
           } catch {
             // noop
@@ -31,7 +35,7 @@ function getSupabase() {
 }
 
 export async function updateCashFlow(input: CashFlowUpdateInput) {
-  const supabase = getSupabase();
+  const supabase = await getSupabase();
 
   const {
     data: { user },
@@ -41,27 +45,23 @@ export async function updateCashFlow(input: CashFlowUpdateInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
-  // 更新でも type が落ちる事故を防ぐ（トリガもあるが二重ロック）
+  // DBの NOT NULL: type を必ず埋める（section をそのまま type に入れる運用）
   const type = input.section;
 
   const { error } = await supabase
     .from("cash_flows")
     .update({
-      cash_account_id: input.cash_account_id,
       date: input.date,
       section: input.section,
-      type, // ここも入れておくのが安全（NOT NULL）
+      type,
       amount: input.amount,
       cash_category_id: input.cash_category_id,
       description: input.description ?? null,
-      is_projection: input.is_projection ?? false,
-      // source_type/source_id は運用次第。manual運用ならここで触らない方が事故らない
     })
-    .eq("id", input.id);
+    .eq("id", input.id)
+    .eq("cash_account_id", input.cash_account_id);
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
   return { ok: true };
 }

@@ -5,8 +5,8 @@ import { createServerClient } from "@supabase/ssr";
 
 import type { CashFlowCreateInput } from "../_types";
 
-function getSupabase() {
-  const cookieStore = cookies();
+async function getSupabase() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,10 +19,15 @@ function getSupabase() {
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              try {
+                // Next の環境/タイミングによって set が効かないケースがあるので握りつぶす
+                cookieStore.set(name, value, options as any);
+              } catch {
+                // noop
+              }
             });
           } catch {
-            // Server Action 内では set が無効ケースがあるが、致命ではない
+            // noop
           }
         },
       },
@@ -31,7 +36,7 @@ function getSupabase() {
 }
 
 export async function createCashFlow(input: CashFlowCreateInput) {
-  const supabase = getSupabase();
+  const supabase = await getSupabase();
 
   const {
     data: { user },
@@ -41,27 +46,24 @@ export async function createCashFlow(input: CashFlowCreateInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
-  // DBのNOT NULL: type を必ず埋める（トリガもあるが、アプリ側も正す）
+  // DBの NOT NULL: type を必ず埋める（section をそのまま type に入れる運用）
   const type = input.section;
 
-  const { error } = await supabase.from("cash_flows").insert({
+  const payload: Record<string, any> = {
     cash_account_id: input.cash_account_id,
     date: input.date,
-    section: input.section, // '収入' / '支出'
-    type,                  // NOT NULL
+    section: input.section,
+    type,
     amount: input.amount,
     cash_category_id: input.cash_category_id,
     description: input.description ?? null,
     source_type: input.source_type ?? "manual",
-    source_id: input.source_id ?? null,
-    is_projection: input.is_projection ?? false,
-    // user_id は DB default(auth.uid()) に任せる前提
-    // created_by / updated_by は必要ならここで user.id を入れる
-  });
+    // user_id/created_by は DB 側 default (auth.uid()) 前提
+  };
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  const { error } = await supabase.from("cash_flows").insert(payload);
+
+  if (error) throw new Error(error.message);
 
   return { ok: true };
 }

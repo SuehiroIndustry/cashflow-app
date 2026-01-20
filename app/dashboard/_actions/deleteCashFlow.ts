@@ -3,12 +3,10 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-export type DeleteCashFlowInput = {
-  id: number;
-};
+import type { CashFlowDeleteInput } from "../_types";
 
-function getSupabase() {
-  const cookieStore = cookies();
+async function getSupabase() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,7 +19,11 @@ function getSupabase() {
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              try {
+                cookieStore.set(name, value, options as any);
+              } catch {
+                // noop
+              }
             });
           } catch {
             // noop
@@ -32,8 +34,8 @@ function getSupabase() {
   );
 }
 
-export async function deleteCashFlow(input: DeleteCashFlowInput) {
-  const supabase = getSupabase();
+export async function deleteCashFlow(input: CashFlowDeleteInput) {
+  const supabase = await getSupabase();
 
   const {
     data: { user },
@@ -43,7 +45,11 @@ export async function deleteCashFlow(input: DeleteCashFlowInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
-  const { error } = await supabase.from("cash_flows").delete().eq("id", input.id);
+  const { error } = await supabase
+    .from("cash_flows")
+    .delete()
+    .eq("id", input.id)
+    .eq("cash_account_id", input.cash_account_id);
 
   if (error) throw new Error(error.message);
 
