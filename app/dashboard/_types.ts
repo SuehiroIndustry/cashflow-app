@@ -102,6 +102,13 @@ export type MonthlyCashAccountBalanceRow = {
   updated_at: string; // timestamptz -> ISO string
 };
 
+// 月次の「収入・支出」だけを返す用途（getMonthlyIncomeExpense.ts 用）
+export type MonthlyIncomeExpenseRow = {
+  month: string;   // "YYYY-MM-01"
+  income: number;
+  expense: number;
+};
+
 export type GetMonthlyCashBalancesInput = {
   cashAccountId: number;
   month: string; // "YYYY-MM-01"
