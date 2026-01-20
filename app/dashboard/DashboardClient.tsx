@@ -1,3 +1,4 @@
+// app/dashboard/DashboardClient.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -6,27 +7,46 @@ import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-// actions（関数だけimport）
 import { getAccounts } from "./_actions/getAccounts";
-import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalance";
+import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalances";
 
-// types（ルール：_types からだけ）
-import type { CashAccount, MonthlyCashBalanceRow, OverviewPayload } from "./_types";
+import type {
+  CashAccount,
+  MonthlyCashBalanceRow,
+  OverviewPayload,
+} from "./_types";
+
+function toMonthStartISO(yyyymm: string): string {
+  // "2026年01月" → "2026-01-01"
+  const m = yyyymm.match(/^(\d{4})\D+(\d{1,2})/);
+  if (m) {
+    const y = m[1];
+    const mm = String(Number(m[2])).padStart(2, "0");
+    return `${y}-${mm}-01`;
+  }
+
+  // "YYYY-MM" → "YYYY-MM-01"
+  const m2 = yyyymm.match(/^(\d{4})-(\d{2})$/);
+  if (m2) return `${m2[1]}-${m2[2]}-01`;
+
+  // "YYYY-MM-DD" ならそのまま
+  if (/^\d{4}-\d{2}-\d{2}$/.test(yyyymm)) return yyyymm;
+
+  // 保険：今月
+  const d = new Date();
+  const y = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${mm}-01`;
+}
 
 export default function DashboardClient() {
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
-  const [month, setMonth] = useState<string>(() => {
-    // 初期値：今月の1日（YYYY-MM-01）
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    return `${y}-${m}-01`;
-  });
-
+  const [monthText, setMonthText] = useState<string>("2026年01月");
   const [rangeMonths, setRangeMonths] = useState<number>(12);
 
+  // ✅ ここが肝：返り値に合わせて MonthlyCashBalanceRow[]
   const [monthlyRows, setMonthlyRows] = useState<MonthlyCashBalanceRow[]>([]);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
 
@@ -42,33 +62,37 @@ export default function DashboardClient() {
     const nextAccountId =
       selectedAccountId ?? (acc?.length ? acc[0].id : null);
 
-    if (nextAccountId !== selectedAccountId) {
+    if (nextAccountId != null && selectedAccountId == null) {
       setSelectedAccountId(nextAccountId);
     }
 
-    // 口座が無いなら空で終了
-    if (!nextAccountId) {
+    if (nextAccountId != null) {
+      const month = toMonthStartISO(monthText);
+
+      try {
+        const rows = await getMonthlyCashBalances({
+          cashAccountId: nextAccountId,
+          month,
+          rangeMonths,
+        });
+
+        // 表示が昇順前提ならここで昇順に
+        const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
+        setMonthlyRows(asc);
+
+        // デバッグしたいなら一旦これ入れとくと速い
+        // console.log("monthly rows:", asc);
+      } catch (e) {
+        console.error(e);
+        setMonthlyRows([]);
+      }
+    } else {
       setMonthlyRows([]);
-      setOverview(null);
-      return;
     }
 
-    // 月次を取得（ここが落ちると Server Components render error に繋がりやすいので try/catch で握る）
-    try {
-      const rows = await getMonthlyCashBalances({
-  cashAccountId: nextAccountId,
-  month,
-  rangeMonths,
-});
-      setMonthlyRows(rows);
-    } catch (e) {
-      console.error("getMonthlyCashBalances failed:", e);
-      setMonthlyRows([]);
-    }
-
-    // overview はまだ未実装なら null のままでOK（表示側はガードしてる）
+    // overview はまだ作ってないなら null のままでOK
     setOverview(null);
-  }, [month, rangeMonths, selectedAccountId]);
+  }, [monthText, rangeMonths, selectedAccountId]);
 
   useEffect(() => {
     void load();
@@ -76,13 +100,15 @@ export default function DashboardClient() {
 
   return (
     <div className="space-y-6">
-      {/* 操作UI（最低限） */}
       <div className="flex items-center gap-3">
         <label className="text-sm opacity-80">Account</label>
         <select
           className="border rounded px-2 py-1 bg-transparent"
           value={selectedAccountId ?? ""}
-          onChange={(e) => setSelectedAccountId(Number(e.target.value))}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSelectedAccountId(v === "" ? null : Number(v));
+          }}
         >
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
@@ -91,15 +117,14 @@ export default function DashboardClient() {
           ))}
         </select>
 
-        <label className="text-sm opacity-80 ml-2">Month</label>
+        <label className="text-sm opacity-80 ml-4">Month</label>
         <input
           className="border rounded px-2 py-1 bg-transparent"
-          type="month"
-          value={month.slice(0, 7)}
-          onChange={(e) => setMonth(`${e.target.value}-01`)}
+          value={monthText}
+          onChange={(e) => setMonthText(e.target.value)}
         />
 
-        <label className="text-sm opacity-80 ml-2">Range</label>
+        <label className="text-sm opacity-80 ml-4">Range</label>
         <select
           className="border rounded px-2 py-1 bg-transparent"
           value={rangeMonths}
@@ -108,10 +133,11 @@ export default function DashboardClient() {
           <option value={2}>last 2 months</option>
           <option value={6}>last 6 months</option>
           <option value={12}>last 12 months</option>
+          <option value={24}>last 24 months</option>
         </select>
 
         <button
-          className="border rounded px-3 py-1"
+          className="border rounded px-3 py-1 ml-2"
           onClick={() => void load()}
         >
           refresh
@@ -132,7 +158,7 @@ export default function DashboardClient() {
 
       <div className="text-xs opacity-60">
         selectedAccount: {selectedAccount ? selectedAccount.name : "none"} / month:{" "}
-        {month}
+        {toMonthStartISO(monthText)}
       </div>
     </div>
   );
