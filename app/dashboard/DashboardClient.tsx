@@ -32,6 +32,9 @@ import type {
   CashFlowUpdateInput,
 } from "./_types";
 
+// 編集用
+const [editingId, setEditingId] = useState<number | null>(null);
+
 function ym(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
