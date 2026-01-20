@@ -1,21 +1,37 @@
-// app/dashboard/_actions/createCashFlow.ts
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+
 import type { CashFlowCreateInput } from "../_types";
-import { ensureMonthlyCashBalance } from "./_ensureMonthlyCashBalance";
 
-function isYmd(s: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
+function getSupabase() {
+  const cookieStore = cookies();
 
-/** "YYYY-MM-DD" -> "YYYY-MM-01" */
-function ymdToMonthKey(ymd: string) {
-  return `${ymd.slice(0, 7)}-01`;
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // Server Action 内では set が無効ケースがあるが、致命ではない
+          }
+        },
+      },
+    }
+  );
 }
 
 export async function createCashFlow(input: CashFlowCreateInput) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = getSupabase();
 
   const {
     data: { user },
@@ -25,32 +41,27 @@ export async function createCashFlow(input: CashFlowCreateInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
-  if (!input?.cash_account_id) throw new Error("cash_account_id is required");
-  if (!isYmd(input.date)) throw new Error("Invalid date format (YYYY-MM-DD)");
-  if (input.section !== "in" && input.section !== "out") throw new Error("Invalid section");
-  if (!Number.isFinite(input.amount) || input.amount <= 0) throw new Error("Invalid amount");
-
-  // manual の場合はカテゴリ必須（君のCHECK制約に合わせる）
-  if (input.source_type === "manual" && !input.cash_category_id) {
-    throw new Error("cash_category_id is required for manual");
-  }
+  // DBのNOT NULL: type を必ず埋める（トリガもあるが、アプリ側も正す）
+  const type = input.section;
 
   const { error } = await supabase.from("cash_flows").insert({
     cash_account_id: input.cash_account_id,
     date: input.date,
-    section: input.section,
+    section: input.section, // '収入' / '支出'
+    type,                  // NOT NULL
     amount: input.amount,
     cash_category_id: input.cash_category_id,
     description: input.description ?? null,
     source_type: input.source_type ?? "manual",
+    source_id: input.source_id ?? null,
+    is_projection: input.is_projection ?? false,
+    // user_id は DB default(auth.uid()) に任せる前提
+    // created_by / updated_by は必要ならここで user.id を入れる
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(error.message);
+  }
 
-  await ensureMonthlyCashBalance({
-    cash_account_id: input.cash_account_id,
-    month: ymdToMonthKey(input.date),
-  });
-
-  return { ok: true as const };
+  return { ok: true };
 }

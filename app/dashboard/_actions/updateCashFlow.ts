@@ -1,21 +1,37 @@
-// app/dashboard/_actions/updateCashFlow.ts
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+
 import type { CashFlowUpdateInput } from "../_types";
-import { ensureMonthlyCashBalance } from "./_ensureMonthlyCashBalance";
 
-function isYmd(s: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
+function getSupabase() {
+  const cookieStore = cookies();
 
-/** "YYYY-MM-DD" -> "YYYY-MM-01" */
-function ymdToMonthKey(ymd: string) {
-  return `${ymd.slice(0, 7)}-01`;
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
+            });
+          } catch {
+            // noop
+          }
+        },
+      },
+    }
+  );
 }
 
 export async function updateCashFlow(input: CashFlowUpdateInput) {
-  const supabase = await createSupabaseServerClient();
+  const supabase = getSupabase();
 
   const {
     data: { user },
@@ -25,52 +41,27 @@ export async function updateCashFlow(input: CashFlowUpdateInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
-  if (!input?.id) throw new Error("id is required");
-  if (!input?.cash_account_id) throw new Error("cash_account_id is required");
-  if (!isYmd(input.date)) throw new Error("Invalid date format (YYYY-MM-DD)");
-  if (input.section !== "in" && input.section !== "out") throw new Error("Invalid section");
-  if (!Number.isFinite(input.amount) || input.amount <= 0) throw new Error("Invalid amount");
-  if (!input.cash_category_id) throw new Error("cash_category_id is required");
-
-  // 変更前の month も拾っておく（月跨ぎ編集に備える）
-  const { data: before, error: beforeErr } = await supabase
-    .from("cash_flows")
-    .select("date")
-    .eq("id", input.id)
-    .eq("cash_account_id", input.cash_account_id)
-    .maybeSingle();
-
-  if (beforeErr) throw new Error(beforeErr.message);
-
-  const beforeMonth = before?.date ? ymdToMonthKey(String(before.date)) : null;
-  const afterMonth = ymdToMonthKey(input.date);
+  // 更新でも type が落ちる事故を防ぐ（トリガもあるが二重ロック）
+  const type = input.section;
 
   const { error } = await supabase
     .from("cash_flows")
     .update({
+      cash_account_id: input.cash_account_id,
       date: input.date,
       section: input.section,
+      type, // ここも入れておくのが安全（NOT NULL）
       amount: input.amount,
       cash_category_id: input.cash_category_id,
       description: input.description ?? null,
+      is_projection: input.is_projection ?? false,
+      // source_type/source_id は運用次第。manual運用ならここで触らない方が事故らない
     })
-    .eq("id", input.id)
-    .eq("cash_account_id", input.cash_account_id);
+    .eq("id", input.id);
 
-  if (error) throw new Error(error.message);
-
-  // ★集計を再計算（同月なら1回、月跨ぎなら2回）
-  await ensureMonthlyCashBalance({
-    cash_account_id: input.cash_account_id,
-    month: afterMonth,
-  });
-
-  if (beforeMonth && beforeMonth !== afterMonth) {
-    await ensureMonthlyCashBalance({
-      cash_account_id: input.cash_account_id,
-      month: beforeMonth,
-    });
+  if (error) {
+    throw new Error(error.message);
   }
 
-  return { ok: true as const };
+  return { ok: true };
 }
