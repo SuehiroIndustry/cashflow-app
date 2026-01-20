@@ -1,12 +1,15 @@
 // app/dashboard/_actions/updateCashFlow.ts
 "use server";
 
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { CashFlowUpdateInput } from "../_types";
 
+function isYmd(s: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
 export async function updateCashFlow(input: CashFlowUpdateInput) {
-  // ★ここがポイント：createClient() を await する
-  const supabase = await createClient();
+  const supabase = await createSupabaseServerClient(); // ★ここが重要（Promiseのまま使わない）
 
   const {
     data: { user },
@@ -16,35 +19,28 @@ export async function updateCashFlow(input: CashFlowUpdateInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
-  // 手入力運用の前提：カテゴリ必須
-  if (!input.cash_category_id) {
-    throw new Error("カテゴリを選択してください（manual必須）");
-  }
+  if (!input?.id) throw new Error("id is required");
+  if (!input?.cash_account_id) throw new Error("cash_account_id is required");
+  if (!isYmd(input.date)) throw new Error("Invalid date format (YYYY-MM-DD)");
+  if (input.section !== "in" && input.section !== "out") throw new Error("Invalid section");
+  if (!Number.isFinite(input.amount) || input.amount <= 0) throw new Error("Invalid amount");
+  if (!input.cash_category_id) throw new Error("cash_category_id is required");
 
-  // YYYY-MM-DD ざっくり検証
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
-    throw new Error("日付が不正です（YYYY-MM-DD）");
-  }
-
-  const amount = Number(input.amount);
-  if (!Number.isFinite(amount)) {
-    throw new Error("金額が不正です");
-  }
-
+  // RLS を想定：cash_account_id も条件に入れて事故を防ぐ
   const { error } = await supabase
     .from("cash_flows")
     .update({
       date: input.date,
       section: input.section,
-      amount,
+      amount: input.amount,
       cash_category_id: input.cash_category_id,
       description: input.description ?? null,
-      // source_type は更新しない（手入力・CSVの区別は維持）
+      // user_id を更新したりはしない（RLSで担保）
     })
     .eq("id", input.id)
     .eq("cash_account_id", input.cash_account_id);
 
   if (error) throw new Error(error.message);
 
-  return { ok: true };
+  return { ok: true as const };
 }

@@ -29,11 +29,7 @@ import type {
   MonthlyCashBalanceRow,
   OverviewPayload,
   MonthlyIncomeExpenseRow,
-  CashFlowUpdateInput,
 } from "./_types";
-
-// 編集用
-const [editingId, setEditingId] = useState<number | null>(null);
 
 function ym(date: Date) {
   const y = date.getFullYear();
@@ -85,6 +81,9 @@ export default function DashboardClient() {
   const [chartRows, setChartRows] = useState<MonthlyCashBalanceRow[]>([]);
   const [incomeExpense, setIncomeExpense] = useState<MonthlyIncomeExpenseRow | null>(null);
 
+  // ★編集モード
+  const [editingId, setEditingId] = useState<number | null>(null);
+
   const overview: OverviewPayload | null = useMemo(() => {
     const currentBalance = chartRows.length ? Number(chartRows[chartRows.length - 1].balance ?? 0) : 0;
     const thisMonthIncome = Number(incomeExpense?.income ?? 0);
@@ -105,7 +104,7 @@ export default function DashboardClient() {
     };
   }, [chartRows, incomeExpense]);
 
-  // form（新規登録）
+  // form
   const [formDate, setFormDate] = useState<string>(() =>
     normalizeYmd(new Date().toISOString().slice(0, 10))
   );
@@ -113,14 +112,6 @@ export default function DashboardClient() {
   const [formAmount, setFormAmount] = useState<string>("0");
   const [formCategoryId, setFormCategoryId] = useState<number | null>(null);
   const [formMemo, setFormMemo] = useState<string>("");
-
-  // form（編集）
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editDate, setEditDate] = useState<string>("");
-  const [editSection, setEditSection] = useState<CashFlowSection>("in");
-  const [editAmount, setEditAmount] = useState<string>("0");
-  const [editCategoryId, setEditCategoryId] = useState<number | null>(null);
-  const [editMemo, setEditMemo] = useState<string>("");
 
   const loadBase = useCallback(async () => {
     const [acc, cats] = await Promise.all([getAccounts(), getCashCategories()]);
@@ -175,6 +166,22 @@ export default function DashboardClient() {
     })();
   }, [selectedAccountId, monthKey, rangeN, reloadAll]);
 
+  function onEditCashFlow(row: CashFlowListRow) {
+    setEditingId(row.id);
+    setFormDate(row.date);
+    setFormSection(row.section);
+    setFormAmount(String(row.amount ?? 0));
+    setFormCategoryId(row.cash_category_id);
+    setFormMemo(row.description ?? "");
+  }
+
+  function onCancelEdit() {
+    setEditingId(null);
+    setFormAmount("0");
+    setFormMemo("");
+    // setFormCategoryId(null); // ここは好みで
+  }
+
   async function onCreate() {
     if (!selectedAccountId) return;
 
@@ -186,22 +193,26 @@ export default function DashboardClient() {
 
       // manual 必須ルール
       if (!formCategoryId) throw new Error("カテゴリを選択してください（manual必須）");
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) throw new Error("日付が不正です（YYYY-MM-DD で入力してください）");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) throw new Error("日付が不正です（YYYY-MM-DD）");
+
+      const amt = Number(formAmount || 0);
+      if (!Number.isFinite(amt) || amt <= 0) throw new Error("金額が不正です（1以上）");
 
       const payload: CashFlowCreateInput = {
-        cash_account_id: selectedAccountId, // number
+        cash_account_id: selectedAccountId,
         date: ymdDate,
         section: formSection,
-        amount: Number(formAmount || 0),
-        cash_category_id: formCategoryId, // number
+        amount: amt,
+        cash_category_id: formCategoryId,
         description: formMemo || null,
         source_type: "manual",
       };
 
       await createCashFlow(payload);
+
       await reloadAll(selectedAccountId, monthKey, rangeN);
 
-      // reset
+      // reset（任意）
       setFormAmount("0");
       setFormMemo("");
     } catch (e: any) {
@@ -212,50 +223,33 @@ export default function DashboardClient() {
     }
   }
 
-  function beginEdit(row: CashFlowListRow) {
-    setEditingId(row.id);
-    setEditDate(normalizeYmd(row.date));
-    setEditSection(row.section);
-    setEditAmount(String(Number(row.amount ?? 0)));
-    setEditCategoryId(row.cash_category_id ?? row.cash_category?.id ?? null);
-    setEditMemo(row.description ?? "");
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-    setEditDate("");
-    setEditAmount("0");
-    setEditCategoryId(null);
-    setEditMemo("");
-    setEditSection("in");
-  }
-
-  async function saveEdit(row: CashFlowListRow) {
-    if (!selectedAccountId) return;
+  async function onUpdate() {
+    if (!selectedAccountId || !editingId) return;
 
     try {
       setLoading(true);
       setErrorMsg("");
 
-      const ymdDate = normalizeYmd(editDate);
+      const ymdDate = normalizeYmd(formDate);
 
-      if (!editCategoryId) throw new Error("カテゴリを選択してください（manual必須）");
+      if (!formCategoryId) throw new Error("カテゴリを選択してください");
       if (!/^\d{4}-\d{2}-\d{2}$/.test(ymdDate)) throw new Error("日付が不正です（YYYY-MM-DD）");
 
-      const payload: CashFlowUpdateInput = {
-        id: row.id,
+      const amt = Number(formAmount || 0);
+      if (!Number.isFinite(amt) || amt <= 0) throw new Error("金額が不正です（1以上）");
+
+      await updateCashFlow({
+        id: editingId,
         cash_account_id: selectedAccountId,
         date: ymdDate,
-        section: editSection,
-        amount: Number(editAmount || 0),
-        cash_category_id: editCategoryId,
-        description: editMemo || null,
-      };
+        section: formSection,
+        amount: amt,
+        cash_category_id: formCategoryId,
+        description: formMemo || null,
+      });
 
-      await updateCashFlow(payload);
-
+      setEditingId(null);
       await reloadAll(selectedAccountId, monthKey, rangeN);
-      cancelEdit();
     } catch (e: any) {
       console.error(e);
       setErrorMsg(e?.message ?? "更新中にエラーが発生しました");
@@ -267,7 +261,9 @@ export default function DashboardClient() {
   async function onDeleteCashFlow(row: CashFlowListRow) {
     if (!selectedAccountId) return;
 
-    const ok = window.confirm(`削除しますか?\n${row.date} / ${sectionLabel(row.section)} / ${yen(Number(row.amount ?? 0))}`);
+    const ok = window.confirm(
+      `削除しますか?\n${row.date} / ${sectionLabel(row.section)} / ${yen(Number(row.amount ?? 0))}`
+    );
     if (!ok) return;
 
     try {
@@ -278,6 +274,9 @@ export default function DashboardClient() {
         id: row.id,
         cash_account_id: selectedAccountId,
       });
+
+      // 編集中に対象が消えたら編集解除
+      if (editingId === row.id) setEditingId(null);
 
       await reloadAll(selectedAccountId, monthKey, rangeN);
     } catch (e: any) {
@@ -306,7 +305,10 @@ export default function DashboardClient() {
           Account:&nbsp;
           <select
             value={selectedAccountId ?? ""}
-            onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
+            onChange={(e) => {
+              setSelectedAccountId(e.target.value ? Number(e.target.value) : null);
+              setEditingId(null);
+            }}
             disabled={loading}
           >
             {accounts.map((a) => (
@@ -327,6 +329,7 @@ export default function DashboardClient() {
               if (!/^\d{4}-\d{2}$/.test(v)) return;
               const d = new Date(`${v}-01T00:00:00`);
               setCurrentMonth(d);
+              setEditingId(null);
             }}
             disabled={loading}
           />
@@ -334,7 +337,14 @@ export default function DashboardClient() {
 
         <div>
           Range:&nbsp;
-          <select value={rangeN} onChange={(e) => setRange(Number(e.target.value))} disabled={loading}>
+          <select
+            value={rangeN}
+            onChange={(e) => {
+              setRange(Number(e.target.value));
+              setEditingId(null);
+            }}
+            disabled={loading}
+          >
             {[3, 6, 12, 24].map((n) => (
               <option key={n} value={n}>
                 last {n} months
@@ -350,7 +360,7 @@ export default function DashboardClient() {
 
       <hr style={{ margin: "16px 0" }} />
 
-      {/* input row（新規登録） */}
+      {/* input row */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div>
           日付&nbsp;
@@ -372,7 +382,10 @@ export default function DashboardClient() {
 
         <div>
           カテゴリ（manual必須）&nbsp;
-          <select value={formCategoryId ?? ""} onChange={(e) => setFormCategoryId(e.target.value ? Number(e.target.value) : null)}>
+          <select
+            value={formCategoryId ?? ""}
+            onChange={(e) => setFormCategoryId(e.target.value ? Number(e.target.value) : null)}
+          >
             <option value="">（選択）</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
@@ -392,9 +405,19 @@ export default function DashboardClient() {
           />
         </div>
 
-        <button disabled={loading || !selectedAccountId} onClick={onCreate}>
-          登録
+        <button
+          disabled={loading || !selectedAccountId}
+          onClick={editingId ? onUpdate : onCreate}
+          title={editingId ? `id:${editingId} を更新` : "新規登録"}
+        >
+          {editingId ? "更新" : "登録"}
         </button>
+
+        {editingId ? (
+          <button onClick={onCancelEdit} disabled={loading} title="編集をやめる">
+            キャンセル
+          </button>
+        ) : null}
       </div>
 
       <hr style={{ margin: "16px 0" }} />
@@ -420,88 +443,23 @@ export default function DashboardClient() {
             </tr>
           </thead>
           <tbody>
-            {cashFlows.map((r) => {
-              const isEditing = editingId === r.id;
-
-              return (
-                <tr key={r.id}>
-                  <td style={{ paddingRight: 12 }}>
-                    {isEditing ? (
-                      <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
-                    ) : (
-                      r.date
-                    )}
-                  </td>
-
-                  <td style={{ paddingRight: 12 }}>
-                    {isEditing ? (
-                      <select value={editSection} onChange={(e) => setEditSection(e.target.value as CashFlowSection)}>
-                        <option value="in">収入</option>
-                        <option value="out">支出</option>
-                      </select>
-                    ) : (
-                      sectionLabel(r.section)
-                    )}
-                  </td>
-
-                  <td style={{ paddingRight: 12, textAlign: "right" }}>
-                    {isEditing ? (
-                      <input value={editAmount} onChange={(e) => setEditAmount(e.target.value)} style={{ width: 120 }} />
-                    ) : (
-                      yen(Number(r.amount ?? 0))
-                    )}
-                  </td>
-
-                  <td style={{ paddingRight: 12 }}>
-                    {isEditing ? (
-                      <select
-                        value={editCategoryId ?? ""}
-                        onChange={(e) => setEditCategoryId(e.target.value ? Number(e.target.value) : null)}
-                      >
-                        <option value="">（選択）</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name} / id:{c.id}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      r.cash_category?.name ?? "-"
-                    )}
-                  </td>
-
-                  <td style={{ paddingRight: 12 }}>
-                    {isEditing ? (
-                      <input value={editMemo} onChange={(e) => setEditMemo(e.target.value)} style={{ width: 240 }} />
-                    ) : (
-                      r.description ?? ""
-                    )}
-                  </td>
-
-                  <td>
-                    {isEditing ? (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => saveEdit(r)} disabled={loading} title="保存">
-                          保存
-                        </button>
-                        <button onClick={cancelEdit} disabled={loading} title="キャンセル">
-                          キャンセル
-                        </button>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => beginEdit(r)} disabled={loading} title="編集">
-                          編集
-                        </button>
-                        <button onClick={() => onDeleteCashFlow(r)} disabled={loading} title="削除">
-                          削除
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {cashFlows.map((r) => (
+              <tr key={r.id} style={editingId === r.id ? { background: "rgba(255,165,0,0.12)" } : undefined}>
+                <td style={{ paddingRight: 12 }}>{r.date}</td>
+                <td style={{ paddingRight: 12 }}>{sectionLabel(r.section)}</td>
+                <td style={{ paddingRight: 12, textAlign: "right" }}>{yen(Number(r.amount ?? 0))}</td>
+                <td style={{ paddingRight: 12 }}>{r.cash_category?.name ?? "-"}</td>
+                <td style={{ paddingRight: 12 }}>{r.description ?? ""}</td>
+                <td style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => onEditCashFlow(r)} disabled={loading} title="フォームに読み込み">
+                    編集
+                  </button>
+                  <button onClick={() => onDeleteCashFlow(r)} disabled={loading} title="削除">
+                    削除
+                  </button>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       )}
