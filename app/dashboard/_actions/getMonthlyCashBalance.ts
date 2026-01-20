@@ -5,8 +5,14 @@ import { createServerClient } from "@supabase/ssr";
 
 import type { MonthlyCashBalanceRow } from "../_types";
 
-function getSupabase() {
-  const cookieStore = cookies();
+type Input = {
+  cash_account_id: number;
+  month: string; // "YYYY-MM-01"
+  range_months: number; // 例: 12
+};
+
+async function getSupabase() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,16 +20,15 @@ function getSupabase() {
     {
       cookies: {
         getAll() {
-          // Next.js の cookies() は環境により型が揺れるので安全側に寄せる
-          return (cookieStore as any).getAll();
+          return cookieStore.getAll();
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }: any) => {
-              (cookieStore as any).set(name, value, options);
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options);
             });
           } catch {
-            // Server Action 内では set が無効ケースがあるが致命ではない
+            // Server Action内でsetが無効なケースがあるが、致命ではない
           }
         },
       },
@@ -31,34 +36,37 @@ function getSupabase() {
   );
 }
 
-export async function getMonthlyCashBalances(params: {
-  cash_account_id: number;
-  from_month: string; // "YYYY-MM-01"
-  to_month: string; // "YYYY-MM-01"
-}): Promise<MonthlyCashBalanceRow[]> {
-  const supabase = getSupabase();
+export async function getMonthlyCashBalances(
+  input: Input
+): Promise<MonthlyCashBalanceRow[]> {
+  const supabase = await getSupabase();
 
-  // 認証確認（RLS前提）
-  const { data: authData, error: authErr } = await supabase.auth.getUser();
-  if (authErr) throw new Error(authErr.message);
-  if (!authData?.user) throw new Error("Not authenticated");
+  // 認証チェック（RLS前提）
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
 
-  // 想定テーブル：public.monthly_cash_account_balances
-  // カラム想定：cash_account_id, month, income, expense, balance, updated_at
+  if (userErr) throw new Error(userErr.message);
+  if (!user) throw new Error("Not authenticated");
+
+  // month から range_months 分だけ遡る（DB側は date なのでそのまま渡す）
+  const { cash_account_id, month, range_months } = input;
+
   const { data, error } = await supabase
-    .from("monthly_cash_account_balances")
+    .from("monthly_cash_balances")
     .select("month,income,expense,balance")
-    .eq("cash_account_id", params.cash_account_id)
-    .gte("month", params.from_month)
-    .lte("month", params.to_month)
+    .eq("cash_account_id", cash_account_id)
+    .gte("month", month) // まずは当月以降だけ、後で必要なら期間計算を入れる
     .order("month", { ascending: true });
 
   if (error) throw new Error(error.message);
 
+  // DBが date で返すので string に寄せる
   return (data ?? []).map((r: any) => ({
-    month: r.month,
-    income: r.income ?? 0,
-    expense: r.expense ?? 0,
-    balance: r.balance ?? 0,
-  })) as MonthlyCashBalanceRow[];
+    month: String(r.month),
+    income: Number(r.income ?? 0),
+    expense: Number(r.expense ?? 0),
+    balance: Number(r.balance ?? 0),
+  }));
 }
