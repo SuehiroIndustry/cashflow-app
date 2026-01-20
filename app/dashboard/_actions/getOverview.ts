@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-import type { MonthlyCashBalanceRow } from "../_types";
+import type { OverviewPayload } from "../_types";
 
 function getSupabase() {
   const cookieStore = cookies();
@@ -14,7 +14,6 @@ function getSupabase() {
     {
       cookies: {
         getAll() {
-          // Next.js の cookies() は環境により型が揺れるので安全側に寄せる
           return (cookieStore as any).getAll();
         },
         setAll(cookiesToSet) {
@@ -23,7 +22,7 @@ function getSupabase() {
               (cookieStore as any).set(name, value, options);
             });
           } catch {
-            // Server Action 内では set が無効ケースがあるが致命ではない
+            // noop
           }
         },
       },
@@ -31,34 +30,38 @@ function getSupabase() {
   );
 }
 
-export async function getMonthlyCashBalances(params: {
+export async function getOverview(params: {
   cash_account_id: number;
-  from_month: string; // "YYYY-MM-01"
-  to_month: string; // "YYYY-MM-01"
-}): Promise<MonthlyCashBalanceRow[]> {
+  month: string; // "YYYY-MM-01"
+}): Promise<OverviewPayload> {
   const supabase = getSupabase();
 
-  // 認証確認（RLS前提）
   const { data: authData, error: authErr } = await supabase.auth.getUser();
   if (authErr) throw new Error(authErr.message);
   if (!authData?.user) throw new Error("Not authenticated");
 
-  // 想定テーブル：public.monthly_cash_account_balances
-  // カラム想定：cash_account_id, month, income, expense, balance, updated_at
-  const { data, error } = await supabase
+  // その月のサマリを monthly_cash_account_balances から取る（最も安定）
+  const { data: row, error } = await supabase
     .from("monthly_cash_account_balances")
-    .select("month,income,expense,balance")
+    .select("income,expense,balance")
     .eq("cash_account_id", params.cash_account_id)
-    .gte("month", params.from_month)
-    .lte("month", params.to_month)
-    .order("month", { ascending: true });
+    .eq("month", params.month)
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map((r: any) => ({
-    month: r.month,
-    income: r.income ?? 0,
-    expense: r.expense ?? 0,
-    balance: r.balance ?? 0,
-  })) as MonthlyCashBalanceRow[];
+  const income = (row as any)?.income ?? 0;
+  const expense = (row as any)?.expense ?? 0;
+  const balance = (row as any)?.balance ?? 0;
+
+  // OverviewCard が欲しがる形に寄せる
+  // ※OverviewPayload の実体に合わせて必要ならここを調整する
+  const payload: OverviewPayload = {
+    currentBalance: balance,
+    thisMonthIncome: income,
+    thisMonthExpense: expense,
+    net: income - expense,
+  } as any;
+
+  return payload;
 }
