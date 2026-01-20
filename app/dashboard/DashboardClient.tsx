@@ -56,10 +56,10 @@ export default function DashboardClient() {
     // 月次を取得（ここが落ちると Server Components render error に繋がりやすいので try/catch で握る）
     try {
       const rows = await getMonthlyCashBalances({
-        cash_account_id: nextAccountId,
-        month,
-        range_months: rangeMonths,
-      });
+  cashAccountId: nextAccountId,
+  month,
+  rangeMonths,
+});
       setMonthlyRows(rows);
     } catch (e) {
       console.error("getMonthlyCashBalances failed:", e);
