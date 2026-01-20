@@ -6,36 +6,29 @@ import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-// actions
+// actions（関数だけimport）
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalance";
-import { getOverview } from "./_actions/getOverview";
 
 // types（ルール：_types からだけ）
 import type { CashAccount, MonthlyCashBalanceRow, OverviewPayload } from "./_types";
-
-function monthStartISO(d = new Date()) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}-01`;
-}
-
-function addMonths(monthISO: string, delta: number) {
-  const [y, m] = monthISO.split("-").map((v) => Number(v));
-  const dt = new Date(y, m - 1 + delta, 1);
-  return monthStartISO(dt);
-}
 
 export default function DashboardClient() {
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
-  const [selectedMonth, setSelectedMonth] = useState<string>(monthStartISO(new Date()));
+  const [month, setMonth] = useState<string>(() => {
+    // 初期値：今月の1日（YYYY-MM-01）
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}-01`;
+  });
+
+  const [rangeMonths, setRangeMonths] = useState<number>(12);
+
   const [monthlyRows, setMonthlyRows] = useState<MonthlyCashBalanceRow[]>([]);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
-
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const selectedAccount = useMemo(() => {
     if (selectedAccountId == null) return null;
@@ -43,51 +36,39 @@ export default function DashboardClient() {
   }, [accounts, selectedAccountId]);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setErrorMsg(null);
+    const acc = (await getAccounts()) as CashAccount[];
+    setAccounts(acc);
 
-    try {
-      const acc = (await getAccounts()) as CashAccount[];
-      setAccounts(acc);
+    const nextAccountId =
+      selectedAccountId ?? (acc?.length ? acc[0].id : null);
 
-      const accountId =
-        selectedAccountId ?? (acc?.length ? acc[0].id : null);
+    if (nextAccountId !== selectedAccountId) {
+      setSelectedAccountId(nextAccountId);
+    }
 
-      if (accountId == null) {
-        setSelectedAccountId(null);
-        setMonthlyRows([]);
-        setOverview(null);
-        return;
-      }
-
-      if (selectedAccountId == null) setSelectedAccountId(accountId);
-
-      // last 12 months
-      const toMonth = selectedMonth;
-      const fromMonth = addMonths(selectedMonth, -11);
-
-      const rows = await getMonthlyCashBalances({
-        cash_account_id: accountId,
-        from_month: fromMonth,
-        to_month: toMonth,
-      });
-
-      setMonthlyRows(rows);
-
-      const ov = await getOverview({
-        cash_account_id: accountId,
-        month: selectedMonth,
-      });
-
-      setOverview(ov);
-    } catch (e: any) {
-      setErrorMsg(e?.message ?? "Unknown error");
+    // 口座が無いなら空で終了
+    if (!nextAccountId) {
       setMonthlyRows([]);
       setOverview(null);
-    } finally {
-      setLoading(false);
+      return;
     }
-  }, [selectedAccountId, selectedMonth]);
+
+    // 月次を取得（ここが落ちると Server Components render error に繋がりやすいので try/catch で握る）
+    try {
+      const rows = await getMonthlyCashBalances({
+        cash_account_id: nextAccountId,
+        month,
+        range_months: rangeMonths,
+      });
+      setMonthlyRows(rows);
+    } catch (e) {
+      console.error("getMonthlyCashBalances failed:", e);
+      setMonthlyRows([]);
+    }
+
+    // overview はまだ未実装なら null のままでOK（表示側はガードしてる）
+    setOverview(null);
+  }, [month, rangeMonths, selectedAccountId]);
 
   useEffect(() => {
     void load();
@@ -95,10 +76,11 @@ export default function DashboardClient() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <div className="opacity-80">Account:</div>
+      {/* 操作UI（最低限） */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm opacity-80">Account</label>
         <select
-          className="rounded border px-2 py-1 bg-transparent"
+          className="border rounded px-2 py-1 bg-transparent"
           value={selectedAccountId ?? ""}
           onChange={(e) => setSelectedAccountId(Number(e.target.value))}
         >
@@ -109,39 +91,38 @@ export default function DashboardClient() {
           ))}
         </select>
 
-        <div className="opacity-80">Month:</div>
+        <label className="text-sm opacity-80 ml-2">Month</label>
         <input
-          className="rounded border px-2 py-1 bg-transparent"
+          className="border rounded px-2 py-1 bg-transparent"
           type="month"
-          value={selectedMonth.slice(0, 7)}
-          onChange={(e) => {
-            const v = e.target.value; // "YYYY-MM"
-            setSelectedMonth(`${v}-01`);
-          }}
+          value={month.slice(0, 7)}
+          onChange={(e) => setMonth(`${e.target.value}-01`)}
         />
 
-        <button
-          className="rounded border px-3 py-1 hover:opacity-80"
-          onClick={() => void load()}
-          disabled={loading}
+        <label className="text-sm opacity-80 ml-2">Range</label>
+        <select
+          className="border rounded px-2 py-1 bg-transparent"
+          value={rangeMonths}
+          onChange={(e) => setRangeMonths(Number(e.target.value))}
         >
-          {loading ? "loading..." : "refresh"}
+          <option value={2}>last 2 months</option>
+          <option value={6}>last 6 months</option>
+          <option value={12}>last 12 months</option>
+        </select>
+
+        <button
+          className="border rounded px-3 py-1"
+          onClick={() => void load()}
+        >
+          refresh
         </button>
       </div>
-
-      {errorMsg ? (
-        <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm">
-          {errorMsg}
-        </div>
-      ) : null}
 
       <div className="space-y-4">
         {selectedAccount && overview ? (
           <OverviewCard accountName={selectedAccount.name} payload={overview} />
         ) : (
-          <div className="text-sm opacity-60">
-            {loading ? "Overview loading..." : "Overview not available"}
-          </div>
+          <div className="text-sm opacity-60">Overview not available</div>
         )}
 
         <BalanceCard rows={monthlyRows} />
@@ -151,7 +132,7 @@ export default function DashboardClient() {
 
       <div className="text-xs opacity-60">
         selectedAccount: {selectedAccount ? selectedAccount.name : "none"} / month:{" "}
-        {selectedMonth}
+        {month}
       </div>
     </div>
   );
