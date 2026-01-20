@@ -1,99 +1,85 @@
 // app/dashboard/_types.ts
 
-// =====================
-// 基本ドメイン型
-// =====================
-
-// 口座（cash_accounts）
 export type CashAccount = {
   id: number;
   name: string;
-
-  // もしテーブルにあるなら使う（無くてもOK）
-  type?: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
 };
 
-// カテゴリ（cash_categories / user_category_settings 経由など）
-// ※カテゴリは user_id 列が無い前提（あなたのルール通り）
 export type CashCategory = {
   id: number;
   name: string;
-
-  // 収入/支出の区分（DBに合わせて調整してOK）
-  section?: "収入" | "支出" | "income" | "expense" | string;
-  sort_order?: number | null;
-
-  created_at?: string | null;
-  updated_at?: string | null;
 };
 
-// =====================
-// Cash Flow 入出金
-// =====================
-
-export type CashFlowSection = "収入" | "支出" | "income" | "expense";
+export type CashFlowSection = "in" | "out";
 
 export type CashFlowCreateInput = {
   cash_account_id: number;
   date: string; // "YYYY-MM-DD"
-  section: CashFlowSection;
+  section: CashFlowSection; // "in" | "out"
   amount: number;
-
   cash_category_id: number | null;
   description?: string | null;
+  source_type?: "manual";
+};
 
-  // DB制約に合わせた運用
-  source_type?: "manual" | string;
-  source_id?: number | null;
-
-  is_projection?: boolean;
+export type CashFlowDeleteInput = {
+  id: number;
+  cash_account_id: number;
 };
 
 export type CashFlowUpdateInput = {
   id: number;
   cash_account_id: number;
-  date: string;
+  date: string; // YYYY-MM-DD
   section: CashFlowSection;
   amount: number;
-
-  cash_category_id: number | null;
-  description?: string | null;
-
-  is_projection?: boolean;
+  cash_category_id: number;
+  description: string | null;
 };
 
-// 一覧表示に使う行（Dashboardの「当月の明細」など）
 export type CashFlowListRow = {
   id: number;
+  cash_account_id: number;
   date: string; // "YYYY-MM-DD"
-  section: string;
-  amount: number;
+  section: CashFlowSection;
+  amount: number | null;
   cash_category_id: number | null;
-  category_name: string | null;
-  memo: string | null;
+  description: string | null;
+  created_at: string | null;
+  cash_category: { id: number; name: string } | null;
 };
 
-// 月次集計表示
-export type MonthlyBalanceRow = {
-  month: string; // "YYYY-MM-01" 等
-  income: number;
-  expense: number;
-  balance: number;
+/**
+ * monthly_cash_account_balances から取る “月次” 行
+ * month は "YYYY-MM-01"
+ */
+export type MonthlyCashBalanceRow = {
+  cash_account_id: number;
+  month: string; // "YYYY-MM-01"
+  income: number | null;
+  expense: number | null;
+  balance: number | null;
+  updated_at?: string | null;
+  // user_id は select しない運用でもOKだが、DBによっては存在する
+  user_id?: string | null;
 };
 
-// Overview 表示用
+export type MonthlyIncomeExpenseRow = {
+  income: number | null;
+  expense: number | null;
+};
+
 export type OverviewPayload = {
-  accountId: number;
-  accountName: string;
-
   currentBalance: number;
-
   thisMonthIncome: number;
   thisMonthExpense: number;
   net: number;
 
-  monthEndBalance?: number;
-  monthOverMonth?: number;
+  monthlyBalance: number;
+  monthlyDiff: number;
 };
+
+/**
+ * 旧名互換（DashboardClient.tsx などで MonthlyBalanceRow を使ってても通す）
+ */
+export type MonthlyBalanceRow = MonthlyCashBalanceRow;

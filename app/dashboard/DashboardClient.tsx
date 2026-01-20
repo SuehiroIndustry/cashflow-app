@@ -10,14 +10,14 @@ import EcoCharts from "./_components/EcoCharts";
 import { getAccounts } from "./_actions/getAccounts";
 
 // types（ルール：_types からだけ）
-import type { CashAccount, MonthlyBalanceRow, OverviewPayload } from "./_types";
+import type { CashAccount, MonthlyCashBalanceRow, OverviewPayload } from "./_types";
 
 export default function DashboardClient() {
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
-  // いったん月次は空配列（getMonthlyBalance が無いので依存を切る）
-  const [monthlyRows, setMonthlyRows] = useState<MonthlyBalanceRow[]>([]);
+  // ✅ MonthlyBalanceRow じゃなくて MonthlyCashBalanceRow
+  const [monthlyRows, setMonthlyRows] = useState<MonthlyCashBalanceRow[]>([]);
 
   // overview も今は取得してないので null のまま
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
