@@ -4,7 +4,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import OverviewCard from "./_components/OverviewCard";
-import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
 import { getAccounts } from "./_actions/getAccounts";
@@ -55,6 +54,52 @@ function toMonthStartISO(input: string): string {
   const y = d.getFullYear();
   const m = pad2(d.getMonth() + 1);
   return `${y}-${m}-01`;
+}
+
+function ForecastCard(props: { forecast: CashShortForecast; currentBalance: number }) {
+  const { forecast, currentBalance } = props;
+
+  const badge =
+    forecast.level === "danger"
+      ? { label: "危険", cls: "border-red-500/60 text-red-200" }
+      : forecast.level === "warn"
+        ? { label: "注意", cls: "border-yellow-500/60 text-yellow-200" }
+        : { label: "安全", cls: "border-emerald-500/60 text-emerald-200" };
+
+  return (
+    <div className="border rounded p-4">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="font-semibold">資金ショート予測</div>
+        <div className={`text-xs border rounded px-2 py-0.5 ${badge.cls}`}>{badge.label}</div>
+      </div>
+
+      <div className="text-sm opacity-80 mb-3">{forecast.message}</div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div>
+          <div className="opacity-70">現在残高</div>
+          <div className="font-semibold">¥{currentBalance.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="opacity-70">月平均 収入</div>
+          <div className="font-semibold">¥{forecast.avgIncome.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="opacity-70">月平均 支出</div>
+          <div className="font-semibold">¥{forecast.avgExpense.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="opacity-70">月平均 純増減</div>
+          <div className="font-semibold">¥{forecast.avgNet.toLocaleString()}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 text-xs opacity-60">
+        予測対象: {forecast.month} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測{forecast.rangeMonths}ヶ月
+        {forecast.shortDate ? ` / ショート見込み: ${forecast.shortDate}` : " / ショート見込み: なし"}
+      </div>
+    </div>
+  );
 }
 
 export default function DashboardClient() {
@@ -110,22 +155,19 @@ export default function DashboardClient() {
         rangeMonths,
       });
 
-      // month asc にしておく（表示しやすい）
       const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
       setMonthRows(asc);
 
-      // ここが今回の本命：資金ショート予測
       const input: CashShortForecastInput = {
         cashAccountId: nextAccountId,
         month: monthISO,
         rangeMonths,
-        avgWindowMonths: 6, // ← ここはInputの必須
+        avgWindowMonths: 6,
       };
 
       const fc = await getCashShortForecast(input);
       setForecast(fc);
 
-      // overview は未実装でOK：一旦null
       setOverview(null);
     } catch (e: any) {
       setLoadError(e?.message ?? String(e));
@@ -197,9 +239,9 @@ export default function DashboardClient() {
         {loadError && <div className="text-sm text-red-300">{loadError}</div>}
       </div>
 
-      {/* Forecast card */}
+      {/* Forecast card (BalanceCardは使わない) */}
       {forecast ? (
-        <BalanceCard forecast={forecast} currentBalance={selectedAccount?.current_balance ?? 0} />
+        <ForecastCard forecast={forecast} currentBalance={selectedAccount?.current_balance ?? 0} />
       ) : (
         <div className="text-sm opacity-70">No forecast</div>
       )}
