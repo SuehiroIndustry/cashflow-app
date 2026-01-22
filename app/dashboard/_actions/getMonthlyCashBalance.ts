@@ -1,4 +1,4 @@
-// app/dashboard/_actions/getMonthlyCashBalance.ts
+// app/dashboard/_actions/getMonthlyCashBalances.ts
 "use server";
 
 import { cookies } from "next/headers";
@@ -6,9 +6,9 @@ import { createServerClient } from "@supabase/ssr";
 
 import type { MonthlyBalanceRow } from "../_types";
 
-type GetMonthlyCashBalanceInput = {
+type GetMonthlyCashBalancesInput = {
   cashAccountId: number;
-  month: string; // "YYYY-MM-01"
+  month: string; // "YYYY-MM-01" or "YYYY-MM"
   rangeMonths: number; // 3/6/12...
 };
 
@@ -47,8 +47,8 @@ function normalizeMonthKey(input: string): string {
   return input;
 }
 
-export async function getMonthlyCashBalance(
-  input: GetMonthlyCashBalanceInput
+export async function getMonthlyCashBalances(
+  input: GetMonthlyCashBalancesInput
 ): Promise<MonthlyBalanceRow[]> {
   const supabase = await getSupabase();
 
@@ -72,8 +72,7 @@ export async function getMonthlyCashBalance(
 
   if (error) throw new Error(error.message);
 
-  // 返すのは昇順に揃える（UI側で扱いやすい）
   const rows = (data ?? []) as MonthlyBalanceRow[];
-  rows.sort((a, b) => a.month.localeCompare(b.month));
+  rows.sort((a, b) => a.month.localeCompare(b.month)); // 昇順
   return rows;
 }
