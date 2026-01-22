@@ -1,4 +1,5 @@
-import SimulationClient from "../simulation/SimulationClient";
+// app/simulation/page.tsx
+import SimulationClient from "./SimulationClient";
 
 export default function Page() {
   return (

@@ -6,24 +6,9 @@ import { createServerClient } from "@supabase/ssr";
 
 import type {
   CashShortForecast,
-  GetCashShortForecastInput,
+  CashShortForecastInput,
+  CashProjectionMonthRow,
 } from "../_types";
-
-function addMonths(monthStartISO: string, plusMonths: number): string {
-  // monthStartISO: "YYYY-MM-01"
-  const d = new Date(monthStartISO + "T00:00:00Z");
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth(); // 0-based
-  const newDate = new Date(Date.UTC(y, m + plusMonths, 1));
-  const yy = newDate.getUTCFullYear();
-  const mm = String(newDate.getUTCMonth() + 1).padStart(2, "0");
-  return `${yy}-${mm}-01`;
-}
-
-function toNumber(v: any): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
 
 async function getSupabase() {
   const cookieStore = await Promise.resolve(cookies());
@@ -41,27 +26,32 @@ async function getSupabase() {
             cookiesToSet.forEach(({ name, value, options }) => {
               try {
                 cookieStore.set(name, value, options as any);
-              } catch {
-                // noop
-              }
+              } catch {}
             });
-          } catch {
-            // noop
-          }
+          } catch {}
         },
       },
     }
   );
 }
 
-export async function getCashShortForecast(
-  input: GetCashShortForecastInput
-): Promise<CashShortForecast> {
-  const { cashAccountId, month, rangeMonths } = input;
+function addMonthsISO(monthISO: string, add: number) {
+  // monthISO: "YYYY-MM-01"
+  const [y, m] = monthISO.split("-").map((v) => Number(v));
+  const dt = new Date(y, (m - 1) + add, 1);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  return `${yy}-${mm}-01`;
+}
 
+export async function getCashShortForecast(
+  input: CashShortForecastInput
+): Promise<CashShortForecast> {
   const supabase = await getSupabase();
 
-  // ① 現在残高（cash_accounts）
+  const { cashAccountId, month, rangeMonths, avgWindowMonths, whatIf } = input;
+
+  // 1) current balance
   const { data: acc, error: accErr } = await supabase
     .from("cash_accounts")
     .select("id, current_balance")
@@ -69,83 +59,82 @@ export async function getCashShortForecast(
     .maybeSingle();
 
   if (accErr) throw new Error(accErr.message);
+  const currentBalance = Number(acc?.current_balance ?? 0);
 
-  const currentBalance = toNumber(acc?.current_balance ?? 0);
-
-  // ② 月次（monthly_cash_account_balances）: 選択月以前の直近Nヶ月
-  const { data: rows, error: rowsErr } = await supabase
+  // 2) last N months actuals for averaging
+  const { data: rows, error: balErr } = await supabase
     .from("monthly_cash_account_balances")
-    .select("month, income, expense, balance")
+    .select("month, income, expense")
     .eq("cash_account_id", cashAccountId)
     .lte("month", month)
     .order("month", { ascending: false })
-    .limit(rangeMonths);
+    .limit(avgWindowMonths);
 
-  if (rowsErr) throw new Error(rowsErr.message);
+  if (balErr) throw new Error(balErr.message);
 
-  const list = (rows ?? []).map((r: any) => ({
-    month: String(r.month),
-    income: toNumber(r.income),
-    expense: toNumber(r.expense),
-    balance: toNumber(r.balance),
-  }));
+  const n = rows?.length ?? 0;
+  const sumIncome = (rows ?? []).reduce((s: number, r: any) => s + Number(r.income ?? 0), 0);
+  const sumExpense = (rows ?? []).reduce((s: number, r: any) => s + Number(r.expense ?? 0), 0);
 
-  const count = list.length || 1;
-  const sumIncome = list.reduce((a, r) => a + r.income, 0);
-  const sumExpense = list.reduce((a, r) => a + r.expense, 0);
+  const baseAvgIncome = n ? Math.round(sumIncome / n) : 0;
+  const baseAvgExpense = n ? Math.round(sumExpense / n) : 0;
 
-  const avgIncome = sumIncome / count;
-  const avgExpense = sumExpense / count;
-  const avgNet = avgIncome - avgExpense; // 月平均の純増減（＋なら増える、−なら減る）
+  const deltaIncome = Number(whatIf?.deltaIncome ?? 0);
+  const deltaExpense = Number(whatIf?.deltaExpense ?? 0);
 
-  // ③ ショート予測
-  let monthsToZero: number | null = null;
-  let predictedMonth: string | null = null;
+  const avgIncome = baseAvgIncome + deltaIncome;
+  const avgExpense = baseAvgExpense + deltaExpense;
+  const avgNet = avgIncome - avgExpense;
 
-  if (currentBalance <= 0) {
-    monthsToZero = 0;
-    predictedMonth = month;
-  } else if (avgNet < 0) {
-    const burn = -avgNet; // 月あたり減る額
-    monthsToZero = Math.ceil(currentBalance / burn);
-    predictedMonth = addMonths(month, monthsToZero);
+  // 3) build projection
+  const projection: CashProjectionMonthRow[] = [];
+  let bal = currentBalance;
+  let shortDate: string | null = null;
+
+  for (let i = 0; i < rangeMonths; i++) {
+    const m = addMonthsISO(month, i); // start from selected month
+    bal = bal + avgNet;
+
+    if (shortDate === null && bal <= 0) shortDate = m;
+
+    projection.push({
+      month: m,
+      income: avgIncome,
+      expense: avgExpense,
+      balance: bal,
+    });
   }
 
-  // ④ レベル判定（ダッシュボードで色付けする用）
-  let level: CashShortForecast["level"] = "safe";
-  let message = "資金ショートの兆候は見えていません（平均ベース）";
+  // 4) level + message
+  let level: "safe" | "warn" | "danger" = "safe";
+  let message = "平均ベースでは残高は減りません（ただし変動は別途）";
 
-  if (monthsToZero === 0) {
-    level = "danger";
-    message = "残高がすでに0以下です。即時の対策が必要です。";
-  } else if (typeof monthsToZero === "number") {
-    if (monthsToZero <= 3) {
+  if (shortDate) {
+    // months until short
+    const idx = projection.findIndex((r) => r.month === shortDate);
+    if (idx >= 0 && idx <= 1) {
       level = "danger";
-      message = `このままだと約${monthsToZero}ヶ月で資金ショート見込みです。`;
-    } else if (monthsToZero <= 6) {
+      message = "かなり危険。直近で資金ショート見込みです。";
+    } else if (idx >= 0 && idx <= 3) {
       level = "warn";
-      message = `このままだと約${monthsToZero}ヶ月で資金ショート見込みです（要注意）。`;
+      message = "注意。数ヶ月以内に資金ショートの可能性があります。";
     } else {
-      level = "safe";
-      message = `平均ベースでは、資金ショートまで約${monthsToZero}ヶ月の余裕があります。`;
+      level = "warn";
+      message = "今すぐではないが、放置すると資金ショートします。";
     }
-  } else {
-    // monthsToZero === null（平均で増える or 横ばい）
-    level = "safe";
-    message = "平均ベースでは残高は減りません（ただし変動は別途）";
   }
 
   return {
     cashAccountId,
     month,
     rangeMonths,
-    currentBalance,
+    avgWindowMonths,
     avgIncome,
     avgExpense,
     avgNet,
-    monthsToZero,
-    predictedMonth,
     level,
     message,
+    shortDate,
+    rows: projection,
   };
 }

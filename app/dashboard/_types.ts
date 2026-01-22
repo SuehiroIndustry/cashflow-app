@@ -1,92 +1,14 @@
 // app/dashboard/_types.ts
 
+// ===== Accounts =====
 export type CashAccount = {
   id: number;
   name: string;
+  current_balance: number;
 };
 
-export type CashCategory = {
-  id: number;
-  name: string;
-};
-
-export type CashFlowSection = "in" | "out";
-
-export type CashFlowCreateInput = {
-  cash_account_id: number;
-  date: string; // "YYYY-MM-DD"
-  section: CashFlowSection; // "in" | "out"
-  amount: number;
-  cash_category_id: number | null;
-  description?: string | null;
-  source_type?: "manual";
-};
-
-export type CashFlowDeleteInput = {
-  id: number;
-  cash_account_id: number;
-};
-
-export type CashFlowListRow = {
-  id: number;
-  cash_account_id: number;
-  date: string; // "YYYY-MM-DD"
-  section: CashFlowSection;
-  amount: number | null;
-  cash_category_id: number | null;
-  description: string | null;
-  created_at: string | null;
-  cash_category: { id: number; name: string } | null;
-};
-
-export type MonthlyCashBalanceRow = {
-  cash_account_id: number;
-  month: string; // "YYYY-MM-01"
-  income: number | null;
-  expense: number | null;
-  balance: number | null;
-  updated_at?: string | null;
-  user_id?: string | null;
-};
-
-/**
- * ✅ ここがポイント：month を必須にする（= 今のビルドエラーの期待に合わせる）
- */
-export type MonthlyIncomeExpenseRow = {
-  month: string; // "YYYY-MM-01"
-  income: number | null;
-  expense: number | null;
-};
-
-export type OverviewPayload = {
-  currentBalance: number;
-  thisMonthIncome: number;
-  thisMonthExpense: number;
-  net: number;
-
-  monthlyBalance: number;
-  monthlyDiff: number;
-};
-
-export type CashFlowUpdateInput = {
-  id: number;
-  cash_account_id: number;
-  date: string; // YYYY-MM-DD
-  section: CashFlowSection;
-  amount: number;
-  cash_category_id: number;
-  description: string | null;
-};
-
-// app/dashboard/_types.ts
-
-export type GetMonthlyCashBalancesInput = {
-  cashAccountId: number;
-  month: string;       // "YYYY-MM-01"
-  rangeMonths: number; // 12とか
-};
-
-export type MonthlyCashAccountBalanceRow = {
+// ===== Monthly balances (actuals) =====
+export type MonthlyBalanceRow = {
   cash_account_id: number;
   month: string; // "YYYY-MM-01"
   income: number;
@@ -94,43 +16,59 @@ export type MonthlyCashAccountBalanceRow = {
   balance: number;
 };
 
-// app/dashboard/_types.ts（追記分だけ）
+// ===== Cash short forecast (monthly projection) =====
+export type CashProjectionMonthRow = {
+  month: string; // "YYYY-MM-01"
+  income: number; // avg income
+  expense: number; // avg expense
+  balance: number; // projected balance
+};
 
-export type GetCashShortForecastInput = {
+export type CashShortForecastInput = {
   cashAccountId: number;
-  month: string;       // "YYYY-MM-01"
-  rangeMonths: number; // 2,6,12,24...
+  month: string; // "YYYY-MM-01"
+  rangeMonths: number; // 3/6/12 ...
+  avgWindowMonths: number; // 3/6/12 ...
+  whatIf?: {
+    deltaIncome?: number; // + per month
+    deltaExpense?: number; // + per month
+  };
 };
 
 export type CashShortForecast = {
   cashAccountId: number;
-  month: string;
-  rangeMonths: number;
 
-  currentBalance: number;
+  // request echo
+  month: string; // "YYYY-MM-01"
+  rangeMonths: number;
+  avgWindowMonths: number;
+
+  // computed
   avgIncome: number;
   avgExpense: number;
-  avgNet: number;
-
-  monthsToZero: number | null;      // null=減らない/横ばい、0=すでに0以下
-  predictedMonth: string | null;    // "YYYY-MM-01"
-
+  avgNet: number; // avgIncome - avgExpense (after what-if)
   level: "safe" | "warn" | "danger";
   message: string;
+
+  // first month where balance <= 0 (YYYY-MM-01) or null
+  shortDate: string | null;
+
+  rows: CashProjectionMonthRow[];
 };
 
+// ===== Simulation (daily projection) =====
 export type GetCashProjectionInput = {
   cashAccountId: number;
-  startDate: string;   // "YYYY-MM-DD"
-  days: number;        // 例: 180
+  startDate: string; // "YYYY-MM-DD"
+  days: number; // e.g. 180
 };
 
-export type CashProjectionRow = {
-  date: string;        // "YYYY-MM-DD"
+export type CashProjectionDayRow = {
+  date: string; // "YYYY-MM-DD"
   income: number;
   expense: number;
   net: number;
-  balance: number;     // その日時点の残高
+  balance: number;
 };
 
 export type CashProjectionResult = {
@@ -138,6 +76,11 @@ export type CashProjectionResult = {
   startDate: string;
   days: number;
   currentBalance: number;
-  shortDate: string | null;     // 残高<=0になった最初の日
-  rows: CashProjectionRow[];
+  shortDate: string | null; // first day where balance <= 0
+  rows: CashProjectionDayRow[];
+};
+
+// ===== Overview（未実装でもOK用）=====
+export type OverviewPayload = {
+  note?: string;
 };

@@ -1,4 +1,3 @@
-// app/dashboard/DashboardClient.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -8,38 +7,55 @@ import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
 import { getAccounts } from "./_actions/getAccounts";
-import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalances";
+import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 import { getCashShortForecast } from "./_actions/getCashShortForecast";
 
 import type {
   CashAccount,
-  MonthlyCashAccountBalanceRow,
+  MonthlyBalanceRow,
   OverviewPayload,
   CashShortForecast,
 } from "./_types";
 
-function toMonthStartISO(yyyymm: string): string {
-  const m = yyyymm.match(/^(\d{4})\D+(\d{1,2})/);
-  if (m) {
-    const y = m[1];
-    const mm = String(Number(m[2])).padStart(2, "0");
-    return `${y}-${mm}-01`;
-  }
-
-  const m2 = yyyymm.match(/^(\d{4})-(\d{2})$/);
-  if (m2) return `${m2[1]}-${m2[2]}-01`;
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(yyyymm)) return yyyymm;
-
-  const d = new Date();
-  const y = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${mm}-01`;
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
 }
 
-function yen(n: number): string {
-  const v = Math.round(Number(n) || 0);
-  return new Intl.NumberFormat("ja-JP").format(v);
+/**
+ * Accepts:
+ * - "2026年01月"
+ * - "2026-01"
+ * - "2026-01-01"
+ * - その他 → 今日の年月を採用
+ * Returns: "YYYY-MM-01"
+ */
+function toMonthStartISO(input: string): string {
+  const s = (input ?? "").trim();
+
+  // 2026年01月
+  const m1 = s.match(/^(\d{4})年(\d{1,2})月$/);
+  if (m1) {
+    const yyyy = m1[1];
+    const mm = pad2(Number(m1[2]));
+    return `${yyyy}-${mm}-01`;
+  }
+
+  // 2026-01
+  const m2 = s.match(/^(\d{4})-(\d{1,2})$/);
+  if (m2) {
+    const yyyy = m2[1];
+    const mm = pad2(Number(m2[2]));
+    return `${yyyy}-${mm}-01`;
+  }
+
+  // 2026-01-01
+  const m3 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m3) return `${m3[1]}-${m3[2]}-01`;
+
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = pad2(d.getMonth() + 1);
+  return `${yyyy}-${mm}-01`;
 }
 
 export default function DashboardClient() {
@@ -49,11 +65,16 @@ export default function DashboardClient() {
   const [monthText, setMonthText] = useState<string>("2026年01月");
   const [rangeMonths, setRangeMonths] = useState<number>(12);
 
-  const [monthlyRows, setMonthlyRows] = useState<MonthlyCashAccountBalanceRow[]>([]);
+  const [monthlyRows, setMonthlyRows] = useState<MonthlyBalanceRow[]>([]);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
 
+  // 追加：資金ショート予測
   const [forecast, setForecast] = useState<CashShortForecast | null>(null);
-  const [loading, setLoading] = useState(false);
+
+  // 予測の計算窓（直近Nヶ月の平均）
+  const [avgWindowMonths, setAvgWindowMonths] = useState<number>(6);
+
+  const [loading, setLoading] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const selectedAccount = useMemo(() => {
@@ -70,45 +91,55 @@ export default function DashboardClient() {
       setAccounts(acc);
 
       const nextAccountId =
-        selectedAccountId ?? (acc?.length ? acc[0].id : null);
+        selectedAccountId ?? (acc.length > 0 ? acc[0].id : null);
 
       if (nextAccountId != null && selectedAccountId == null) {
         setSelectedAccountId(nextAccountId);
       }
 
-      if (nextAccountId != null) {
-        const month = toMonthStartISO(monthText);
-
-        // 月次
-        const rows = await getMonthlyCashBalances({
-          cashAccountId: nextAccountId,
-          month,
-          rangeMonths,
-        });
-
-        const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
-        setMonthlyRows(asc);
-
-        // ★ 資金ショート予測（ここが今日の本命）
-        const fc = await getCashShortForecast({
-          cashAccountId: nextAccountId,
-          month,
-          rangeMonths,
-        });
-        setForecast(fc);
-      } else {
+      if (nextAccountId == null) {
         setMonthlyRows([]);
+        setOverview(null);
         setForecast(null);
+        return;
       }
 
-      // overview はまだ未実装でOK
+      const month = toMonthStartISO(monthText);
+
+      // 月次（直近Nヶ月）
+      const rows = (await getMonthlyBalance({
+        cashAccountId: nextAccountId,
+        month,
+        rangeMonths,
+      })) as MonthlyBalanceRow[];
+
+      // 表示は昇順（古い→新しい）にしたいならここでsort
+      const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
+      setMonthlyRows(asc);
+
+      // Overview（未実装ならnullでOK）
       setOverview(null);
+
+      // 資金ショート予測（ここが今日の本命）
+      const fc = (await getCashShortForecast({
+        cashAccountId: nextAccountId,
+        month,
+        rangeMonths,
+        avgWindowMonths,
+        // whatIf を今は未使用なら空でもOK（型が要求するなら入れる）
+        whatIf: {},
+      })) as unknown as CashShortForecast;
+
+      setForecast(fc);
     } catch (e: any) {
       setLoadError(e?.message ?? String(e));
+      setMonthlyRows([]);
+      setOverview(null);
+      setForecast(null);
     } finally {
       setLoading(false);
     }
-  }, [monthText, rangeMonths, selectedAccountId]);
+  }, [monthText, rangeMonths, avgWindowMonths, selectedAccountId]);
 
   useEffect(() => {
     void load();
@@ -116,6 +147,7 @@ export default function DashboardClient() {
 
   const forecastBadge = useMemo(() => {
     if (!forecast) return null;
+
     const base =
       forecast.level === "danger"
         ? "border-red-500/60 text-red-200"
@@ -135,109 +167,124 @@ export default function DashboardClient() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <label className="text-sm opacity-80">Account</label>
-        <select
-          className="border rounded px-2 py-1 bg-transparent"
-          value={selectedAccountId ?? ""}
-          onChange={(e) => setSelectedAccountId(Number(e.target.value))}
-        >
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name} / id:{a.id}
-            </option>
-          ))}
-        </select>
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <div className="text-sm opacity-80">Account</div>
+          <select
+            className="border rounded px-2 py-1 bg-transparent"
+            value={selectedAccountId ?? ""}
+            onChange={(e) => setSelectedAccountId(Number(e.target.value))}
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} / id:{a.id}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <label className="text-sm opacity-80 ml-4">Month</label>
-        <input
-          className="border rounded px-2 py-1 bg-transparent"
-          value={monthText}
-          onChange={(e) => setMonthText(e.target.value)}
-        />
+        <div className="flex items-center gap-2">
+          <div className="text-sm opacity-80">Month</div>
+          <input
+            className="border rounded px-2 py-1 bg-transparent"
+            value={monthText}
+            onChange={(e) => setMonthText(e.target.value)}
+            placeholder="2026年01月"
+          />
+        </div>
 
-        <label className="text-sm opacity-80 ml-4">Range</label>
-        <select
-          className="border rounded px-2 py-1 bg-transparent"
-          value={rangeMonths}
-          onChange={(e) => setRangeMonths(Number(e.target.value))}
-        >
-          <option value={2}>last 2 months</option>
-          <option value={6}>last 6 months</option>
-          <option value={12}>last 12 months</option>
-          <option value={24}>last 24 months</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <div className="text-sm opacity-80">Range</div>
+          <select
+            className="border rounded px-2 py-1 bg-transparent"
+            value={rangeMonths}
+            onChange={(e) => setRangeMonths(Number(e.target.value))}
+          >
+            <option value={3}>last 3 months</option>
+            <option value={6}>last 6 months</option>
+            <option value={12}>last 12 months</option>
+          </select>
+        </div>
 
         <button
-          className="border rounded px-3 py-1 ml-2"
+          className="border rounded px-3 py-1 hover:bg-white/5"
           onClick={() => void load()}
           disabled={loading}
-          title="最新を読み込み"
         >
-          {loading ? "loading..." : "refresh"}
+          refresh
         </button>
+
+        {loading && <div className="text-sm opacity-70">loading...</div>}
+        {loadError && <div className="text-sm text-red-300">{loadError}</div>}
       </div>
 
-      {loadError ? (
-        <div className="border border-red-500/50 rounded p-3 text-sm text-red-200">
-          {loadError}
+      {/* Forecast Card */}
+      <div className="border rounded p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="font-semibold">資金ショート予測</div>
+          {forecastBadge && (
+            <span className={`text-xs border rounded px-2 py-0.5 ${forecastBadge.base}`}>
+              {forecastBadge.label}
+            </span>
+          )}
         </div>
-      ) : null}
 
-      {/* ★ 今日の主役：資金ショート警告カード */}
-      {forecast ? (
-        <div className="border rounded p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="font-semibold">資金ショート予測</div>
-            {forecastBadge ? (
-              <span className={`text-xs px-2 py-0.5 rounded border ${forecastBadge.base}`}>
-                {forecastBadge.label}
-              </span>
-            ) : null}
-          </div>
+        {!forecast ? (
+          <div className="text-sm opacity-70 mt-2">No forecast</div>
+        ) : (
+          <>
+            <div className="text-sm opacity-70 mt-1">{forecast.message}</div>
 
-          <div className="text-sm opacity-80">{forecast.message}</div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <div className="opacity-70 text-xs">現在残高</div>
+                <div className="font-semibold">
+                  ¥{forecast.currentBalance.toLocaleString()}
+                </div>
+              </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-            <div>
-              <div className="opacity-60">現在残高</div>
-              <div className="font-semibold">¥{yen(forecast.currentBalance)}</div>
-            </div>
-            <div>
-              <div className="opacity-60">月平均 収入</div>
-              <div className="font-semibold">¥{yen(forecast.avgIncome)}</div>
-            </div>
-            <div>
-              <div className="opacity-60">月平均 支出</div>
-              <div className="font-semibold">¥{yen(forecast.avgExpense)}</div>
-            </div>
-            <div>
-              <div className="opacity-60">月平均 純増減</div>
-              <div className="font-semibold">
-                {forecast.avgNet >= 0 ? "+" : "-"}¥{yen(Math.abs(forecast.avgNet))}
+              <div>
+                <div className="opacity-70 text-xs">月平均 収入</div>
+                <div className="font-semibold">
+                  ¥{forecast.avgIncome.toLocaleString()}
+                </div>
+              </div>
+
+              <div>
+                <div className="opacity-70 text-xs">月平均 支出</div>
+                <div className="font-semibold">
+                  ¥{forecast.avgExpense.toLocaleString()}
+                </div>
+              </div>
+
+              <div>
+                <div className="opacity-70 text-xs">月平均 純増減</div>
+                <div className="font-semibold">
+                  ¥{forecast.netChange.toLocaleString()}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="text-xs opacity-60">
-            予測対象月: {forecast.month} / 直近: {forecast.rangeMonths}ヶ月 /
-            {forecast.predictedMonth
-              ? ` ショート見込み: ${forecast.predictedMonth}`
-              : " ショート見込み: なし（平均ベース）"}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="space-y-4">
-        {selectedAccount && overview ? (
-          <OverviewCard accountName={selectedAccount.name} payload={overview} />
-        ) : (
-          <div className="text-sm opacity-60">Overview not available</div>
+            <div className="mt-2 text-xs opacity-60">
+              予測対象: {forecast.startMonth} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測{forecast.rangeMonths}ヶ月
+              {forecast.shortDate ? ` / ショート見込み: ${forecast.shortDate}` : " / ショート見込み: なし"}
+            </div>
+          </>
         )}
-
-        <BalanceCard rows={monthlyRows} />
       </div>
 
+      {/* Overview */}
+      {overview ? (
+        <OverviewCard payload={overview} />
+      ) : (
+        <div className="text-sm opacity-60">Overview not available</div>
+      )}
+
+      {/* Monthly Summary */}
+      <BalanceCard rows={monthlyRows} />
+
+      {/* Charts */}
       <EcoCharts rows={monthlyRows} />
 
       <div className="text-xs opacity-60">
