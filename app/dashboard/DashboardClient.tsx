@@ -1,3 +1,4 @@
+// app/dashboard/DashboardClient.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -7,14 +8,15 @@ import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
 import { getAccounts } from "./_actions/getAccounts";
-import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
+import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalances";
 import { getCashShortForecast } from "./_actions/getCashShortForecast";
 
 import type {
   CashAccount,
   MonthlyBalanceRow,
-  OverviewPayload,
   CashShortForecast,
+  CashShortForecastInput,
+  OverviewPayload,
 } from "./_types";
 
 function pad2(n: number) {
@@ -26,36 +28,33 @@ function pad2(n: number) {
  * - "2026年01月"
  * - "2026-01"
  * - "2026-01-01"
- * - その他 → 今日の年月を採用
- * Returns: "YYYY-MM-01"
+ * -> returns "YYYY-MM-01"
  */
 function toMonthStartISO(input: string): string {
   const s = (input ?? "").trim();
 
-  // 2026年01月
-  const m1 = s.match(/^(\d{4})年(\d{1,2})月$/);
-  if (m1) {
-    const yyyy = m1[1];
-    const mm = pad2(Number(m1[2]));
-    return `${yyyy}-${mm}-01`;
+  const jp = s.match(/^(\d{4})年(\d{1,2})月$/);
+  if (jp) {
+    const y = jp[1];
+    const m = pad2(Number(jp[2]));
+    return `${y}-${m}-01`;
   }
 
-  // 2026-01
-  const m2 = s.match(/^(\d{4})-(\d{1,2})$/);
-  if (m2) {
-    const yyyy = m2[1];
-    const mm = pad2(Number(m2[2]));
-    return `${yyyy}-${mm}-01`;
+  const ym = s.match(/^(\d{4})-(\d{1,2})$/);
+  if (ym) {
+    const y = ym[1];
+    const m = pad2(Number(ym[2]));
+    return `${y}-${m}-01`;
   }
 
-  // 2026-01-01
-  const m3 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m3) return `${m3[1]}-${m3[2]}-01`;
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) return s;
 
+  // fallback: current month
   const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = pad2(d.getMonth() + 1);
-  return `${yyyy}-${mm}-01`;
+  const y = d.getFullYear();
+  const m = pad2(d.getMonth() + 1);
+  return `${y}-${m}-01`;
 }
 
 export default function DashboardClient() {
@@ -65,14 +64,9 @@ export default function DashboardClient() {
   const [monthText, setMonthText] = useState<string>("2026年01月");
   const [rangeMonths, setRangeMonths] = useState<number>(12);
 
-  const [monthlyRows, setMonthlyRows] = useState<MonthlyBalanceRow[]>([]);
-  const [overview, setOverview] = useState<OverviewPayload | null>(null);
-
-  // 追加：資金ショート予測
+  const [monthRows, setMonthRows] = useState<MonthlyBalanceRow[]>([]);
   const [forecast, setForecast] = useState<CashShortForecast | null>(null);
-
-  // 予測の計算窓（直近Nヶ月の平均）
-  const [avgWindowMonths, setAvgWindowMonths] = useState<number>(6);
+  const [overview, setOverview] = useState<OverviewPayload | null>(null);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -82,95 +76,84 @@ export default function DashboardClient() {
     return accounts.find((a) => a.id === selectedAccountId) ?? null;
   }, [accounts, selectedAccountId]);
 
+  const monthISO = useMemo(() => toMonthStartISO(monthText), [monthText]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
 
     try {
-      const acc = (await getAccounts()) as CashAccount[];
+      const acc = await getAccounts();
       setAccounts(acc);
 
       const nextAccountId =
-        selectedAccountId ?? (acc.length > 0 ? acc[0].id : null);
-
-      if (nextAccountId != null && selectedAccountId == null) {
-        setSelectedAccountId(nextAccountId);
-      }
+        selectedAccountId != null
+          ? selectedAccountId
+          : acc.length > 0
+            ? acc[0].id
+            : null;
 
       if (nextAccountId == null) {
-        setMonthlyRows([]);
-        setOverview(null);
+        setMonthRows([]);
         setForecast(null);
+        setOverview(null);
         return;
       }
 
-      const month = toMonthStartISO(monthText);
+      if (selectedAccountId == null) {
+        setSelectedAccountId(nextAccountId);
+      }
 
-      // 月次（直近Nヶ月）
-      const rows = (await getMonthlyBalance({
+      const rows = await getMonthlyCashBalances({
         cashAccountId: nextAccountId,
-        month,
+        month: monthISO,
         rangeMonths,
-      })) as MonthlyBalanceRow[];
+      });
 
-      // 表示は昇順（古い→新しい）にしたいならここでsort
+      // month asc にしておく（表示しやすい）
       const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
-      setMonthlyRows(asc);
+      setMonthRows(asc);
 
-      // Overview（未実装ならnullでOK）
-      setOverview(null);
-
-      // 資金ショート予測（ここが今日の本命）
-      const fc = (await getCashShortForecast({
+      // ここが今回の本命：資金ショート予測
+      const input: CashShortForecastInput = {
         cashAccountId: nextAccountId,
-        month,
+        month: monthISO,
         rangeMonths,
-        avgWindowMonths,
-        // whatIf を今は未使用なら空でもOK（型が要求するなら入れる）
-        whatIf: {},
-      })) as unknown as CashShortForecast;
+        avgWindowMonths: 6, // ← ここはInputの必須
+      };
 
+      const fc = await getCashShortForecast(input);
       setForecast(fc);
+
+      // overview は未実装でOK：一旦null
+      setOverview(null);
     } catch (e: any) {
       setLoadError(e?.message ?? String(e));
-      setMonthlyRows([]);
-      setOverview(null);
-      setForecast(null);
     } finally {
       setLoading(false);
     }
-  }, [monthText, rangeMonths, avgWindowMonths, selectedAccountId]);
+  }, [monthISO, rangeMonths, selectedAccountId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const forecastBadge = useMemo(() => {
-    if (!forecast) return null;
-
-    const base =
-      forecast.level === "danger"
-        ? "border-red-500/60 text-red-200"
-        : forecast.level === "warn"
-        ? "border-yellow-500/60 text-yellow-200"
-        : "border-emerald-500/60 text-emerald-200";
-
-    const label =
-      forecast.level === "danger"
-        ? "危険"
-        : forecast.level === "warn"
-        ? "注意"
-        : "安全";
-
-    return { base, label };
-  }, [forecast]);
+  const monthSummary = useMemo(() => {
+    if (!monthRows.length) return null;
+    const last = monthRows[monthRows.length - 1];
+    return {
+      income: last.income,
+      expense: last.expense,
+      balance: last.balance,
+    };
+  }, [monthRows]);
 
   return (
     <div className="space-y-6">
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <div className="text-sm opacity-80">Account</div>
+          <label className="text-sm opacity-80">Account</label>
           <select
             className="border rounded px-2 py-1 bg-transparent"
             value={selectedAccountId ?? ""}
@@ -185,7 +168,7 @@ export default function DashboardClient() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="text-sm opacity-80">Month</div>
+          <label className="text-sm opacity-80">Month</label>
           <input
             className="border rounded px-2 py-1 bg-transparent"
             value={monthText}
@@ -195,7 +178,7 @@ export default function DashboardClient() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="text-sm opacity-80">Range</div>
+          <label className="text-sm opacity-80">Range</label>
           <select
             className="border rounded px-2 py-1 bg-transparent"
             value={rangeMonths}
@@ -207,89 +190,89 @@ export default function DashboardClient() {
           </select>
         </div>
 
-        <button
-          className="border rounded px-3 py-1 hover:bg-white/5"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          refresh
+        <button className="border rounded px-3 py-1" onClick={() => void load()} disabled={loading}>
+          {loading ? "loading..." : "refresh"}
         </button>
 
-        {loading && <div className="text-sm opacity-70">loading...</div>}
         {loadError && <div className="text-sm text-red-300">{loadError}</div>}
       </div>
 
-      {/* Forecast Card */}
-      <div className="border rounded p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="font-semibold">資金ショート予測</div>
-          {forecastBadge && (
-            <span className={`text-xs border rounded px-2 py-0.5 ${forecastBadge.base}`}>
-              {forecastBadge.label}
-            </span>
-          )}
-        </div>
-
-        {!forecast ? (
-          <div className="text-sm opacity-70 mt-2">No forecast</div>
-        ) : (
-          <>
-            <div className="text-sm opacity-70 mt-1">{forecast.message}</div>
-
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div>
-                <div className="opacity-70 text-xs">現在残高</div>
-                <div className="font-semibold">
-                  ¥{forecast.currentBalance.toLocaleString()}
-                </div>
-              </div>
-
-              <div>
-                <div className="opacity-70 text-xs">月平均 収入</div>
-                <div className="font-semibold">
-                  ¥{forecast.avgIncome.toLocaleString()}
-                </div>
-              </div>
-
-              <div>
-                <div className="opacity-70 text-xs">月平均 支出</div>
-                <div className="font-semibold">
-                  ¥{forecast.avgExpense.toLocaleString()}
-                </div>
-              </div>
-
-              <div>
-                <div className="opacity-70 text-xs">月平均 純増減</div>
-                <div className="font-semibold">
-                  ¥{forecast.netChange.toLocaleString()}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-2 text-xs opacity-60">
-              予測対象: {forecast.startMonth} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測{forecast.rangeMonths}ヶ月
-              {forecast.shortDate ? ` / ショート見込み: ${forecast.shortDate}` : " / ショート見込み: なし"}
-            </div>
-          </>
-        )}
-      </div>
+      {/* Forecast card */}
+      {forecast ? (
+        <BalanceCard forecast={forecast} currentBalance={selectedAccount?.current_balance ?? 0} />
+      ) : (
+        <div className="text-sm opacity-70">No forecast</div>
+      )}
 
       {/* Overview */}
       {overview ? (
-        <OverviewCard payload={overview} />
+        <OverviewCard accountName={selectedAccount?.name ?? ""} payload={overview} />
       ) : (
         <div className="text-sm opacity-60">Overview not available</div>
       )}
 
-      {/* Monthly Summary */}
-      <BalanceCard rows={monthlyRows} />
+      {/* Month summary */}
+      <div className="border rounded p-4">
+        <div className="font-semibold mb-2">月次サマリ</div>
+        {monthSummary ? (
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <div className="opacity-70">Income</div>
+              <div className="font-semibold">¥{monthSummary.income.toLocaleString()}</div>
+            </div>
+            <div>
+              <div className="opacity-70">Expense</div>
+              <div className="font-semibold">¥{monthSummary.expense.toLocaleString()}</div>
+            </div>
+            <div>
+              <div className="opacity-70">Balance</div>
+              <div className="font-semibold">¥{monthSummary.balance.toLocaleString()}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm opacity-60">No data</div>
+        )}
+      </div>
 
-      {/* Charts */}
-      <EcoCharts rows={monthlyRows} />
+      {/* Charts + table */}
+      <EcoCharts rows={monthRows} />
 
-      <div className="text-xs opacity-60">
-        selectedAccount: {selectedAccount ? selectedAccount.name : "none"} / month:{" "}
-        {toMonthStartISO(monthText)}
+      <div className="border rounded p-4">
+        <div className="font-semibold mb-3">last {Math.min(rangeMonths, monthRows.length)} months</div>
+
+        <div className="overflow-auto">
+          <table className="min-w-[720px] w-full text-sm">
+            <thead className="opacity-70">
+              <tr className="text-left border-b">
+                <th className="py-2">Month</th>
+                <th className="py-2">Income</th>
+                <th className="py-2">Expense</th>
+                <th className="py-2">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthRows.map((r: MonthlyBalanceRow) => (
+                <tr key={r.month} className="border-b last:border-b-0">
+                  <td className="py-2">{r.month}</td>
+                  <td className="py-2">¥{r.income.toLocaleString()}</td>
+                  <td className="py-2">¥{r.expense.toLocaleString()}</td>
+                  <td className="py-2">¥{r.balance.toLocaleString()}</td>
+                </tr>
+              ))}
+              {!monthRows.length && (
+                <tr>
+                  <td className="py-2 opacity-60" colSpan={4}>
+                    No rows
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="text-xs opacity-60 mt-3">
+          selectedAccount: {selectedAccount ? selectedAccount.name : "none"} / month: {monthISO}
+        </div>
       </div>
     </div>
   );
