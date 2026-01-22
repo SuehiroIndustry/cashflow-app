@@ -46,19 +46,18 @@ export async function createCashFlow(input: CashFlowCreateInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
-  // DBの NOT NULL: type を必ず埋める（section をそのまま type に入れる運用）
-  const type = input.section;
-
-  const payload: Record<string, any> = {
-    cash_account_id: input.cash_account_id,
+  // NOTE:
+  // - cash_flows.user_id は DB 側 default(auth.uid()) 前提（クライアントからは送らない）
+  // - source_type は NOT NULL 想定なので manual をデフォルトにする
+  // - section は 'in' | 'out' 制約想定
+  const payload = {
+    cash_account_id: input.cashAccountId,
     date: input.date,
     section: input.section,
-    type,
     amount: input.amount,
-    cash_category_id: input.cash_category_id,
+    cash_category_id: input.cashCategoryId ?? null,
     description: input.description ?? null,
-    source_type: input.source_type ?? "manual",
-    // user_id/created_by は DB 側 default (auth.uid()) 前提
+    source_type: input.sourceType ?? "manual",
   };
 
   const { error } = await supabase.from("cash_flows").insert(payload);
