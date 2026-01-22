@@ -1,3 +1,4 @@
+// app/dashboard/_actions/deleteCashFlow.ts
 "use server";
 
 import { cookies } from "next/headers";
@@ -45,11 +46,12 @@ export async function deleteCashFlow(input: CashFlowDeleteInput) {
   if (userErr) throw new Error(userErr.message);
   if (!user) throw new Error("Not authenticated");
 
+  // RLSで cash_account_id まで絞る運用（安全側）
   const { error } = await supabase
     .from("cash_flows")
     .delete()
     .eq("id", input.id)
-    .eq("cash_account_id", input.cash_account_id);
+    .eq("cash_account_id", input.cashAccountId);
 
   if (error) throw new Error(error.message);
 

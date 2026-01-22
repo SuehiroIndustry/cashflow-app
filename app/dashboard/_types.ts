@@ -80,19 +80,30 @@ export type CashProjectionResult = {
   rows: CashProjectionDayRow[];
 };
 
-// ===== Cash Flow Create (manual entry) =====
-// createCashFlow.ts が import している型
-export type CashFlowCreateInput = {
-  cashAccountId: number;
-  date: string; // "YYYY-MM-DD"
-  section: "in" | "out";
-  amount: number;
-  cashCategoryId: number;
-  description?: string | null;
-  sourceType: "manual";
-};
-
 // ===== Overview（未実装でもOK用）=====
 export type OverviewPayload = {
   note?: string;
+};
+
+// ===== CashFlow (manual input) =====
+// DB: cash_flows
+// - cash_account_id (number, NOT NULL)
+// - cash_category_id (number, manualなら必須運用)
+// - source_type (NOT NULL) -> "manual" を基本
+// - section: "in" | "out" を想定
+export type CashFlowSection = "in" | "out";
+
+export type CashFlowCreateInput = {
+  cashAccountId: number;
+  date: string; // "YYYY-MM-DD"
+  section: CashFlowSection; // "in" | "out"
+  amount: number;
+  cashCategoryId: number | null;
+  description?: string | null;
+  sourceType?: "manual";
+};
+
+export type CashFlowDeleteInput = {
+  id: number;
+  cashAccountId: number;
 };
