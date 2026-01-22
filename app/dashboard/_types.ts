@@ -93,3 +93,28 @@ export type MonthlyCashAccountBalanceRow = {
   expense: number;
   balance: number;
 };
+
+// app/dashboard/_types.ts（追記分だけ）
+
+export type GetCashShortForecastInput = {
+  cashAccountId: number;
+  month: string;       // "YYYY-MM-01"
+  rangeMonths: number; // 2,6,12,24...
+};
+
+export type CashShortForecast = {
+  cashAccountId: number;
+  month: string;
+  rangeMonths: number;
+
+  currentBalance: number;
+  avgIncome: number;
+  avgExpense: number;
+  avgNet: number;
+
+  monthsToZero: number | null;      // null=減らない/横ばい、0=すでに0以下
+  predictedMonth: string | null;    // "YYYY-MM-01"
+
+  level: "safe" | "warn" | "danger";
+  message: string;
+};
