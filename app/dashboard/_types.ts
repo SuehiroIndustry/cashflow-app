@@ -108,11 +108,22 @@ export type CashFlowDeleteInput = {
   cashAccountId: number;
 };
 
-
 // ===== Cash Categories =====
 // DB: public.cash_categories（user_id列は無い）
 // このアクションでは id/name しか使わないので、まずは最小でOK
 export type CashCategory = {
   id: number;
   name: string;
+};
+
+// ===== Cash Flows (list rows) =====
+export type CashFlowListRow = {
+  id: number;
+  cash_account_id: number;
+  date: string; // "YYYY-MM-DD"
+  section: "in" | "out"; // DBのCHECKに合わせる
+  amount: number;
+  cash_category_id: number | null;
+  description: string | null;
+  source_type: string; // "manual" など（今はstringでOK）
 };
