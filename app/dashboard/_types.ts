@@ -140,4 +140,4 @@ export type CashProjectionResult = {
   currentBalance: number;
   shortDate: string | null;     // 残高<=0になった最初の日
   rows: CashProjectionRow[];
-};s
+};

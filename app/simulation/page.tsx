@@ -1,4 +1,4 @@
-import SimulationClient from "./SimulationClient";
+import SimulationClient from "../simulation/SimulationClient";
 
 export default function Page() {
   return (
