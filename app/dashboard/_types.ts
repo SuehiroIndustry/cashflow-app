@@ -107,3 +107,13 @@ export type CashFlowDeleteInput = {
   id: number;
   cashAccountId: number;
 };
+
+// ===== Cash Categories =====
+// DB: public.cash_categories（user_id列は無い）
+export type CashCategory = {
+  id: number;
+  name: string;
+  kind: "income" | "expense"; // もしDBが text で自由入力なら string にして
+  sort_order?: number | null; // あれば
+  is_active?: boolean | null; // あれば
+};

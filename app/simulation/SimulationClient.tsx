@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getAccounts } from "../dashboard/_actions/getAccounts";
 import { getCashShortForecast } from "../dashboard/_actions/getCashShortForecast";
 
-import type { CashAccount, CashShortForecastPayload } from "../dashboard/_types";
+import type { CashAccount, CashShortForecast } from "../dashboard/_types";
 
 function toMonthStartISO(yyyymm: string): string {
   const m = yyyymm.match(/^(\d{4})\D+(\d{1,2})/);
