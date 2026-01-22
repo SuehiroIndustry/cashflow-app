@@ -118,3 +118,26 @@ export type CashShortForecast = {
   level: "safe" | "warn" | "danger";
   message: string;
 };
+
+export type GetCashProjectionInput = {
+  cashAccountId: number;
+  startDate: string;   // "YYYY-MM-DD"
+  days: number;        // 例: 180
+};
+
+export type CashProjectionRow = {
+  date: string;        // "YYYY-MM-DD"
+  income: number;
+  expense: number;
+  net: number;
+  balance: number;     // その日時点の残高
+};
+
+export type CashProjectionResult = {
+  cashAccountId: number;
+  startDate: string;
+  days: number;
+  currentBalance: number;
+  shortDate: string | null;     // 残高<=0になった最初の日
+  rows: CashProjectionRow[];
+};s
