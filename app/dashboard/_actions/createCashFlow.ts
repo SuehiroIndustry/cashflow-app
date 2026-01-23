@@ -20,27 +20,43 @@ async function getSupabase() {
   );
 }
 
+function isYmd(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
+}
+
 export async function createCashFlow(input: CashFlowCreateInput) {
   const supabase = await getSupabase();
 
-  const {
-    cashAccountId,
-    date,
-    section,
-    amount,
-    cashCategoryId,
-    description,
-    sourceType = "manual",
-  } = input;
+  // ✅ camel/snake どっちで来ても受ける（互換運用）
+  const cash_account_id = input.cash_account_id ?? input.cashAccountId;
+  const cash_category_id = input.cash_category_id ?? input.cashCategoryId ?? null;
+  const source_type = input.source_type ?? input.sourceType ?? "manual";
 
+  const { date, section, amount, description } = input;
+
+  // validate（最低限）
+  if (typeof cash_account_id !== "number" || !Number.isFinite(cash_account_id) || cash_account_id <= 0) {
+    throw new Error("cash_account_id が不正です");
+  }
+  if (!isYmd(date)) {
+    throw new Error("date は 'YYYY-MM-DD' 形式で指定してください");
+  }
+  if (section !== "in" && section !== "out") {
+    throw new Error("section は 'in' | 'out' のみです");
+  }
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    throw new Error("amount が不正です");
+  }
+
+  // ✅ DBに入れる形は snake_case
   const { error } = await supabase.from("cash_flows").insert({
-    cash_account_id: cashAccountId,
+    cash_account_id,
     date,
     section,
     amount,
-    cash_category_id: cashCategoryId,
+    cash_category_id,
     description: description ?? null,
-    source_type: sourceType,
+    source_type,
   });
 
   if (error) throw new Error(error.message);
