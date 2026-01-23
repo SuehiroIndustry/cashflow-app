@@ -1,29 +1,23 @@
 // app/transactions/_types.ts
 
-export type Section = "in" | "out";
+export type Option = { id: number; name: string };
 
-/**
- * createCashFlow に渡す入力（Transactions側の正）
- * - sourceType は "manual" 固定（あなたのDB制約に合わせる）
- */
 export type CashFlowCreateInput = {
   cashAccountId: number;
   date: string; // YYYY-MM-DD
-  section: Section;
+  section: "in" | "out";
   amount: number;
-  cashCategoryId: number;
-  description: string | null;
-  sourceType?: "manual";
+  cashCategoryId: number; // manual は必須
+  description?: string | null;
+  sourceType?: "manual"; // 今は manual 固定運用
 };
 
-export type Option = { id: number; name: string };
-
 export type TransactionRow = {
-  id: number;
+  id: string;
   date: string; // YYYY-MM-DD
-  section: Section;
+  section: "in" | "out";
   amount: number;
-  categoryName?: string | null;
-  description?: string | null;
-  createdAt?: string | null;
+  categoryName: string | null;
+  description: string | null;
+ 설명?: never; // 変なキー混入防止（任意）
 };
