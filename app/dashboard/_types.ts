@@ -51,8 +51,25 @@ export type CashShortForecastInput = {
 };
 
 /**
- * deleteCashFlow.ts が import している型
+ * getCashFlows.ts が import している行型
+ * （UI用の一覧表示に必要な最低限）
  */
+export type CashFlowListRow = {
+  id: number;
+  date: string; // YYYY-MM-DD
+  section: "in" | "out";
+  amount: number;
+
+  cashAccountId: number;
+  cashAccountName?: string;
+
+  cashCategoryId: number | null;
+  cashCategoryName?: string | null;
+
+  description: string | null;
+  sourceType: string; // "manual" など
+};
+
 export type CashFlowDeleteInput = {
   id: number;
   cashAccountId?: number;
