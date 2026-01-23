@@ -5,7 +5,7 @@ import React, { useMemo, useState } from "react";
 
 import { createCashFlow } from "./_actions/createCashFlow";
 import type { CashCategoryOption } from "./_actions/getCashCategories";
-import type { RecentCashFlowRow } from "./_actions/getRecentCashFlows";
+import type { RecentRow } from "./transactions-client";
 
 type Option = { id: number; name: string };
 
@@ -14,7 +14,7 @@ type Props = {
   categories: CashCategoryOption[];
   initialCashAccountId: number;
   disabled?: boolean;
-  onCreated: (row: RecentCashFlowRow) => void;
+  onCreated: (row: RecentRow) => void;
 };
 
 export default function TransactionForm({
@@ -40,7 +40,7 @@ export default function TransactionForm({
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const cashCategoryName = useMemo(() => {
+  const categoryName = useMemo(() => {
     const found = categories.find((c) => c.id === cashCategoryId);
     return found?.name ?? "";
   }, [categories, cashCategoryId]);
@@ -157,25 +157,22 @@ export default function TransactionForm({
                   amount,
                   cashCategoryId,
                   description: description.trim() ? description.trim() : null,
-                  sourceType: "manual", // ✅ これが必須（型エラーの原因）
+                  sourceType: "manual", // ✅ 必須
                 });
 
-                // createCashFlow が id を返す想定（返さないなら action 側で返すようにして）
                 const newId = (res as any)?.id as number | undefined;
 
-                const newRow: RecentCashFlowRow = {
-                  id: newId ?? Date.now(), // 念のため（本当はDBのidが望ましい）
+                const newRow: RecentRow = {
+                  id: newId ?? Date.now(),
                   date,
                   section,
                   amount,
-                  cash_category_id: cashCategoryId,
-                  cash_category_name: cashCategoryName,
+                  categoryName, // ✅ Tableが要求するキー
                   description: description.trim() ? description.trim() : null,
-                } as any;
+                };
 
                 onCreated(newRow);
 
-                // 入力だけ軽くリセット（口座・日付は維持）
                 setAmount(0);
                 setDescription("");
               } catch (e: any) {

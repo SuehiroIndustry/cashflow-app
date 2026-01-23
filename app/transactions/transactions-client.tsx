@@ -11,6 +11,31 @@ import type { RecentCashFlowRow } from "./_actions/getRecentCashFlows";
 
 type Option = { id: number; name: string };
 
+// ✅ Tableが欲しがる「表示用の行」(categoryNameを必須に固定)
+export type RecentRow = {
+  id: number;
+  date: string;
+  section: "in" | "out";
+  amount: number;
+  categoryName: string;
+  description: string | null;
+};
+
+function toRecentRow(r: any): RecentRow {
+  return {
+    id: r.id as number,
+    date: r.date as string,
+    section: r.section as "in" | "out",
+    amount: r.amount as number,
+    categoryName:
+      (r.categoryName as string) ??
+      (r.cash_category_name as string) ??
+      (r.cashCategoryName as string) ??
+      "",
+    description: (r.description as string | null) ?? null,
+  };
+}
+
 type Props = {
   initialAccounts: Option[];
   initialCategories: CashCategoryOption[];
@@ -24,31 +49,33 @@ export default function TransactionsClient({
   initialCashAccountId,
   initialRows,
 }: Props) {
-  const [rows, setRows] = useState<RecentCashFlowRow[]>(initialRows);
+  // ✅ ここで正規化して state は RecentRow[] に統一
+  const [rows, setRows] = useState<RecentRow[]>(() => (initialRows ?? []).map(toRecentRow));
 
-  // 口座がない状態でも壊れないように
-  const hasAccounts = useMemo(() => initialAccounts.length > 0 && initialCashAccountId !== 0, [initialAccounts, initialCashAccountId]);
+  const hasAccounts = useMemo(
+    () => initialAccounts.length > 0 && initialCashAccountId !== 0,
+    [initialAccounts, initialCashAccountId]
+  );
 
   return (
     <div className="space-y-6">
-      {/* ✅ ここが「消えてた上の方」 */}
       <TransactionForm
         accounts={initialAccounts}
         categories={initialCategories}
         initialCashAccountId={initialCashAccountId}
         disabled={!hasAccounts}
         onCreated={(newRow) => {
-          // 新規を先頭に差し込む（最大30件維持）
           setRows((prev) => [newRow, ...prev].slice(0, 30));
         }}
       />
 
+      {/* ✅ Tableへは RecentRow[] を渡す */}
       <TransactionsTable
-        rows={rows}
-        onDeleted={(deletedId) => {
-          setRows((prev) => prev.filter((r) => r.id !== deletedId));
-        }}
-      />
+  rows={rows}
+  onDeleted={(deletedId: number) => {
+    setRows((prev) => prev.filter((r) => r.id !== deletedId));
+  }}
+/>
     </div>
   );
 }
