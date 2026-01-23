@@ -15,6 +15,7 @@ export type MonthlyIncomeExpenseRow = {
   month: string; // "YYYY-MM" or "YYYY-MM-01"
   income: number;
   expense: number;
+  net: number;
 };
 
 export type MonthlyBalanceRow = {
