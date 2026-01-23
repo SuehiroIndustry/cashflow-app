@@ -1,57 +1,73 @@
-"use client";
-
+// app/transactions/transactions-table.tsx
 import React from "react";
-import type { CashFlowRow } from "./_actions/getRecentCashFlows";
+import type { RecentCashFlowRow } from "./_actions/getRecentCashFlows";
 
 function yen(n: number) {
   return "¥" + n.toLocaleString("ja-JP");
 }
 
-export default function TransactionsTable({ initialRows }: { initialRows: CashFlowRow[] }) {
+function ymd(s: string) {
+  // "2026-01-23" みたいなのをそのまま表示（必要なら整形）
+  return s;
+}
+
+export default function TransactionsTable(props: { rows: RecentCashFlowRow[] }) {
+  const { rows } = props;
+
   return (
-    <div>
-      <div className="flex items-end justify-between mb-3">
-        <div>
-          <div className="font-semibold">直近の取引</div>
-          <div className="text-xs opacity-60">最新30件（口座フィルタは次で付ける）</div>
-        </div>
-      </div>
+    <div className="border rounded p-4">
+      <div className="font-semibold mb-3">Transactions</div>
 
       <div className="overflow-auto">
-        <table className="min-w-[900px] w-full text-sm">
+        <table className="min-w-[860px] w-full text-sm">
           <thead className="opacity-70">
-            <tr className="text-left border-b border-neutral-800">
-              <th className="py-2">日付</th>
-              <th className="py-2">区分</th>
-              <th className="py-2 text-right">金額</th>
-              <th className="py-2">カテゴリ</th>
-              <th className="py-2">メモ</th>
+            <tr className="text-left border-b">
+              <th className="py-2">Date</th>
+              <th className="py-2">In/Out</th>
+
+              {/* ✅ ここ：金額とカテゴリを分離 */}
+              <th className="py-2">Amount</th>
+              <th className="py-2">Category</th>
+
+              <th className="py-2">Memo</th>
             </tr>
           </thead>
+
           <tbody>
-            {initialRows.map((r) => (
-              <tr key={r.id} className="border-b border-neutral-800 last:border-b-0">
-                <td className="py-2">{r.date}</td>
-                <td className="py-2">
+            {rows.map((r, idx) => (
+              <tr key={(r as any).id ?? `${r.date}-${idx}`} className="border-b last:border-b-0">
+                <td className="py-2 whitespace-nowrap">{ymd(r.date)}</td>
+
+                <td className="py-2 whitespace-nowrap">
                   <span
-                    className={`rounded px-2 py-0.5 text-xs border ${
+                    className={
                       r.section === "in"
-                        ? "border-emerald-500/50 text-emerald-200"
-                        : "border-red-500/50 text-red-200"
-                    }`}
+                        ? "text-emerald-600 font-medium"
+                        : "text-red-600 font-medium"
+                    }
                   >
-                    {r.section === "in" ? "収入" : "支出"}
+                    {r.section}
                   </span>
                 </td>
-                <td className="py-2 text-right">{yen(r.amount)}</td>
-                <td className="py-2">{r.cash_category_name ?? `id:${r.cash_category_id}`}</td>
-                <td className="py-2">{r.description ?? ""}</td>
+
+                <td className="py-2 whitespace-nowrap">{yen(r.amount)}</td>
+
+                {/* ✅ category 名が無い場合の保険 */}
+                <td className="py-2 whitespace-nowrap">
+                  {(r as any).category_name ??
+                    (r as any).cash_category_name ??
+                    (r as any).categoryName ??
+                    "-"}
+                </td>
+
+                <td className="py-2">{(r as any).description ?? (r as any).memo ?? ""}</td>
               </tr>
             ))}
-            {!initialRows.length && (
+
+            {!rows.length && (
               <tr>
-                <td colSpan={5} className="py-6 text-center opacity-60">
-                  データがありません
+                <td className="py-2 opacity-60" colSpan={5}>
+                  No rows
                 </td>
               </tr>
             )}
