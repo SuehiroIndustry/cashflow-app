@@ -85,9 +85,17 @@ export type CashProjectionResult = {
   rows: CashProjectionDayRow[];
 };
 
-// ===== Overview =====
+// ===== Overview（Dashboard summary）=====
 export type OverviewPayload = {
-  note?: string;
+  accountName: string;
+
+  // 現在値
+  currentBalance: number;
+
+  // 当月サマリー
+  thisMonthIncome: number;
+  thisMonthExpense: number;
+  net: number;
 };
 
 // ===== CashFlow =====

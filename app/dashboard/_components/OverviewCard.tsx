@@ -2,30 +2,52 @@
 import React from "react";
 import type { OverviewPayload } from "../_types";
 
-export default function OverviewCard(props: {
-  accountName: string;
+type Props = {
   payload: OverviewPayload;
-}) {
-  const { accountName, payload } = props;
+};
 
-  const yen = (n: number) =>
-    `¥${(Number.isFinite(n) ? Math.trunc(n) : 0).toLocaleString()}`;
+function yen(value: number): string {
+  return value.toLocaleString("ja-JP") + " 円";
+}
+
+export default function OverviewCard({ payload }: Props) {
+  const {
+    accountName,
+    currentBalance,
+    thisMonthIncome,
+    thisMonthExpense,
+    net,
+  } = payload;
 
   return (
-    <div className="space-y-1">
-      <div className="font-semibold">Overview</div>
+    <div className="rounded-xl border p-4 space-y-2">
+      <h3 className="text-sm font-semibold">Overview</h3>
 
-      <div>Account: {accountName}</div>
+      <div className="text-sm">Account: {accountName}</div>
 
-      <div>Current Balance: {yen(payload.currentBalance)}</div>
-      <div>This Month Income: {yen(payload.thisMonthIncome)}</div>
-      <div>This Month Expense: {yen(payload.thisMonthExpense)}</div>
-      <div>Net: {yen(payload.net)}</div>
+      <div className="text-sm">
+        Current Balance:{" "}
+        <span className="font-medium">
+          {yen(currentBalance)}
+        </span>
+      </div>
 
-      <div className="mt-2">
-        <div>月次残高</div>
-        <div>{yen(payload.monthlyBalance)}</div>
-        <div>前月比: {yen(payload.monthlyDiff)}</div>
+      <div className="text-sm">
+        This Month Income: {yen(thisMonthIncome)}
+      </div>
+
+      <div className="text-sm">
+        This Month Expense: {yen(thisMonthExpense)}
+      </div>
+
+      <div
+        className={
+          net >= 0
+            ? "text-sm font-medium text-emerald-600"
+            : "text-sm font-medium text-red-600"
+        }
+      >
+        Net: {yen(net)}
       </div>
     </div>
   );
