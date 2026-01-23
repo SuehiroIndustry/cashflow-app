@@ -43,3 +43,11 @@ export type CashShortForecastInput = {
   rangeMonths: number; // ex) 12
   avgWindowMonths: number; // ex) 6
 };
+
+/**
+ * deleteCashFlow.ts が import している型
+ */
+export type CashFlowDeleteInput = {
+  id: number;
+  cashAccountId?: number; // あってもなくてもOK（将来の絞り込み用）
+};
