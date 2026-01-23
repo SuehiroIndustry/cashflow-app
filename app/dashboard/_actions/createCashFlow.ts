@@ -23,7 +23,6 @@ async function getSupabase() {
 export async function createCashFlow(input: CashFlowCreateInput) {
   const supabase = await getSupabase();
 
-  // ✅ 型は camelCase で受ける（_types.ts と一致）
   const {
     cashAccountId,
     date,
@@ -34,13 +33,12 @@ export async function createCashFlow(input: CashFlowCreateInput) {
     sourceType = "manual",
   } = input;
 
-  // ✅ DBへ入れる直前で snake_case に変換
   const { error } = await supabase.from("cash_flows").insert({
     cash_account_id: cashAccountId,
     date,
     section,
     amount,
-    cash_category_id: cashCategoryId, // manual なら必須運用（制約あり）
+    cash_category_id: cashCategoryId,
     description: description ?? null,
     source_type: sourceType,
   });
