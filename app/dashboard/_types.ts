@@ -1,8 +1,14 @@
 // app/dashboard/_types.ts
+
 export type CashAccount = {
   id: number;
   name: string;
   current_balance: number;
+};
+
+export type CashCategory = {
+  id: number;
+  name: string;
 };
 
 export type MonthlyBalanceRow = {
@@ -40,8 +46,8 @@ export type CashShortForecast = {
 export type CashShortForecastInput = {
   cashAccountId: number; // 0 = all accounts
   month: string; // YYYY-MM-01
-  rangeMonths: number; // ex) 12
-  avgWindowMonths: number; // ex) 6
+  rangeMonths: number;
+  avgWindowMonths: number;
 };
 
 /**
@@ -49,5 +55,5 @@ export type CashShortForecastInput = {
  */
 export type CashFlowDeleteInput = {
   id: number;
-  cashAccountId?: number; // あってもなくてもOK（将来の絞り込み用）
+  cashAccountId?: number;
 };
