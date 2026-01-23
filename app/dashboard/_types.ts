@@ -76,34 +76,41 @@ export type CashFlowDeleteInput = {
 
 /**
  * Simulation（将来推計）用
- * getCashProjection.ts が import している型
+ * getCashProjection.ts が期待している input に合わせる
+ *
+ * - startDate / days: 現行実装に合わせた本命
+ * - month / rangeMonths: 旧仕様が残ってても壊さないための互換
  */
 export type GetCashProjectionInput = {
   cashAccountId: number; // 0 = all accounts
-  month: string; // YYYY-MM-01
-  rangeMonths: number;
+
+  // ✅ 現行 getCashProjection.ts 仕様
+  startDate: string; // YYYY-MM-DD or YYYY-MM-01
+  days: number;
+
+  // ✅ 互換（残しておく）
+  month?: string; // YYYY-MM-01
+  rangeMonths?: number;
 };
 
-/**
- * 返却は「月ごとの推計ポイント配列」を想定。
- * 実装側が多少フィールドを増やしても壊れないよう optional 多めにしてある。
- */
 export type CashProjectionPoint = {
   month: string; // YYYY-MM
   income: number;
   expense: number;
   net: number;
-  balance: number; // 月末残高など
+  balance: number;
 };
 
 export type CashProjectionResult = {
   cashAccountId: number;
-  startMonth: string; // YYYY-MM-01
-  rangeMonths: number;
+
+  // startDate/days ベースに寄せる
+  startDate: string; // YYYY-MM-DD
+  days: number;
 
   points: CashProjectionPoint[];
 
-  // 任意の補助情報（UIで使いたくなったら）
+  // 任意の補助情報
   shortMonth?: string | null; // YYYY-MM or null
   message?: string;
 };
