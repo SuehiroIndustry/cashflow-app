@@ -8,13 +8,12 @@ export type CashCategoryOption = { id: number; name: string };
 export async function getCashCategories(): Promise<CashCategoryOption[]> {
   const supabase = await createClient();
 
-  // ※メモ：cash_categories に user_id は無い（前提どおり）
   const { data, error } = await supabase
     .from("cash_categories")
-    .select("id,name")
-    .order("name", { ascending: true });
+    .select("id, name")
+    .order("id", { ascending: true });
 
-  if (error) throw new Error(error.message);
+  if (error) throw error;
 
-  return (data ?? []).map((r) => ({ id: r.id, name: r.name }));
+  return (data ?? []).map((r) => ({ id: r.id as number, name: r.name as string }));
 }
