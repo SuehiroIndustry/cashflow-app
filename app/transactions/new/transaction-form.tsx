@@ -3,35 +3,45 @@
 
 import React, { useMemo, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { createCashFlow } from "@/app/transactions/_actions/createCashFlow"; // ←おすすめ：transactions側に置く
+import { createCashFlow } from "@/app/transactions/_actions/createCashFlow";
 
-type Option = { id: number; name: string };
+import type { CashFlowCreateInput, Option, Section } from "../_types";
 
 type Props = {
   accounts: Option[];
   categories: Option[];
   initialCashAccountId: number | null;
+  onCreated?: () => void; // 親がリスト更新したい時用（任意）
 };
 
-function todayYmd() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-export default function TransactionForm({ accounts, categories, initialCashAccountId }: Props) {
+export default function TransactionForm({
+  accounts,
+  categories,
+  initialCashAccountId,
+  onCreated,
+}: Props) {
   const supabase = useMemo(() => createClient(), []);
 
-  const [cashAccountId, setCashAccountId] = useState<number | null>(initialCashAccountId);
-  const [section, setSection] = useState<"in" | "out">("out");
-  const [date, setDate] = useState<string>(todayYmd());
+  const [cashAccountId, setCashAccountId] = useState<number | null>(
+    initialCashAccountId ?? (accounts.length ? accounts[0].id : null)
+  );
+
+  const [section, setSection] = useState<Section>("in");
+
+  const [date, setDate] = useState<string>(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  });
 
   const [amount, setAmount] = useState<string>("1000");
+
   const [cashCategoryId, setCashCategoryId] = useState<number | null>(
     categories.length ? categories[0].id : null
   );
+
   const [description, setDescription] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
@@ -52,29 +62,35 @@ export default function TransactionForm({ accounts, categories, initialCashAccou
       return;
     }
 
+    // manual の場合はカテゴリ必須（DB制約）
     if (!cashCategoryId) {
       setMessage("カテゴリが未選択です（manualは必須）");
       return;
     }
 
+    const payload: CashFlowCreateInput = {
+      cashAccountId,
+      date,
+      section,
+      amount: amountNum,
+      cashCategoryId,
+      description: description.trim() ? description.trim() : null,
+      sourceType: "manual", // ← ここが TS 的にも DB 的にも安全
+    };
+
     try {
       setSubmitting(true);
 
-      await createCashFlow({
-        cashAccountId,
-        date,
-        section,
-        amount: amountNum,
-        cashCategoryId,
-        description: description.trim() ? description.trim() : null,
-        sourceType: "manual",
-      } as any);
+      await createCashFlow(payload);
 
       setMessage("登録しました");
+      setAmount("1000");
       setDescription("");
 
-      // 任意：クライアントキャッシュを軽く揺らす
+      // クライアント側セッションを軽く叩く（任意）
       await supabase.auth.getSession();
+
+      onCreated?.();
     } catch (err: any) {
       console.error(err);
       setMessage(err?.message ?? "登録に失敗しました");
@@ -84,121 +100,115 @@ export default function TransactionForm({ accounts, categories, initialCashAccou
   }
 
   return (
-    <div className="text-neutral-100">
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-5">
-        <h2 className="text-base font-semibold mb-1">取引登録</h2>
-        <div className="text-xs text-neutral-500 mb-4">最短入力 → 即反映（manualはカテゴリ必須）</div>
+    <form onSubmit={onSubmit} className="space-y-4">
+      {/* 1行目 */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs text-gray-600">口座</label>
+          <select
+            value={cashAccountId ?? ""}
+            onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
+            className="w-full border rounded px-2 py-1 bg-white"
+          >
+            <option value="">選択してください</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} / id:{a.id}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div className="md:col-span-4">
-              <label className="block text-xs text-neutral-400 mb-1">口座</label>
-              <select
-                value={cashAccountId ?? ""}
-                onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
-                className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-700"
-              >
-                <option value="">選択してください</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} / id:{a.id}
-                  </option>
-                ))}
-              </select>
-            </div>
+        <div className="space-y-1">
+          <label className="text-xs text-gray-600">日付</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full border rounded px-2 py-1 bg-white"
+          />
+        </div>
 
-            <div className="md:col-span-3">
-              <label className="block text-xs text-neutral-400 mb-1">日付</label>
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-700"
-              />
-            </div>
-
-            <div className="md:col-span-5">
-              <label className="block text-xs text-neutral-400 mb-1">区分</label>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSection("in")}
-                  className={[
-                    "flex-1 rounded-md border px-3 py-2 text-sm",
-                    section === "in"
-                      ? "border-emerald-700 bg-emerald-900/40 text-emerald-200"
-                      : "border-neutral-800 bg-neutral-900 text-neutral-200 hover:bg-neutral-800/60",
-                  ].join(" ")}
-                >
-                  収入
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSection("out")}
-                  className={[
-                    "flex-1 rounded-md border px-3 py-2 text-sm",
-                    section === "out"
-                      ? "border-red-700 bg-red-900/40 text-red-200"
-                      : "border-neutral-800 bg-neutral-900 text-neutral-200 hover:bg-neutral-800/60",
-                  ].join(" ")}
-                >
-                  支出
-                </button>
-              </div>
-            </div>
-
-            <div className="md:col-span-4">
-              <label className="block text-xs text-neutral-400 mb-1">金額（円）</label>
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                inputMode="numeric"
-                className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-neutral-700"
-              />
-            </div>
-
-            <div className="md:col-span-8">
-              <label className="block text-xs text-neutral-400 mb-1">
-                カテゴリ <span className="text-neutral-500">（manual必須）</span>
-              </label>
-              <select
-                value={cashCategoryId ?? ""}
-                onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
-                className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-700"
-              >
-                <option value="">選択してください</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} / id:{c.id}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-12">
-              <label className="block text-xs text-neutral-400 mb-1">メモ（任意）</label>
-              <input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-700"
-                placeholder="例：Amazon広告 / 仕入れ / 交通費"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
+        <div className="space-y-1">
+          <label className="text-xs text-gray-600">区分</label>
+          <div className="flex rounded border overflow-hidden">
             <button
-              type="submit"
-              disabled={submitting}
-              className="rounded-md border border-neutral-700 bg-neutral-100 px-4 py-2 text-sm font-semibold text-neutral-900 hover:bg-white disabled:opacity-60"
+              type="button"
+              onClick={() => setSection("in")}
+              className={`flex-1 px-3 py-1 text-sm ${
+                section === "in" ? "bg-gray-900 text-white" : "bg-white"
+              }`}
             >
-              {submitting ? "登録中..." : "登録"}
+              収入
             </button>
-
-            {message ? <span className="text-sm text-neutral-300">{message}</span> : null}
+            <button
+              type="button"
+              onClick={() => setSection("out")}
+              className={`flex-1 px-3 py-1 text-sm border-l ${
+                section === "out" ? "bg-gray-900 text-white" : "bg-white"
+              }`}
+            >
+              支出
+            </button>
           </div>
-        </form>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs text-gray-600">金額</label>
+          <input
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            inputMode="numeric"
+            className="w-full border rounded px-2 py-1 bg-white"
+            placeholder="例: 12000"
+          />
+        </div>
       </div>
-    </div>
+
+      {/* 2行目 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs text-gray-600">カテゴリ（manual必須）</label>
+          <select
+            value={cashCategoryId ?? ""}
+            onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
+            className="w-full border rounded px-2 py-1 bg-white"
+          >
+            <option value="">選択してください</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} / id:{c.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="md:col-span-2 space-y-1">
+          <label className="text-xs text-gray-600">メモ（任意）</label>
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full border rounded px-2 py-1 bg-white"
+            placeholder="例: Amazon手数料 / 外注費 / 交通費 など"
+          />
+        </div>
+      </div>
+
+      {/* 送信 */}
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="border rounded px-4 py-2 text-sm bg-white hover:bg-gray-50 disabled:opacity-60"
+        >
+          {submitting ? "登録中..." : "登録"}
+        </button>
+        {message ? (
+          <span className="text-sm text-gray-700">{message}</span>
+        ) : (
+          <span className="text-sm text-gray-400">入力→登録→下の一覧に反映</span>
+        )}
+      </div>
+    </form>
   );
 }
