@@ -16,60 +16,66 @@ export type MonthlyBalanceRow = {
   balance: number;
 };
 
-/**
- * Monthly income / expense aggregation
- */
+// 互換用（古いコンポーネントが MonthlyCashBalanceRow を参照してても落ちないように）
+export type MonthlyCashBalanceRow = MonthlyBalanceRow;
+
+// ===== Monthly income/expense (single month) =====
 export type MonthlyIncomeExpenseRow = {
   month: string; // "YYYY-MM-01"
   income: number;
   expense: number;
-  net: number;
+  net: number; // income - expense
 };
 
 // ===== Cash short forecast (monthly projection) =====
 export type CashProjectionMonthRow = {
-  month: string;
-  income: number;
-  expense: number;
-  balance: number;
+  month: string; // "YYYY-MM-01"
+  income: number; // avg income
+  expense: number; // avg expense
+  balance: number; // projected balance
 };
 
 export type CashShortForecastInput = {
   cashAccountId: number;
-  month: string;
-  rangeMonths: number;
-  avgWindowMonths: number;
+  month: string; // "YYYY-MM-01"
+  rangeMonths: number; // 3/6/12 ...
+  avgWindowMonths: number; // 3/6/12 ...
   whatIf?: {
-    deltaIncome?: number;
-    deltaExpense?: number;
+    deltaIncome?: number; // + per month
+    deltaExpense?: number; // + per month
   };
 };
 
 export type CashShortForecast = {
   cashAccountId: number;
-  month: string;
+
+  // request echo
+  month: string; // "YYYY-MM-01"
   rangeMonths: number;
   avgWindowMonths: number;
 
+  // computed
   avgIncome: number;
   avgExpense: number;
-  avgNet: number;
+  avgNet: number; // avgIncome - avgExpense (after what-if)
   level: "safe" | "warn" | "danger";
   message: string;
 
+  // first month where balance <= 0 (YYYY-MM-01) or null
   shortDate: string | null;
+
   rows: CashProjectionMonthRow[];
 };
 
 // ===== Simulation (daily projection) =====
 export type GetCashProjectionInput = {
   cashAccountId: number;
-  startDate: string;
-  days: number;
+  startDate: string; // "YYYY-MM-DD"
+  days: number; // e.g. 180
 };
 
 export type CashProjectionDayRow = {
-  date: string;
+  date: string; // "YYYY-MM-DD"
   income: number;
   expense: number;
   net: number;
@@ -81,51 +87,43 @@ export type CashProjectionResult = {
   startDate: string;
   days: number;
   currentBalance: number;
-  shortDate: string | null;
+  shortDate: string | null; // first day where balance <= 0
   rows: CashProjectionDayRow[];
 };
 
-// ===== Overview（Dashboard summary）=====
+// ===== Overview =====
 export type OverviewPayload = {
   accountName: string;
-
-  // 現在値
   currentBalance: number;
 
-  // 当月サマリー
+  // 当月
   thisMonthIncome: number;
   thisMonthExpense: number;
-  net: number;
+  net: number; // thisMonthIncome - thisMonthExpense
+
+  month: string; // "YYYY-MM-01"
 };
 
-// ===== CashFlow =====
+// ===== CashFlow (manual input) =====
 export type CashFlowSection = "in" | "out";
 
 export type CashFlowCreateInput = {
-  // ✅ 正式（camelCase）
-  cashAccountId?: number;
-  cashCategoryId?: number | null;
-  sourceType?: "manual";
-
-  // ✅ 互換（snake_case）※ transactions 側の古い実装救済用
-  cash_account_id?: number;
-  cash_category_id?: number | null;
-  source_type?: "manual";
-
+  cashAccountId: number;
   date: string; // "YYYY-MM-DD"
   section: CashFlowSection; // "in" | "out"
   amount: number;
+  cashCategoryId: number | null;
   description?: string | null;
+  sourceType?: "manual";
 };
 
 export type CashFlowUpdateInput = {
   id: number;
   cashAccountId: number;
-
-  date?: string;
-  section?: CashFlowSection;
-  amount?: number;
-  cashCategoryId?: number | null;
+  date: string; // "YYYY-MM-DD"
+  section: CashFlowSection;
+  amount: number;
+  cashCategoryId: number | null;
   description?: string | null;
 };
 
@@ -144,7 +142,7 @@ export type CashCategory = {
 export type CashFlowListRow = {
   id: number;
   cash_account_id: number;
-  date: string;
+  date: string; // "YYYY-MM-DD"
   section: "in" | "out";
   amount: number;
   cash_category_id: number | null;
