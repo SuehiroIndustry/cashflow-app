@@ -1,47 +1,50 @@
 // app/dashboard/_components/EcoCharts.tsx
-"use client";
-
 import React from "react";
-import type { MonthlyCashBalanceRow } from "../_types";
+import type { MonthlyBalanceRow } from "../_types";
 
 type Props = {
-  rows: MonthlyCashBalanceRow[];
+  rows: MonthlyBalanceRow[];
 };
 
+/**
+ * シンプルな月次サマリー表示（チャートは後で差し替えOK）
+ * 今は「型エラーを出さない・責務を守る」ことを最優先
+ */
 export default function EcoCharts({ rows }: Props) {
-  // ここでは簡易表示だけ。後でグラフに差し替え可能
-  if (!rows || rows.length === 0) return null;
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="rounded-xl border p-4 text-sm text-muted-foreground">
+        データがありません
+      </div>
+    );
+  }
 
   return (
-    <div style={{ marginTop: 12, border: "1px solid #333", padding: 12, borderRadius: 8 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>last {rows.length} months</div>
+    <div className="rounded-xl border p-4 space-y-3">
+      <h3 className="text-sm font-semibold">月次サマリー</h3>
 
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left", padding: "4px 8px" }}>Month</th>
-            <th style={{ textAlign: "right", padding: "4px 8px" }}>Income</th>
-            <th style={{ textAlign: "right", padding: "4px 8px" }}>Expense</th>
-            <th style={{ textAlign: "right", padding: "4px 8px" }}>Balance</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={`${r.cash_account_id}-${r.month}`}>
-              <td style={{ padding: "4px 8px" }}>{r.month}</td>
-              <td style={{ textAlign: "right", padding: "4px 8px" }}>
-                ¥{(r.income ?? 0).toLocaleString()}
-              </td>
-              <td style={{ textAlign: "right", padding: "4px 8px" }}>
-                ¥{(r.expense ?? 0).toLocaleString()}
-              </td>
-              <td style={{ textAlign: "right", padding: "4px 8px" }}>
-                ¥{(r.balance ?? 0).toLocaleString()}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="space-y-2">
+        {rows.map((r) => (
+          <div
+            key={`${r.cash_account_id}-${r.month}`}
+            className="flex items-center justify-between text-sm"
+          >
+            <span className="text-muted-foreground">
+              {r.month}
+            </span>
+
+            <span
+              className={
+                r.balance >= 0
+                  ? "font-medium text-emerald-600"
+                  : "font-medium text-red-600"
+              }
+            >
+              {r.balance.toLocaleString()} 円
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
