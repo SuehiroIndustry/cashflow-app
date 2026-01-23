@@ -1,4 +1,4 @@
-// app/transactions/transaction-form.tsx
+// app/transactions/new/transaction-form.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -18,12 +18,15 @@ export default function TransactionForm({
   categories,
   initialCashAccountId,
 }: Props) {
+  // 任意：残しておく（あなたの構成に合わせる）
   const supabase = useMemo(() => createClient(), []);
 
   const [cashAccountId, setCashAccountId] = useState<number | null>(
     initialCashAccountId
   );
+
   const [section, setSection] = useState<"in" | "out">("in");
+
   const [date, setDate] = useState<string>(() => {
     const d = new Date();
     const y = d.getFullYear();
@@ -33,9 +36,11 @@ export default function TransactionForm({
   });
 
   const [amount, setAmount] = useState<string>("1000");
+
   const [cashCategoryId, setCashCategoryId] = useState<number | null>(
     categories.length ? categories[0].id : null
   );
+
   const [description, setDescription] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
@@ -46,11 +51,10 @@ export default function TransactionForm({
     setMessage("");
 
     if (!cashAccountId) {
-      setMessage("cashAccountId が未選択です");
+      setMessage("口座が未選択です");
       return;
     }
 
-    // 金額
     const amountNum = Number(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       setMessage("金額が不正です");
@@ -59,7 +63,7 @@ export default function TransactionForm({
 
     // manual の場合はカテゴリ必須（DB制約）
     if (!cashCategoryId) {
-      setMessage("cashCategoryId が未選択です（manualは必須）");
+      setMessage("カテゴリが未選択です（manualは必須）");
       return;
     }
 
@@ -74,13 +78,13 @@ export default function TransactionForm({
         cashCategoryId,
         description: description.trim() ? description.trim() : null,
 
-        // ★これが無いせいでビルドが落ちてる
+        // ✅ ここが肝
         sourceType: "manual",
       });
 
       setMessage("登録しました");
 
-      // 任意：クライアント側のキャッシュを軽く揺らす
+      // 任意：クライアント側の状態を軽く揺らす（不要なら消してOK）
       await supabase.auth.getSession();
     } catch (err: any) {
       console.error(err);
@@ -93,11 +97,11 @@ export default function TransactionForm({
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="flex items-center gap-3">
-        <label className="w-24">口座</label>
+        <label className="w-24 text-sm opacity-80">口座</label>
         <select
           value={cashAccountId ?? ""}
           onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
-          className="border px-2 py-1"
+          className="border rounded px-2 py-1 bg-transparent"
         >
           <option value="">選択してください</option>
           {accounts.map((a) => (
@@ -109,21 +113,21 @@ export default function TransactionForm({
       </div>
 
       <div className="flex items-center gap-3">
-        <label className="w-24">日付</label>
+        <label className="w-24 text-sm opacity-80">日付</label>
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="border px-2 py-1"
+          className="border rounded px-2 py-1 bg-transparent"
         />
       </div>
 
       <div className="flex items-center gap-3">
-        <label className="w-24">区分</label>
+        <label className="w-24 text-sm opacity-80">区分</label>
         <select
           value={section}
           onChange={(e) => setSection(e.target.value as "in" | "out")}
-          className="border px-2 py-1"
+          className="border rounded px-2 py-1 bg-transparent"
         >
           <option value="in">in（収入）</option>
           <option value="out">out（支出）</option>
@@ -131,21 +135,21 @@ export default function TransactionForm({
       </div>
 
       <div className="flex items-center gap-3">
-        <label className="w-24">金額</label>
+        <label className="w-24 text-sm opacity-80">金額</label>
         <input
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           inputMode="numeric"
-          className="border px-2 py-1"
+          className="border rounded px-2 py-1 bg-transparent"
         />
       </div>
 
       <div className="flex items-center gap-3">
-        <label className="w-24">カテゴリ</label>
+        <label className="w-24 text-sm opacity-80">カテゴリ</label>
         <select
           value={cashCategoryId ?? ""}
           onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
-          className="border px-2 py-1"
+          className="border rounded px-2 py-1 bg-transparent"
         >
           <option value="">選択してください</option>
           {categories.map((c) => (
@@ -154,21 +158,25 @@ export default function TransactionForm({
             </option>
           ))}
         </select>
-        <span className="text-sm opacity-70">manualは必須</span>
+        <span className="text-xs opacity-60">manualは必須</span>
       </div>
 
       <div className="flex items-center gap-3">
-        <label className="w-24">メモ</label>
+        <label className="w-24 text-sm opacity-80">メモ</label>
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          className="border px-2 py-1 w-96"
+          className="border rounded px-2 py-1 bg-transparent w-96"
           placeholder="任意"
         />
       </div>
 
       <div className="flex items-center gap-3">
-        <button type="submit" disabled={submitting} className="border px-3 py-1">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="border rounded px-3 py-1"
+        >
           {submitting ? "登録中..." : "登録"}
         </button>
         {message ? <span className="text-sm">{message}</span> : null}
