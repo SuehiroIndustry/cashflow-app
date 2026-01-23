@@ -2,23 +2,20 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 
-import TransactionsTable, { type RecentRow } from "./transactions-table";
-import { deleteCashFlow } from "./_actions/deleteCashFlow";
+import TransactionForm from "./transaction-form";
+import TransactionsTable from "./transactions-table";
+
+import type { CashCategoryOption } from "./_actions/getCashCategories";
+import type { RecentCashFlowRow } from "./_actions/getRecentCashFlows";
 
 type Option = { id: number; name: string };
 
-// 既存の getRecentCashFlows の row を想定（id/amount/date/section/categoryName/description）
-export type RecentCashFlowRow = {
-  id: number;
-  date: string;
-  section: "in" | "out";
-  amount: number;
-  cashCategoryName?: string | null;
-  cash_category_name?: string | null; // どっちでも来ても吸収
-  description?: string | null;
-  memo?: string | null; // 念のため
+type Props = {
+  initialAccounts: Option[];
+  initialCategories: CashCategoryOption[];
+  initialCashAccountId: number;
+  initialRows: RecentCashFlowRow[];
 };
 
 export default function TransactionsClient({
@@ -26,50 +23,32 @@ export default function TransactionsClient({
   initialCategories,
   initialCashAccountId,
   initialRows,
-}: {
-  initialAccounts: Option[];
-  initialCategories: Option[];
-  initialCashAccountId: number;
-  initialRows: RecentCashFlowRow[];
-}) {
-  const router = useRouter();
-
+}: Props) {
   const [rows, setRows] = useState<RecentCashFlowRow[]>(initialRows);
 
-  const tableRows: RecentRow[] = useMemo(() => {
-    return (rows ?? []).map((r) => ({
-      id: r.id,
-      date: r.date,
-      section: r.section,
-      amount: r.amount,
-      categoryName:
-        (r.cashCategoryName ?? r.cash_category_name ?? "") || "",
-      description: (r.description ?? r.memo ?? null) as string | null,
-    }));
-  }, [rows]);
-
-  const handleDelete = async (id: number) => {
-    // 先にUIから消す（体感速い）
-    setRows((prev) => prev.filter((x) => x.id !== id));
-
-    try {
-      await deleteCashFlow(id);
-      // DB側でrevalidateされるけど、念のため画面も更新
-      router.refresh();
-    } catch (e) {
-      // 失敗したら戻す
-      setRows(initialRows);
-      alert("削除に失敗しました。もう一度お試しください。");
-      throw e;
-    }
-  };
+  // 口座がない状態でも壊れないように
+  const hasAccounts = useMemo(() => initialAccounts.length > 0 && initialCashAccountId !== 0, [initialAccounts, initialCashAccountId]);
 
   return (
     <div className="space-y-6">
-      {/* ここは既存の入力フォームUIがある前提なら、そのまま残してOK。
-          もしこのファイルが“テーブル専用”だった場合でも、下のテーブルだけは動く。 */}
+      {/* ✅ ここが「消えてた上の方」 */}
+      <TransactionForm
+        accounts={initialAccounts}
+        categories={initialCategories}
+        initialCashAccountId={initialCashAccountId}
+        disabled={!hasAccounts}
+        onCreated={(newRow) => {
+          // 新規を先頭に差し込む（最大30件維持）
+          setRows((prev) => [newRow, ...prev].slice(0, 30));
+        }}
+      />
 
-      <TransactionsTable rows={tableRows} onDelete={handleDelete} />
+      <TransactionsTable
+        rows={rows}
+        onDeleted={(deletedId) => {
+          setRows((prev) => prev.filter((r) => r.id !== deletedId));
+        }}
+      />
     </div>
   );
 }

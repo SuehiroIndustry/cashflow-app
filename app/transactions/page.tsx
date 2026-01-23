@@ -2,36 +2,25 @@
 import TransactionsClient from "./transactions-client";
 
 import { getAccounts } from "../dashboard/_actions/getAccounts";
-import { getCashCategories } from "./_actions/getCashCategories";
 import { getRecentCashFlows } from "./_actions/getRecentCashFlows";
+import { getCashCategories } from "./_actions/getCashCategories";
 
 export default async function TransactionsPage() {
   const accounts = await getAccounts();
   const categories = await getCashCategories();
 
-  // ✅ 口座が0件なら、ここで止める（nullを渡さない）
-  const firstAccountId = accounts[0]?.id;
-  if (!firstAccountId) {
-    return (
-      <div className="p-6">
-        <h1 className="text-xl font-semibold">Transactions</h1>
-        <p className="mt-3 opacity-80">
-          口座がまだ作成されていません。先に口座を作成してください。
-        </p>
-      </div>
-    );
-  }
+  const initialCashAccountId: number = accounts.length ? (accounts[0].id as number) : 0;
 
-  const recent = await getRecentCashFlows({
-    cashAccountId: firstAccountId,
-    limit: 30,
-  });
+  const recent =
+    initialCashAccountId !== 0
+      ? await getRecentCashFlows({ cashAccountId: initialCashAccountId, limit: 30 })
+      : [];
 
   return (
     <TransactionsClient
-      initialAccounts={accounts.map((a) => ({ id: a.id, name: a.name }))}
+      initialAccounts={accounts.map((a: any) => ({ id: a.id as number, name: a.name as string }))}
       initialCategories={categories}
-      initialCashAccountId={firstAccountId} // ✅ number確定
+      initialCashAccountId={initialCashAccountId}
       initialRows={recent}
     />
   );

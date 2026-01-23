@@ -2,185 +2,220 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { createClient } from "@/utils/supabase/client";
+
 import { createCashFlow } from "./_actions/createCashFlow";
+import type { CashCategoryOption } from "./_actions/getCashCategories";
+import type { RecentCashFlowRow } from "./_actions/getRecentCashFlows";
 
 type Option = { id: number; name: string };
 
 type Props = {
   accounts: Option[];
-  categories: Option[];
-  initialCashAccountId: number | null;
+  categories: CashCategoryOption[];
+  initialCashAccountId: number;
+  disabled?: boolean;
+  onCreated: (row: RecentCashFlowRow) => void;
 };
 
 export default function TransactionForm({
   accounts,
   categories,
   initialCashAccountId,
+  disabled = false,
+  onCreated,
 }: Props) {
-  // ※無くても動くけど、あなたの現状構成に合わせて残しておく
-  const supabase = useMemo(() => createClient(), []);
-
-  const [cashAccountId, setCashAccountId] = useState<number | null>(
-    initialCashAccountId
-  );
-
-  const [section, setSection] = useState<"in" | "out">("in");
-
+  const [cashAccountId, setCashAccountId] = useState<number>(initialCashAccountId);
   const [date, setDate] = useState<string>(() => {
     const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
   });
-
-  const [amount, setAmount] = useState<string>("1000");
-
-  const [cashCategoryId, setCashCategoryId] = useState<number | null>(
-    categories.length ? categories[0].id : null
-  );
-
+  const [section, setSection] = useState<"in" | "out">("in");
+  const [amount, setAmount] = useState<number>(0);
+  const [cashCategoryId, setCashCategoryId] = useState<number>(categories[0]?.id ?? 0);
   const [description, setDescription] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState<string>("");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setMessage("");
+  const cashCategoryName = useMemo(() => {
+    const found = categories.find((c) => c.id === cashCategoryId);
+    return found?.name ?? "";
+  }, [categories, cashCategoryId]);
 
-    if (!cashAccountId) {
-      setMessage("口座が未選択です");
-      return;
-    }
-
-    const amountNum = Number(amount);
-    if (!Number.isFinite(amountNum) || amountNum <= 0) {
-      setMessage("金額が不正です");
-      return;
-    }
-
-    // manual の場合はカテゴリ必須（DB制約）
-    if (!cashCategoryId) {
-      setMessage("カテゴリが未選択です（manualは必須）");
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      await createCashFlow({
-        cashAccountId,
-        date,
-        section,
-        amount: amountNum,
-        cashCategoryId,
-        description: description.trim() ? description.trim() : null,
-
-        // ✅ これが無いせいでビルド落ちてた
-        sourceType: "manual",
-      });
-
-      setMessage("登録しました");
-
-      // 任意：クライアント側の状態を軽く揺らす（不要なら消してOK）
-      await supabase.auth.getSession();
-    } catch (err: any) {
-      console.error(err);
-      setMessage(err?.message ?? "登録に失敗しました");
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  const canSubmit =
+    !disabled &&
+    cashAccountId !== 0 &&
+    !!date &&
+    amount > 0 &&
+    cashCategoryId !== 0 &&
+    !submitting;
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="flex items-center gap-3">
-        <label className="w-24 text-sm opacity-80">口座</label>
-        <select
-          value={cashAccountId ?? ""}
-          onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
-          className="border rounded px-2 py-1 bg-transparent"
-        >
-          <option value="">選択してください</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name} / id:{a.id}
-            </option>
-          ))}
-        </select>
-      </div>
+    <div className="rounded-lg border border-neutral-700 bg-neutral-950/40 p-4">
+      <div className="text-lg font-semibold">Transactions</div>
+      <div className="text-sm text-neutral-400">実務用：最短入力 → 即反映 → 直近が見える</div>
 
-      <div className="flex items-center gap-3">
-        <label className="w-24 text-sm opacity-80">日付</label>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className="border rounded px-2 py-1 bg-transparent"
-        />
-      </div>
+      {disabled && (
+        <div className="mt-3 rounded border border-amber-700 bg-amber-950/30 p-3 text-amber-200">
+          口座が未登録です。先に口座を作ってください（いまは入力を無効化しています）。
+        </div>
+      )}
 
-      <div className="flex items-center gap-3">
-        <label className="w-24 text-sm opacity-80">区分</label>
-        <select
-          value={section}
-          onChange={(e) => setSection(e.target.value as "in" | "out")}
-          className="border rounded px-2 py-1 bg-transparent"
-        >
-          <option value="in">in（収入）</option>
-          <option value="out">out（支出）</option>
-        </select>
-      </div>
+      {errorMsg && (
+        <div className="mt-3 rounded border border-red-700 bg-red-950/30 p-3 text-red-200">
+          {errorMsg}
+        </div>
+      )}
 
-      <div className="flex items-center gap-3">
-        <label className="w-24 text-sm opacity-80">金額</label>
-        <input
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          inputMode="numeric"
-          className="border rounded px-2 py-1 bg-transparent"
-        />
-      </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-12">
+        <div className="md:col-span-3">
+          <label className="text-xs text-neutral-400">口座</label>
+          <select
+            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
+            value={cashAccountId}
+            onChange={(e) => setCashAccountId(Number(e.target.value))}
+            disabled={disabled}
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} / id:{a.id}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <div className="flex items-center gap-3">
-        <label className="w-24 text-sm opacity-80">カテゴリ</label>
-        <select
-          value={cashCategoryId ?? ""}
-          onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
-          className="border rounded px-2 py-1 bg-transparent"
-        >
-          <option value="">選択してください</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} / id:{c.id}
-            </option>
-          ))}
-        </select>
-        <span className="text-xs opacity-60">manualは必須</span>
-      </div>
+        <div className="md:col-span-3">
+          <label className="text-xs text-neutral-400">日付</label>
+          <input
+            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            disabled={disabled}
+          />
+        </div>
 
-      <div className="flex items-center gap-3">
-        <label className="w-24 text-sm opacity-80">メモ</label>
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          className="border rounded px-2 py-1 bg-transparent w-96"
-          placeholder="任意"
-        />
-      </div>
+        <div className="md:col-span-2">
+          <label className="text-xs text-neutral-400">区分</label>
+          <div className="mt-1 flex gap-2">
+            <button
+              type="button"
+              className={`w-full rounded border px-3 py-2 ${
+                section === "in"
+                  ? "border-emerald-600 bg-emerald-950/40 text-emerald-200"
+                  : "border-neutral-700 bg-neutral-950 text-neutral-200"
+              }`}
+              onClick={() => setSection("in")}
+              disabled={disabled}
+            >
+              収入
+            </button>
+            <button
+              type="button"
+              className={`w-full rounded border px-3 py-2 ${
+                section === "out"
+                  ? "border-rose-600 bg-rose-950/40 text-rose-200"
+                  : "border-neutral-700 bg-neutral-950 text-neutral-200"
+              }`}
+              onClick={() => setSection("out")}
+              disabled={disabled}
+            >
+              支出
+            </button>
+          </div>
+        </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={submitting}
-          className="border rounded px-3 py-1"
-        >
-          {submitting ? "登録中..." : "登録"}
-        </button>
-        {message ? <span className="text-sm">{message}</span> : null}
+        <div className="md:col-span-2">
+          <label className="text-xs text-neutral-400">金額</label>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              className="w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2 text-right"
+              type="number"
+              value={amount}
+              onChange={(e) => setAmount(Number(e.target.value))}
+              disabled={disabled}
+            />
+            <span className="text-sm text-neutral-300">円</span>
+          </div>
+        </div>
+
+        <div className="md:col-span-2 flex items-end">
+          <button
+            className="w-full rounded border border-neutral-600 bg-neutral-900 px-4 py-2 hover:bg-neutral-800 disabled:opacity-40"
+            disabled={!canSubmit}
+            onClick={async () => {
+              setErrorMsg(null);
+              setSubmitting(true);
+              try {
+                const res = await createCashFlow({
+                  cashAccountId,
+                  date,
+                  section,
+                  amount,
+                  cashCategoryId,
+                  description: description.trim() ? description.trim() : null,
+                  sourceType: "manual", // ✅ これが必須（型エラーの原因）
+                });
+
+                // createCashFlow が id を返す想定（返さないなら action 側で返すようにして）
+                const newId = (res as any)?.id as number | undefined;
+
+                const newRow: RecentCashFlowRow = {
+                  id: newId ?? Date.now(), // 念のため（本当はDBのidが望ましい）
+                  date,
+                  section,
+                  amount,
+                  cash_category_id: cashCategoryId,
+                  cash_category_name: cashCategoryName,
+                  description: description.trim() ? description.trim() : null,
+                } as any;
+
+                onCreated(newRow);
+
+                // 入力だけ軽くリセット（口座・日付は維持）
+                setAmount(0);
+                setDescription("");
+              } catch (e: any) {
+                setErrorMsg(e?.message ?? "登録に失敗しました");
+              } finally {
+                setSubmitting(false);
+              }
+            }}
+          >
+            登録
+          </button>
+        </div>
+
+        <div className="md:col-span-6">
+          <label className="text-xs text-neutral-400">カテゴリ（manualは必須）</label>
+          <select
+            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
+            value={cashCategoryId}
+            onChange={(e) => setCashCategoryId(Number(e.target.value))}
+            disabled={disabled}
+          >
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} / id:{c.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="md:col-span-6">
+          <label className="text-xs text-neutral-400">メモ（任意）</label>
+          <input
+            className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            disabled={disabled}
+            placeholder="任意"
+          />
+        </div>
       </div>
-    </form>
+    </div>
   );
 }
