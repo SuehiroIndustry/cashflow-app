@@ -1,6 +1,9 @@
+// app/transactions/new/transaction-form.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
+
+// ★ new/ 配下なので 1階層上の _actions を参照する
 import { createCashFlow } from "../_actions/createCashFlow";
 
 type Option = { id: number; name: string };
@@ -24,15 +27,17 @@ export default function TransactionForm({
     return `${yyyy}-${mm}-${dd}`;
   }, []);
 
-  const [cashAccountId, setCashAccountId] = useState<number>(
-    initialCashAccountId ?? (accounts[0]?.id ?? 1)
+  const [cashAccountId, setCashAccountId] = useState<number | null>(
+    initialCashAccountId ?? (accounts[0]?.id ?? null)
   );
   const [date, setDate] = useState<string>(today);
   const [section, setSection] = useState<"in" | "out">("in");
   const [amount, setAmount] = useState<string>("");
-  const [cashCategoryId, setCashCategoryId] = useState<number>(
-    categories[0]?.id ?? 1
+
+  const [cashCategoryId, setCashCategoryId] = useState<number | null>(
+    categories[0]?.id ?? null
   );
+
   const [description, setDescription] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
@@ -42,11 +47,18 @@ export default function TransactionForm({
     e.preventDefault();
     setMessage("");
 
+    if (!cashAccountId) {
+      setMessage("口座が未選択です");
+      return;
+    }
+
     const amountNum = Number(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       setMessage("金額が不正です");
       return;
     }
+
+    // manual はカテゴリ必須（あなたのDB制約）
     if (!cashCategoryId) {
       setMessage("カテゴリが未選択です（manual は必須）");
       return;
@@ -61,14 +73,17 @@ export default function TransactionForm({
         section,
         amount: amountNum,
         cashCategoryId,
-        description: description ? description : null,
-        sourceType: "manual", // ★必須
+        description: description.trim() ? description.trim() : null,
+
+        // ★ 必須
+        sourceType: "manual",
       });
 
       setAmount("");
       setDescription("");
       setMessage("登録しました");
     } catch (err: any) {
+      console.error(err);
       setMessage(err?.message ?? "登録に失敗しました");
     } finally {
       setSubmitting(false);
@@ -77,18 +92,17 @@ export default function TransactionForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      {message ? (
-        <div className="text-sm text-white/80">{message}</div>
-      ) : null}
+      {message ? <div className="text-sm text-white/80">{message}</div> : null}
 
       <div className="grid gap-3 md:grid-cols-3">
         <label className="space-y-1">
           <div className="text-xs text-white/70">口座</div>
           <select
             className="w-full rounded border border-white/15 bg-black/40 px-3 py-2 text-sm text-white"
-            value={cashAccountId}
-            onChange={(e) => setCashAccountId(Number(e.target.value))}
+            value={cashAccountId ?? ""}
+            onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
           >
+            <option value="">選択してください</option>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} / id:{a.id}
@@ -149,12 +163,13 @@ export default function TransactionForm({
         </label>
 
         <label className="space-y-1 md:col-span-2">
-          <div className="text-xs text-white/70">カテゴリ</div>
+          <div className="text-xs text-white/70">カテゴリ（manual必須）</div>
           <select
             className="w-full rounded border border-white/15 bg-black/40 px-3 py-2 text-sm text-white"
-            value={cashCategoryId}
-            onChange={(e) => setCashCategoryId(Number(e.target.value))}
+            value={cashCategoryId ?? ""}
+            onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
           >
+            <option value="">選択してください</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} / id:{c.id}
