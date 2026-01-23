@@ -9,6 +9,7 @@ import EcoCharts from "./_components/EcoCharts";
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalances";
 import { getCashShortForecast } from "./_actions/getCashShortForecast";
+import { getOverview } from "./_actions/getOverview"; // ★追加
 
 import type {
   CashAccount,
@@ -168,7 +169,9 @@ export default function DashboardClient() {
       const fc = await getCashShortForecast(input);
       setForecast(fc);
 
-      setOverview(null);
+      // ★ Overview を取得して表示
+      const ov = await getOverview({ cashAccountId: nextAccountId, month: monthISO });
+      setOverview(ov);
     } catch (e: any) {
       setLoadError(e?.message ?? String(e));
     } finally {
@@ -239,7 +242,7 @@ export default function DashboardClient() {
         {loadError && <div className="text-sm text-red-300">{loadError}</div>}
       </div>
 
-      {/* Forecast card (BalanceCardは使わない) */}
+      {/* Forecast card */}
       {forecast ? (
         <ForecastCard forecast={forecast} currentBalance={selectedAccount?.current_balance ?? 0} />
       ) : (
@@ -247,11 +250,7 @@ export default function DashboardClient() {
       )}
 
       {/* Overview */}
-      {overview ? (
-        <OverviewCard payload={overview} />
-      ) : (
-        <div className="text-sm opacity-60">Overview not available</div>
-      )}
+      {overview ? <OverviewCard payload={overview} /> : <div className="text-sm opacity-60">Overview not available</div>}
 
       {/* Month summary */}
       <div className="border rounded p-4">
