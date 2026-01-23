@@ -1,78 +1,99 @@
 // app/dashboard/_actions/getMonthlyCashBalances.ts
 "use server";
 
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
-
+import { createClient } from "@/utils/supabase/server";
 import type { MonthlyBalanceRow } from "../_types";
 
-type GetMonthlyCashBalancesInput = {
-  cashAccountId: number;
-  month: string; // "YYYY-MM-01" or "YYYY-MM"
-  rangeMonths: number; // 3/6/12...
+type Input = {
+  cashAccountId: number; // 0 = all
+  month: string; // YYYY-MM-01
+  rangeMonths: number;
 };
 
-async function getSupabase() {
-  const cookieStore = await cookies();
-
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              try {
-                cookieStore.set(name, value, options as any);
-              } catch {
-                // noop
-              }
-            });
-          } catch {
-            // noop
-          }
-        },
-      },
-    }
-  );
+function toMonthKey(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
 }
 
-function normalizeMonthKey(input: string): string {
-  // Accept: "YYYY-MM" or "YYYY-MM-01"
-  if (/^\d{4}-\d{2}$/.test(input)) return `${input}-01`;
-  return input;
+function addMonths(d: Date, n: number) {
+  const x = new Date(d);
+  x.setMonth(x.getMonth() + n);
+  return x;
 }
 
-export async function getMonthlyCashBalances(
-  input: GetMonthlyCashBalancesInput
-): Promise<MonthlyBalanceRow[]> {
-  const supabase = await getSupabase();
+export async function getMonthlyCashBalances(input: Input): Promise<MonthlyBalanceRow[]> {
+  const supabase = await createClient();
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+  const cashAccountId = Number(input.cashAccountId);
+  const rangeMonths = Math.max(1, Number(input.rangeMonths || 12));
 
-  if (userErr) throw new Error(userErr.message);
-  if (!user) throw new Error("Not authenticated");
+  const monthStart = new Date(input.month);
+  if (Number.isNaN(monthStart.getTime())) {
+    throw new Error("month が不正です（YYYY-MM-01）");
+  }
 
-  const month = normalizeMonthKey(input.month);
+  // 期間: monthStart を含めて rangeMonths 分（過去へ）
+  // 例: 12 -> monthStart-11months 〜 monthStart+1month(未満)
+  const start = addMonths(monthStart, -(rangeMonths - 1));
+  const endExclusive = addMonths(monthStart, 1);
 
-  const { data, error } = await supabase
-    .from("monthly_cash_account_balances")
-    .select("cash_account_id, month, income, expense, balance")
-    .eq("cash_account_id", input.cashAccountId)
-    .lte("month", month)
-    .order("month", { ascending: false })
-    .limit(input.rangeMonths);
+  // 対象 cash_flows をまとめて取得
+  let q = supabase
+    .from("cash_flows")
+    .select("date, section, amount")
+    .gte("date", start.toISOString().slice(0, 10))
+    .lt("date", endExclusive.toISOString().slice(0, 10));
 
-  if (error) throw new Error(error.message);
+  if (cashAccountId !== 0) {
+    q = q.eq("cash_account_id", cashAccountId);
+  }
 
-  const rows = (data ?? []) as MonthlyBalanceRow[];
-  rows.sort((a, b) => a.month.localeCompare(b.month)); // 昇順
+  const { data, error } = await q;
+  if (error) throw error;
+
+  // 月別集計
+  const map = new Map<string, { income: number; expense: number }>();
+
+  // 先に “空の月” も用意しておく（グラフ・テーブルが揃う）
+  for (let i = 0; i < rangeMonths; i++) {
+    const d = addMonths(start, i);
+    map.set(toMonthKey(d), { income: 0, expense: 0 });
+  }
+
+  for (const r of data ?? []) {
+    const d = new Date(String((r as any).date));
+    const key = toMonthKey(d);
+    const section = String((r as any).section);
+    const amount = Number((r as any).amount ?? 0);
+
+    const bucket = map.get(key) ?? { income: 0, expense: 0 };
+
+    if (section === "in") bucket.income += amount;
+    if (section === "out") bucket.expense += amount;
+
+    map.set(key, bucket);
+  }
+
+  // 残高（ここでは「月末残高」を厳密に作るのは DB の初期残高が必要）
+  // なので dashboard の表示用に「月ごとの net を積み上げた擬似推移」を作る。
+  // 現在残高は Overview / Accounts で出すので OK。
+  let running = 0;
+  const rows: MonthlyBalanceRow[] = [];
+
+  const keys = Array.from(map.keys()).sort((a, b) => a.localeCompare(b));
+  for (const k of keys) {
+    const v = map.get(k)!;
+    const net = v.income - v.expense;
+    running += net;
+
+    rows.push({
+      month: k,
+      income: Math.round(v.income),
+      expense: Math.round(v.expense),
+      balance: Math.round(running),
+    });
+  }
+
   return rows;
 }
