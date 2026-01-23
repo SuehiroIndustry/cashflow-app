@@ -9,7 +9,7 @@ import EcoCharts from "./_components/EcoCharts";
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalances";
 import { getCashShortForecast } from "./_actions/getCashShortForecast";
-import { getOverview } from "./_actions/getOverview"; // ★追加
+import { getOverview } from "./_actions/getOverview";
 
 import type {
   CashAccount,
@@ -57,6 +57,27 @@ function toMonthStartISO(input: string): string {
   return `${y}-${m}-01`;
 }
 
+// "YYYY-MM-01" -> "YYYY年MM月"
+function toJpMonthLabel(yyyyMm01: string): string {
+  const m = (yyyyMm01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!m) return yyyyMm01;
+  return `${m[1]}年${m[2]}月`;
+}
+
+// month差（from -> to）。同月なら0。toが過去ならマイナス。
+function diffMonths(fromYYYYMM01: string, toYYYYMM01: string): number {
+  const fm = (fromYYYYMM01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
+  const tm = (toYYYYMM01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
+  if (!fm || !tm) return 0;
+
+  const fy = Number(fm[1]);
+  const fmo = Number(fm[2]);
+  const ty = Number(tm[1]);
+  const tmo = Number(tm[2]);
+
+  return (ty - fy) * 12 + (tmo - fmo);
+}
+
 function ForecastCard(props: { forecast: CashShortForecast; currentBalance: number }) {
   const { forecast, currentBalance } = props;
 
@@ -67,12 +88,33 @@ function ForecastCard(props: { forecast: CashShortForecast; currentBalance: numb
         ? { label: "注意", cls: "border-yellow-500/60 text-yellow-200" }
         : { label: "安全", cls: "border-emerald-500/60 text-emerald-200" };
 
+  const monthsToShort = forecast.shortDate
+    ? diffMonths(forecast.month, forecast.shortDate)
+    : null;
+
+  const headline = forecast.shortDate
+    ? `ショートまで：あと ${Math.max(0, monthsToShort ?? 0)} ヶ月（${toJpMonthLabel(
+        forecast.shortDate
+      )}）`
+    : `予測期間内はショートなし（${forecast.rangeMonths}ヶ月）`;
+
+  const avgNetNote =
+    forecast.avgNet < 0
+      ? `毎月 ¥${Math.abs(forecast.avgNet).toLocaleString()} ずつ減っています`
+      : forecast.avgNet > 0
+        ? `毎月 ¥${forecast.avgNet.toLocaleString()} ずつ増えています`
+        : `増減なし（±0）`;
+
   return (
     <div className="border rounded p-4">
       <div className="flex items-center gap-3 mb-2">
         <div className="font-semibold">資金ショート予測</div>
         <div className={`text-xs border rounded px-2 py-0.5 ${badge.cls}`}>{badge.label}</div>
       </div>
+
+      {/* ★ここが主役：期限が一発で分かる */}
+      <div className="text-sm font-semibold mb-1">{headline}</div>
+      <div className="text-xs opacity-70 mb-3">{avgNetNote}</div>
 
       <div className="text-sm opacity-80 mb-3">{forecast.message}</div>
 
@@ -96,8 +138,11 @@ function ForecastCard(props: { forecast: CashShortForecast; currentBalance: numb
       </div>
 
       <div className="mt-3 text-xs opacity-60">
-        予測対象: {forecast.month} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測{forecast.rangeMonths}ヶ月
-        {forecast.shortDate ? ` / ショート見込み: ${forecast.shortDate}` : " / ショート見込み: なし"}
+        予測対象: {toJpMonthLabel(forecast.month)} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測
+        {forecast.rangeMonths}ヶ月
+        {forecast.shortDate
+          ? ` / ショート見込み: ${toJpMonthLabel(forecast.shortDate)}`
+          : " / ショート見込み: なし"}
       </div>
     </div>
   );
@@ -169,7 +214,6 @@ export default function DashboardClient() {
       const fc = await getCashShortForecast(input);
       setForecast(fc);
 
-      // ★ Overview を取得して表示
       const ov = await getOverview({ cashAccountId: nextAccountId, month: monthISO });
       setOverview(ov);
     } catch (e: any) {
@@ -250,7 +294,11 @@ export default function DashboardClient() {
       )}
 
       {/* Overview */}
-      {overview ? <OverviewCard payload={overview} /> : <div className="text-sm opacity-60">Overview not available</div>}
+      {overview ? (
+        <OverviewCard payload={overview} />
+      ) : (
+        <div className="text-sm opacity-60">Overview not available</div>
+      )}
 
       {/* Month summary */}
       <div className="border rounded p-4">
