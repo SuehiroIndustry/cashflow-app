@@ -1,36 +1,41 @@
 // app/transactions/transactions-client.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
+import { createClient } from "@/utils/supabase/client";
+
 import { createCashFlow } from "@/app/transactions/_actions/createCashFlow";
-import type { CashFlowSection } from "@/app/dashboard/_types";
 
-function todayYmd() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+type Props = {
+  // 既存に合わせて必要なら増やしてOK
+};
 
-export default function TransactionsClient() {
-  // フォームは string で持つ（input/selectがstringだから）
-  const [cashAccountId, setCashAccountId] = useState<string>("");
-  const [date, setDate] = useState<string>(todayYmd());
-  const [section, setSection] = useState<CashFlowSection>("out");
+export default function TransactionsClient(_props: Props) {
+  const supabase = useMemo(() => createClient(), []);
+
+  // ---- ここは既存の state/props に合わせて使ってOK（仮置き） ----
+  const [cashAccountId, setCashAccountId] = useState<number | null>(null);
+  const [section, setSection] = useState<"in" | "out">("in");
+  const [date, setDate] = useState<string>(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  });
   const [amount, setAmount] = useState<string>("1000");
-  const [cashCategoryId, setCashCategoryId] = useState<string>("");
+  const [cashCategoryId, setCashCategoryId] = useState<number | null>(null);
   const [description, setDescription] = useState<string>("");
 
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string>("");
+  // ------------------------------------------------------------
 
   async function onCreate() {
     setMessage("");
 
-    const cash_account_id = Number(cashAccountId);
-    if (!Number.isFinite(cash_account_id) || cash_account_id <= 0) {
-      setMessage("口座IDが不正です");
+    if (cashAccountId == null) {
+      setMessage("cashAccountId が未選択です");
       return;
     }
 
@@ -40,112 +45,109 @@ export default function TransactionsClient() {
       return;
     }
 
-    // manualはカテゴリ必須
-    const catNum = Number(cashCategoryId);
-    if (!Number.isFinite(catNum) || catNum <= 0) {
-      setMessage("カテゴリIDが不正です（manualは必須）");
+    // manual の場合カテゴリ必須（DB制約）
+    if (cashCategoryId == null) {
+      setMessage("cashCategoryId が未選択です（manualは必須）");
       return;
     }
 
     try {
       setSubmitting(true);
 
+      // ✅ snake_case をやめて camelCase で統一
       await createCashFlow({
-        cash_account_id,
+        cashAccountId,
         date,
-        section, // ✅ typeじゃなくsection
+        section,
         amount: amountNum,
-        cash_category_id: catNum,
+        cashCategoryId,
         description: description.trim() ? description.trim() : null,
-        source_type: "manual",
+        sourceType: "manual",
       });
 
       setMessage("登録しました");
-      setDescription("");
-    } catch (e: any) {
-      console.error(e);
-      setMessage(e?.message ?? "登録に失敗しました");
+      await supabase.auth.getSession();
+    } catch (err: any) {
+      console.error(err);
+      setMessage(err?.message ?? "登録に失敗しました");
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <div style={{ padding: 16 }}>
-      <h2>Transactions</h2>
+    <div className="space-y-4">
+      {/* ここ以下は既存UIに合わせて置き換えてOK。大事なのは createCashFlow の payload */}
+      <div className="border rounded p-4 space-y-3">
+        <div className="font-semibold">Transactions</div>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <label>
-          口座ID{" "}
+        <div className="flex items-center gap-3">
+          <label className="w-28 text-sm">cashAccountId</label>
           <input
-            inputMode="numeric"
-            value={cashAccountId}
-            onChange={(e) => setCashAccountId(e.target.value)}
+            className="border px-2 py-1"
+            value={cashAccountId ?? ""}
+            onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
             placeholder="例: 1"
-            disabled={submitting}
           />
-        </label>
+        </div>
 
-        <label>
-          日付{" "}
+        <div className="flex items-center gap-3">
+          <label className="w-28 text-sm">date</label>
           <input
             type="date"
+            className="border px-2 py-1"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            disabled={submitting}
           />
-        </label>
+        </div>
 
-        <label>
-          区分{" "}
+        <div className="flex items-center gap-3">
+          <label className="w-28 text-sm">section</label>
           <select
+            className="border px-2 py-1"
             value={section}
-            onChange={(e) => setSection(e.target.value as CashFlowSection)}
-            disabled={submitting}
+            onChange={(e) => setSection(e.target.value as "in" | "out")}
           >
-            <option value="in">in（収入）</option>
-            <option value="out">out（支出）</option>
+            <option value="in">in</option>
+            <option value="out">out</option>
           </select>
-        </label>
+        </div>
 
-        <label>
-          金額{" "}
+        <div className="flex items-center gap-3">
+          <label className="w-28 text-sm">amount</label>
           <input
-            inputMode="numeric"
+            className="border px-2 py-1"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            placeholder="例: 1000"
-            disabled={submitting}
-          />
-        </label>
-
-        <label>
-          カテゴリID（manual必須）{" "}
-          <input
             inputMode="numeric"
-            value={cashCategoryId}
-            onChange={(e) => setCashCategoryId(e.target.value)}
-            placeholder="例: 1"
-            disabled={submitting}
           />
-        </label>
+        </div>
 
-        <label style={{ flex: "1 1 240px" }}>
-          メモ{" "}
+        <div className="flex items-center gap-3">
+          <label className="w-28 text-sm">cashCategoryId</label>
           <input
+            className="border px-2 py-1"
+            value={cashCategoryId ?? ""}
+            onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
+            placeholder="例: 10"
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <label className="w-28 text-sm">description</label>
+          <input
+            className="border px-2 py-1 w-96"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="任意"
-            disabled={submitting}
-            style={{ width: "100%" }}
           />
-        </label>
+        </div>
 
-        <button onClick={onCreate} disabled={submitting}>
-          {submitting ? "登録中..." : "登録"}
-        </button>
-
-        {message ? <span style={{ fontSize: 12 }}>{message}</span> : null}
+        <div className="flex items-center gap-3">
+          <button className="border px-3 py-1" onClick={onCreate} disabled={submitting}>
+            {submitting ? "登録中..." : "登録"}
+          </button>
+          {message ? <div className="text-sm">{message}</div> : null}
+        </div>
       </div>
     </div>
   );
