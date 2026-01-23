@@ -51,7 +51,7 @@ export type CashShortForecastInput = {
 };
 
 /**
- * getCashFlows.ts が import している行型（一覧/テーブル用）
+ * 一覧/テーブル用
  */
 export type CashFlowListRow = {
   id: number;
@@ -75,17 +75,16 @@ export type CashFlowDeleteInput = {
 };
 
 /**
- * Simulation（将来推計）用
- * getCashProjection.ts が期待している input に合わせる
+ * Simulation（将来推計）用 input
+ * getCashProjection.ts の仕様に合わせる
  */
 export type GetCashProjectionInput = {
   cashAccountId: number; // 0 = all accounts
 
-  // ✅ 現行 getCashProjection.ts 仕様
   startDate: string; // YYYY-MM-DD or YYYY-MM-01
   days: number;
 
-  // ✅ 互換（残しておく）
+  // 互換（残しておく）
   month?: string; // YYYY-MM-01
   rangeMonths?: number;
 };
@@ -99,8 +98,7 @@ export type CashProjectionPoint = {
 };
 
 /**
- * ✅ getCashProjection.ts が作っている “日次” の結果（rows）
- * - getCashProjection.ts 内で CashProjectionResult["rows"] を参照してるので必須
+ * 日次の推計行
  */
 export type CashProjectionRow = {
   date: string; // YYYY-MM-DD
@@ -116,13 +114,18 @@ export type CashProjectionResult = {
   startDate: string; // YYYY-MM-DD
   days: number;
 
-  // ✅ 日次（画面の折れ線・一覧で使う想定）
+  // ✅ getCashProjection.ts が返してる
+  currentBalance: number;
+
+  // ✅ getCashProjection.ts が返してる（ログ上 shortDate）
+  shortDate: string | null;
+
+  // ✅ getCashProjection.ts が組み立ててる日次配列
   rows: CashProjectionRow[];
 
-  // ✅ 月次サマリ（あれば使う）
+  // 任意（月次まとめがあるなら）
   points?: CashProjectionPoint[];
 
-  // 任意の補助情報
-  shortMonth?: string | null; // YYYY-MM or null
+  // 任意メッセージ
   message?: string;
 };
