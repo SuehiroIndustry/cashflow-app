@@ -16,6 +16,17 @@ export type MonthlyBalanceRow = {
   balance: number;
 };
 
+/**
+ * Monthly income / expense aggregation
+ * （月次の収支サマリー：一覧・チャート用）
+ */
+export type MonthlyIncomeExpenseRow = {
+  month: string; // "YYYY-MM-01"
+  income: number;
+  expense: number;
+  net: number; // income - expense
+};
+
 // ===== Cash short forecast (monthly projection) =====
 export type CashProjectionMonthRow = {
   month: string; // "YYYY-MM-01"
