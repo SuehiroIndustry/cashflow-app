@@ -248,7 +248,7 @@ export default function DashboardClient() {
 
       {/* Overview */}
       {overview ? (
-        <OverviewCard accountName={selectedAccount?.name ?? ""} payload={overview} />
+        <OverviewCard payload={overview} />
       ) : (
         <div className="text-sm opacity-60">Overview not available</div>
       )}
