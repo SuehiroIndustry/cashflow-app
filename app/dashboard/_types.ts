@@ -81,6 +81,21 @@ export type CashFlowDeleteInput = {
   cashAccountId?: number;
 };
 
+export type CashFlowUpdateInput = {
+  id: number;
+
+  date: string; // YYYY-MM-DD
+  section: "in" | "out";
+  amount: number;
+
+  cashAccountId: number;
+
+  cashCategoryId: number | null;
+  description: string | null;
+
+  sourceType: string; // "manual" 等
+};
+
 /**
  * Simulation（将来推計）用 input
  * getCashProjection.ts の仕様に合わせる
