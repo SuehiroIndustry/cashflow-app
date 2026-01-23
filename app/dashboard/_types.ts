@@ -77,9 +77,6 @@ export type CashFlowDeleteInput = {
 /**
  * Simulation（将来推計）用
  * getCashProjection.ts が期待している input に合わせる
- *
- * - startDate / days: 現行実装に合わせた本命
- * - month / rangeMonths: 旧仕様が残ってても壊さないための互換
  */
 export type GetCashProjectionInput = {
   cashAccountId: number; // 0 = all accounts
@@ -101,14 +98,29 @@ export type CashProjectionPoint = {
   balance: number;
 };
 
+/**
+ * ✅ getCashProjection.ts が作っている “日次” の結果（rows）
+ * - getCashProjection.ts 内で CashProjectionResult["rows"] を参照してるので必須
+ */
+export type CashProjectionRow = {
+  date: string; // YYYY-MM-DD
+  income: number;
+  expense: number;
+  net: number;
+  balance: number;
+};
+
 export type CashProjectionResult = {
   cashAccountId: number;
 
-  // startDate/days ベースに寄せる
   startDate: string; // YYYY-MM-DD
   days: number;
 
-  points: CashProjectionPoint[];
+  // ✅ 日次（画面の折れ線・一覧で使う想定）
+  rows: CashProjectionRow[];
+
+  // ✅ 月次サマリ（あれば使う）
+  points?: CashProjectionPoint[];
 
   // 任意の補助情報
   shortMonth?: string | null; // YYYY-MM or null
