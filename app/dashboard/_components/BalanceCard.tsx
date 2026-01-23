@@ -1,42 +1,22 @@
-// app/dashboard/_components/BalanceCard.tsx
-"use client";
-
 import React from "react";
-import type { MonthlyCashBalanceRow } from "../_types";
+import type { MonthlyBalanceRow } from "../_types";
 
 type Props = {
-  rows: MonthlyCashBalanceRow[];
+  rows: MonthlyBalanceRow[];
 };
 
 export default function BalanceCard({ rows }: Props) {
-  // rows が空なら何も出さない（DashboardClient 側でもガードしてるが保険）
-  if (!rows || rows.length === 0) return null;
-
-  const latest = rows[rows.length - 1];
-  const income = latest?.income ?? 0;
-  const expense = latest?.expense ?? 0;
-  const balance = latest?.balance ?? 0;
-
   return (
-    <div style={{ border: "1px solid #333", padding: 12, borderRadius: 8 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>月次サマリ</div>
-
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ opacity: 0.8 }}>Income</div>
-          <div>¥{income.toLocaleString()}</div>
-        </div>
-
-        <div>
-          <div style={{ opacity: 0.8 }}>Expense</div>
-          <div>¥{expense.toLocaleString()}</div>
-        </div>
-
-        <div>
-          <div style={{ opacity: 0.8 }}>Balance</div>
-          <div>¥{balance.toLocaleString()}</div>
-        </div>
-      </div>
+    <div className="rounded-xl border p-4 space-y-2">
+      <h3 className="text-sm font-semibold">月次残高</h3>
+      <ul className="space-y-1 text-sm">
+        {rows.map((r) => (
+          <li key={`${r.cash_account_id}-${r.month}`} className="flex justify-between">
+            <span>{r.month}</span>
+            <span>{r.balance.toLocaleString()} 円</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

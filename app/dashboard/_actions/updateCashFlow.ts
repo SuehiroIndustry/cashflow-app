@@ -1,4 +1,3 @@
-// app/dashboard/_actions/updateCashFlow.ts
 "use server";
 
 import { cookies } from "next/headers";
@@ -23,7 +22,6 @@ async function getSupabase() {
 export async function updateCashFlow(input: CashFlowUpdateInput) {
   const supabase = await getSupabase();
 
-  // ✅ update payload を安全に組み立てる
   const payload: Record<string, any> = {};
 
   if (input.date !== undefined) payload.date = input.date;
@@ -44,9 +42,7 @@ export async function updateCashFlow(input: CashFlowUpdateInput) {
     .eq("id", input.id)
     .eq("cash_account_id", input.cashAccountId);
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
   return { success: true };
 }

@@ -1,19 +1,15 @@
-// app/dashboard/_actions/getMonthlyIncomeExpense.ts
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { MonthlyIncomeExpenseRow } from "../_types";
 
 function normalizeMonthKey(month: string): string {
-  // "YYYY-MM" -> "YYYY-MM-01"
   if (/^\d{4}-\d{2}$/.test(month)) return `${month}-01`;
-  // "YYYY-MM-01" -> OK
   if (/^\d{4}-\d{2}-\d{2}$/.test(month)) return month;
-  throw new Error("Invalid month format. Use 'YYYY-MM' or 'YYYY-MM-01'.");
+  throw new Error("Invalid month format.");
 }
 
 function addMonths(yyyyMm01: string, delta: number): string {
-  // yyyyMm01: "YYYY-MM-01"
   const [y, m] = yyyyMm01.split("-").map(Number);
   const d = new Date(Date.UTC(y, m - 1, 1));
   d.setUTCMonth(d.getUTCMonth() + delta);
@@ -24,20 +20,19 @@ function addMonths(yyyyMm01: string, delta: number): string {
 
 export async function getMonthlyIncomeExpense(input: {
   cash_account_id: number;
-  month: string; // "YYYY-MM" or "YYYY-MM-01"
+  month: string;
 }): Promise<MonthlyIncomeExpenseRow> {
   const supabase = await createSupabaseServerClient();
 
   const monthKey = normalizeMonthKey(input.month);
-  const monthStart = monthKey; // inclusive
-  const nextMonthStart = addMonths(monthKey, 1); // exclusive
+  const nextMonth = addMonths(monthKey, 1);
 
   const { data, error } = await supabase
     .from("cash_flows")
     .select("section, amount, date")
     .eq("cash_account_id", input.cash_account_id)
-    .gte("date", monthStart)
-    .lt("date", nextMonthStart);
+    .gte("date", monthKey)
+    .lt("date", nextMonth);
 
   if (error) throw new Error(error.message);
 
@@ -45,18 +40,15 @@ export async function getMonthlyIncomeExpense(input: {
   let expense = 0;
 
   for (const r of data ?? []) {
-    const amt = Number((r as any).amount ?? 0) || 0;
-    const section = String((r as any).section ?? "");
-    if (section === "in") income += amt;
-    if (section === "out") expense += amt;
+    const amt = Number((r as any).amount ?? 0);
+    if ((r as any).section === "in") income += amt;
+    if ((r as any).section === "out") expense += amt;
   }
-
-  const net = income - expense;
 
   return {
     month: monthKey,
     income,
     expense,
-    net,
+    net: income - expense,
   };
 }
