@@ -51,8 +51,7 @@ export type CashShortForecastInput = {
 };
 
 /**
- * getCashFlows.ts が import している行型
- * （UI用の一覧表示に必要な最低限）
+ * getCashFlows.ts が import している行型（一覧/テーブル用）
  */
 export type CashFlowListRow = {
   id: number;
@@ -73,4 +72,38 @@ export type CashFlowListRow = {
 export type CashFlowDeleteInput = {
   id: number;
   cashAccountId?: number;
+};
+
+/**
+ * Simulation（将来推計）用
+ * getCashProjection.ts が import している型
+ */
+export type GetCashProjectionInput = {
+  cashAccountId: number; // 0 = all accounts
+  month: string; // YYYY-MM-01
+  rangeMonths: number;
+};
+
+/**
+ * 返却は「月ごとの推計ポイント配列」を想定。
+ * 実装側が多少フィールドを増やしても壊れないよう optional 多めにしてある。
+ */
+export type CashProjectionPoint = {
+  month: string; // YYYY-MM
+  income: number;
+  expense: number;
+  net: number;
+  balance: number; // 月末残高など
+};
+
+export type CashProjectionResult = {
+  cashAccountId: number;
+  startMonth: string; // YYYY-MM-01
+  rangeMonths: number;
+
+  points: CashProjectionPoint[];
+
+  // 任意の補助情報（UIで使いたくなったら）
+  shortMonth?: string | null; // YYYY-MM or null
+  message?: string;
 };
