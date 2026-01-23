@@ -114,6 +114,18 @@ export type CashFlowCreateInput = {
   sourceType?: "manual";
 };
 
+// ===== CashFlow (update) =====
+export type CashFlowUpdateInput = {
+  id: number;                 // 更新対象の cash_flows.id
+  cashAccountId: number;      // セキュリティ用（where 条件）
+
+  date?: string;              // "YYYY-MM-DD"
+  section?: "in" | "out";
+  amount?: number;
+  cashCategoryId?: number | null;
+  description?: string | null;
+};
+
 export type CashFlowDeleteInput = {
   id: number;
   cashAccountId: number;
