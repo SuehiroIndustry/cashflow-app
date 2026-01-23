@@ -1,49 +1,68 @@
 // app/dashboard/_components/EcoCharts.tsx
-import React from "react";
+"use client";
+
+import React, { useMemo } from "react";
 import type { MonthlyBalanceRow } from "../_types";
 
-type Props = {
-  rows: MonthlyBalanceRow[];
-};
+function yen(n: number) {
+  return "¥" + n.toLocaleString("ja-JP");
+}
 
-/**
- * シンプルな月次サマリー表示（チャートは後で差し替えOK）
- * 今は「型エラーを出さない・責務を守る」ことを最優先
- */
-export default function EcoCharts({ rows }: Props) {
-  if (!rows || rows.length === 0) {
-    return (
-      <div className="rounded-xl border p-4 text-sm text-muted-foreground">
-        データがありません
-      </div>
-    );
-  }
+export default function EcoCharts(props: { rows: MonthlyBalanceRow[] }) {
+  const { rows } = props;
+
+  const latest = useMemo(() => {
+    if (!rows.length) return null;
+    return rows[rows.length - 1];
+  }, [rows]);
 
   return (
-    <div className="rounded-xl border p-4 space-y-3">
-      <h3 className="text-sm font-semibold">月次サマリー</h3>
-
-      <div className="space-y-2">
-        {rows.map((r) => (
-          <div
-            key={`${r.cash_account_id}-${r.month}`}
-            className="flex items-center justify-between text-sm"
-          >
-            <span className="text-muted-foreground">
-              {r.month}
-            </span>
-
-            <span
-              className={
-                r.balance >= 0
-                  ? "font-medium text-emerald-600"
-                  : "font-medium text-red-600"
-              }
-            >
-              {r.balance.toLocaleString()} 円
-            </span>
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="border rounded p-4">
+        <div className="font-semibold mb-2">推移（サマリ）</div>
+        {latest ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="opacity-70">最新月</div>
+              <div className="font-semibold">{latest.month}</div>
+            </div>
+            <div>
+              <div className="opacity-70">収入</div>
+              <div className="font-semibold">{yen(latest.income)}</div>
+            </div>
+            <div>
+              <div className="opacity-70">支出</div>
+              <div className="font-semibold">{yen(latest.expense)}</div>
+            </div>
+            <div>
+              <div className="opacity-70">残高</div>
+              <div className="font-semibold">{yen(latest.balance)}</div>
+            </div>
           </div>
-        ))}
+        ) : (
+          <div className="text-sm opacity-60">No data</div>
+        )}
+      </div>
+
+      {/* “Charts” (simple list until you plug real charts) */}
+      <div className="border rounded p-4">
+        <div className="font-semibold mb-3">月次（一覧）</div>
+
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div key={r.month} className="flex items-center justify-between text-sm">
+              <span className="opacity-70">{r.month}</span>
+              <span className="flex gap-3">
+                <span className="tabular-nums">{yen(r.income)}</span>
+                <span className="tabular-nums opacity-70">{yen(r.expense)}</span>
+                <span className="tabular-nums font-semibold">{yen(r.balance)}</span>
+              </span>
+            </div>
+          ))}
+
+          {!rows.length && <div className="text-sm opacity-60">No rows</div>}
+        </div>
       </div>
     </div>
   );
