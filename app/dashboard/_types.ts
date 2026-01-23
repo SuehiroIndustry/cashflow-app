@@ -102,13 +102,20 @@ export type OverviewPayload = {
 export type CashFlowSection = "in" | "out";
 
 export type CashFlowCreateInput = {
-  cashAccountId: number;
-  date: string;
-  section: CashFlowSection;
-  amount: number;
-  cashCategoryId: number | null;
-  description?: string | null;
+  // ✅ 正式（camelCase）
+  cashAccountId?: number;
+  cashCategoryId?: number | null;
   sourceType?: "manual";
+
+  // ✅ 互換（snake_case）※ transactions 側の古い実装救済用
+  cash_account_id?: number;
+  cash_category_id?: number | null;
+  source_type?: "manual";
+
+  date: string; // "YYYY-MM-DD"
+  section: CashFlowSection; // "in" | "out"
+  amount: number;
+  description?: string | null;
 };
 
 export type CashFlowUpdateInput = {
