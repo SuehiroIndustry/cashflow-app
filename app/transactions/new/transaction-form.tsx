@@ -2,9 +2,8 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
-
-// ✅ transactions 側の action を使う
 import { createCashFlow } from "@/app/transactions/_actions/createCashFlow";
 
 type Option = { id: number; name: string };
@@ -20,6 +19,7 @@ export default function TransactionForm({
   categories,
   initialCashAccountId,
 }: Props) {
+  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const [cashAccountId, setCashAccountId] = useState<number | null>(
@@ -47,13 +47,11 @@ export default function TransactionForm({
     e.preventDefault();
     setMessage("");
 
-    // 口座
-    if (cashAccountId == null) {
-      setMessage("cashAccountId が未選択です");
+    if (!cashAccountId) {
+      setMessage("口座が未選択です");
       return;
     }
 
-    // 金額
     const amountNum = Number(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       setMessage("金額が不正です");
@@ -61,15 +59,15 @@ export default function TransactionForm({
     }
 
     // manual の場合はカテゴリ必須（DB制約）
-    if (cashCategoryId == null) {
-      setMessage("cashCategoryId が未選択です（manualは必須）");
+    if (!cashCategoryId) {
+      setMessage("カテゴリが未選択です（manualは必須）");
       return;
     }
 
     try {
       setSubmitting(true);
 
-      // ✅ _types.ts の CashFlowCreateInput に合わせて camelCase で渡す
+      // ✅ camelCase で統一（CashFlowCreateInput に合わせる）
       await createCashFlow({
         cashAccountId,
         date,
@@ -82,7 +80,14 @@ export default function TransactionForm({
 
       setMessage("登録しました");
 
-      // クライアント側キャッシュ軽く揺らす（任意）
+      // ✅ フォームを気持ちよく初期化
+      setAmount("1000");
+      setDescription("");
+
+      // ✅ サーバーコンポーネント/一覧/残高などを再取得
+      router.refresh();
+
+      // （任意）クライアント側キャッシュを軽く揺らす
       await supabase.auth.getSession();
     } catch (err: any) {
       console.error(err);
