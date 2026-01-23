@@ -1,66 +1,42 @@
+// app/transactions/_actions/createCashFlow.ts
 "use server";
 
 import { createClient } from "@/utils/supabase/server";
-import { revalidatePath } from "next/cache";
 
 export type CashFlowCreateInput = {
   cashAccountId: number;
   date: string; // YYYY-MM-DD
   section: "in" | "out";
   amount: number;
-  cashCategoryId: number; // manual は必須
-  description?: string | null;
-  sourceType?: "manual"; // 今は manual 固定でOK
+  cashCategoryId: number; // manualの場合必須
+  description: string | null;
+  sourceType: "manual";
 };
 
-function isYmd(s: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
-export async function createCashFlow(input: CashFlowCreateInput) {
-  const {
-    cashAccountId,
-    date,
-    section,
-    amount,
-    cashCategoryId,
-    description = null,
-    sourceType = "manual",
-  } = input;
-
-  // validate（最低限）
-  if (!Number.isFinite(cashAccountId) || cashAccountId <= 0) {
-    throw new Error("cashAccountId が不正です");
-  }
-  if (!isYmd(date)) {
-    throw new Error("date は YYYY-MM-DD で指定してください");
-  }
-  if (section !== "in" && section !== "out") {
-    throw new Error("section が不正です");
-  }
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("amount が不正です");
-  }
-  if (!Number.isFinite(cashCategoryId) || cashCategoryId <= 0) {
-    throw new Error("cashCategoryId が未選択です（manualは必須）");
-  }
-
+export async function createCashFlow(input: CashFlowCreateInput): Promise<{ id: number }> {
   const supabase = await createClient();
 
-  const { error } = await supabase.from("cash_flows").insert({
-    cash_account_id: cashAccountId,
-    date,
-    section,
-    amount,
-    cash_category_id: cashCategoryId,
-    description,
-    source_type: sourceType,
-  });
+  // 念のためガード（DBにもCHECKあるけど先に落とす）
+  if (input.sourceType === "manual" && !input.cashCategoryId) {
+    throw new Error("manual の場合 cashCategoryId は必須です");
+  }
 
-  if (error) throw new Error(error.message);
+  const { data, error } = await supabase
+    .from("cash_flows")
+    .insert({
+      cash_account_id: input.cashAccountId,
+      date: input.date,
+      section: input.section,
+      amount: input.amount,
+      cash_category_id: input.cashCategoryId,
+      description: input.description,
+      source_type: input.sourceType,
+    })
+    .select("id")
+    .single();
 
-  // 反映
-  revalidatePath("/transactions");
-  revalidatePath("/dashboard");
-  revalidatePath("/simulation");
+  if (error) throw error;
+  if (!data?.id) throw new Error("insert succeeded but id is missing");
+
+  return { id: data.id as number };
 }

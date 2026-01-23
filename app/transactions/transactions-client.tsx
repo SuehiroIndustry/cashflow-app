@@ -3,7 +3,7 @@
 
 import React, { useMemo, useState } from "react";
 
-import { createCashFlow } from "../dashboard/_actions/createCashFlow";
+import { createCashFlow } from "./_actions/createCashFlow";
 import type { CashCategoryOption } from "./_actions/getCashCategories";
 import type { RecentCashFlowRow } from "./_actions/getRecentCashFlows";
 
@@ -17,7 +17,6 @@ type Props = {
 };
 
 function fmtYMD(s: string) {
-  // "YYYY-MM-DD" -> "YYYY/MM/DD"
   return s?.replaceAll("-", "/") ?? "";
 }
 
@@ -77,22 +76,22 @@ export default function TransactionsClient(props: Props) {
     try {
       setSubmitting(true);
 
-      await createCashFlow({
+      const res = await createCashFlow({
         cashAccountId,
         date,
         section,
         amount: amountNum,
         cashCategoryId,
         description: description.trim() ? description.trim() : null,
-        sourceType: "manual" as const,
+        sourceType: "manual",
       });
 
-      // 即時反映（最近一覧の先頭に追加）
       const catName = categoryNameById.get(cashCategoryId) ?? null;
 
+      // ✅ DBのidで先頭に追加
       setRows((prev) => [
         {
-          id: Date.now(), // 仮ID（本気で厳密にするなら createCashFlow がID返すようにする）
+          id: res.id,
           date,
           section,
           amount: amountNum,
@@ -125,7 +124,6 @@ export default function TransactionsClient(props: Props) {
       <div className="border rounded-xl p-4 bg-black/30">
         <form onSubmit={onSubmit} className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-            {/* 口座 */}
             <div className="md:col-span-3">
               <div className="text-xs opacity-70 mb-1">口座</div>
               <select
@@ -142,7 +140,6 @@ export default function TransactionsClient(props: Props) {
               </select>
             </div>
 
-            {/* 日付 */}
             <div className="md:col-span-3">
               <div className="text-xs opacity-70 mb-1">日付</div>
               <input
@@ -153,7 +150,6 @@ export default function TransactionsClient(props: Props) {
               />
             </div>
 
-            {/* 区分 */}
             <div className="md:col-span-2">
               <div className="text-xs opacity-70 mb-1">区分</div>
               <div className="flex gap-2">
@@ -161,7 +157,9 @@ export default function TransactionsClient(props: Props) {
                   type="button"
                   onClick={() => setSection("in")}
                   className={`border rounded px-3 py-2 text-sm ${
-                    section === "in" ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-200" : "opacity-80"
+                    section === "in"
+                      ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-200"
+                      : "opacity-80"
                   }`}
                 >
                   収入
@@ -170,7 +168,9 @@ export default function TransactionsClient(props: Props) {
                   type="button"
                   onClick={() => setSection("out")}
                   className={`border rounded px-3 py-2 text-sm ${
-                    section === "out" ? "bg-red-500/10 border-red-500/50 text-red-200" : "opacity-80"
+                    section === "out"
+                      ? "bg-red-500/10 border-red-500/50 text-red-200"
+                      : "opacity-80"
                   }`}
                 >
                   支出
@@ -178,7 +178,6 @@ export default function TransactionsClient(props: Props) {
               </div>
             </div>
 
-            {/* 金額 */}
             <div className="md:col-span-2">
               <div className="text-xs opacity-70 mb-1">金額</div>
               <div className="flex items-center gap-2">
@@ -192,19 +191,13 @@ export default function TransactionsClient(props: Props) {
               </div>
             </div>
 
-            {/* 登録 */}
             <div className="md:col-span-2">
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full border rounded px-3 py-2"
-              >
+              <button type="submit" disabled={submitting} className="w-full border rounded px-3 py-2">
                 {submitting ? "登録中..." : "登録"}
               </button>
             </div>
           </div>
 
-          {/* カテゴリ + メモ */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
             <div className="md:col-span-4">
               <div className="text-xs opacity-70 mb-1">カテゴリ（manualは必須）</div>
@@ -240,7 +233,7 @@ export default function TransactionsClient(props: Props) {
       {/* 直近一覧 */}
       <div className="border rounded-xl p-4 bg-black/30">
         <div className="font-semibold mb-1">直近の取引</div>
-        <div className="text-xs opacity-60 mb-3">最新30件（口座フィルタは後で付ける）</div>
+        <div className="text-xs opacity-60 mb-3">最新30件</div>
 
         <div className="overflow-auto">
           <table className="min-w-[860px] w-full text-sm">
@@ -248,7 +241,6 @@ export default function TransactionsClient(props: Props) {
               <tr className="text-left border-b">
                 <th className="py-2 w-[140px]">日付</th>
                 <th className="py-2 w-[90px]">区分</th>
-                {/* ✅ ここが分離ポイント */}
                 <th className="py-2 w-[160px] text-right">金額</th>
                 <th className="py-2 w-[280px]">カテゴリ</th>
                 <th className="py-2">メモ</th>
@@ -269,9 +261,7 @@ export default function TransactionsClient(props: Props) {
                         {isIn ? "収入" : "支出"}
                       </span>
                     </td>
-                    <td className="py-2 text-right font-semibold">
-                      ¥{Number(r.amount).toLocaleString()}
-                    </td>
+                    <td className="py-2 text-right font-semibold">¥{Number(r.amount).toLocaleString()}</td>
                     <td className="py-2">
                       {r.cash_category_name ??
                         (r.cash_category_id ? categoryNameById.get(r.cash_category_id) : null) ??
