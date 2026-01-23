@@ -27,25 +27,24 @@ function isYmd(s: string): boolean {
 export async function createCashFlow(input: CashFlowCreateInput) {
   const supabase = await getSupabase();
 
-  // camel / snake 互換取得
+  // camel / snake 両対応
   const rawAccountId = input.cash_account_id ?? input.cashAccountId;
   const rawCategoryId = input.cash_category_id ?? input.cashCategoryId ?? null;
   const source_type = input.source_type ?? input.sourceType ?? "manual";
 
   const { date, section, amount, description } = input;
 
-  // ✅ ① 存在チェック（ここで undefined を排除）
-  if (rawAccountId == null) {
+  // ✅ TSが確実に納得する型ガード
+  if (typeof rawAccountId !== "number") {
     throw new Error("cash_account_id が指定されていません");
   }
-
-  // ✅ ② number として確定させる
-  const cash_account_id: number = rawAccountId;
-
-  // validate（最低限）
-  if (!Number.isFinite(cash_account_id) || cash_account_id <= 0) {
+  if (!Number.isFinite(rawAccountId) || rawAccountId <= 0) {
     throw new Error("cash_account_id が不正です");
   }
+
+  // ここで number に完全確定
+  const cash_account_id: number = rawAccountId;
+
   if (!isYmd(date)) {
     throw new Error("date は 'YYYY-MM-DD' 形式で指定してください");
   }
