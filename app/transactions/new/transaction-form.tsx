@@ -3,7 +3,9 @@
 
 import React, { useMemo, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { createCashFlow } from "@/app/dashboard/_actions/createCashFlow";
+
+// ✅ transactions 側の action を使う
+import { createCashFlow } from "@/app/transactions/_actions/createCashFlow";
 
 type Option = { id: number; name: string };
 
@@ -45,8 +47,9 @@ export default function TransactionForm({
     e.preventDefault();
     setMessage("");
 
-    if (!cashAccountId) {
-      setMessage("cash_account_id が未選択です");
+    // 口座
+    if (cashAccountId == null) {
+      setMessage("cashAccountId が未選択です");
       return;
     }
 
@@ -57,27 +60,29 @@ export default function TransactionForm({
       return;
     }
 
-    // manual の場合はカテゴリ必須（あなたのDB制約）
-    if (!cashCategoryId) {
-      setMessage("cash_category_id が未選択です（manualは必須）");
+    // manual の場合はカテゴリ必須（DB制約）
+    if (cashCategoryId == null) {
+      setMessage("cashCategoryId が未選択です（manualは必須）");
       return;
     }
 
     try {
       setSubmitting(true);
 
+      // ✅ _types.ts の CashFlowCreateInput に合わせて camelCase で渡す
       await createCashFlow({
-        cash_account_id: cashAccountId,
+        cashAccountId,
         date,
         section,
         amount: amountNum,
-        cash_category_id: cashCategoryId,
+        cashCategoryId,
         description: description.trim() ? description.trim() : null,
+        sourceType: "manual",
       });
 
       setMessage("登録しました");
 
-      // ついでにクライアント側のキャッシュを軽く揺らす（任意）
+      // クライアント側キャッシュ軽く揺らす（任意）
       await supabase.auth.getSession();
     } catch (err: any) {
       console.error(err);
