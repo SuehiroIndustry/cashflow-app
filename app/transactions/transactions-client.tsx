@@ -1,42 +1,42 @@
 // app/transactions/transactions-client.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { CashFlowCreateInput, Option, TransactionRow } from "./_types";
+import { getAccounts } from "../dashboard/_actions/getAccounts";
+import { getCashCategories } from "./_actions/getCashCategories";
 import { createCashFlow } from "./_actions/createCashFlow";
-import { createClient } from "@/utils/supabase/client";
+import { getRecentCashFlows } from "./_actions/getRecentCashFlows";
 
-// もし「直近の取引」を server action で取っているなら、それを使う想定。
-// 無い場合は一旦 props を空配列で渡しておけばOK。
-// import { getRecentTransactions } from "./_actions/getRecentTransactions";
-
-type Props = {
-  accounts: Option[];
-  categories: Option[];
-  initialCashAccountId: number | null;
-
-  // page.tsx 側で取って渡せるなら渡す（推奨）
-  initialRecent?: TransactionRow[];
-};
+import type {
+  Option,
+  CashFlowCreateInput,
+  RecentCashFlowRow,
+  CashFlowSection,
+} from "./_types";
 
 function yen(n: number) {
-  return `¥${n.toLocaleString("ja-JP")}`;
+  return `¥${Math.trunc(n).toLocaleString()}`;
 }
 
-export default function TransactionsClient({
-  accounts,
-  categories,
-  initialCashAccountId,
-  initialRecent = [],
-}: Props) {
-  const supabase = useMemo(() => createClient(), []);
+function SectionBadge({ section }: { section: CashFlowSection }) {
+  const cls =
+    section === "in"
+      ? "border-emerald-500/60 text-emerald-200 bg-emerald-500/10"
+      : "border-red-500/60 text-red-200 bg-red-500/10";
 
-  const [cashAccountId, setCashAccountId] = useState<number | null>(
-    initialCashAccountId ?? (accounts[0]?.id ?? null)
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 text-xs border rounded ${cls}`}>
+      {section === "in" ? "収入" : "支出"}
+    </span>
   );
+}
 
-  const [section, setSection] = useState<"in" | "out">("in");
+export default function TransactionsClient() {
+  const [accounts, setAccounts] = useState<Option[]>([]);
+  const [categories, setCategories] = useState<Option[]>([]);
+
+  const [cashAccountId, setCashAccountId] = useState<number | null>(null);
   const [date, setDate] = useState<string>(() => {
     const d = new Date();
     const y = d.getFullYear();
@@ -45,26 +45,70 @@ export default function TransactionsClient({
     return `${y}-${m}-${day}`;
   });
 
-  const [amountText, setAmountText] = useState<string>("1000");
-  const [cashCategoryId, setCashCategoryId] = useState<number | null>(
-    categories[0]?.id ?? null
-  );
+  const [section, setSection] = useState<CashFlowSection>("in");
+  const [amount, setAmount] = useState<string>("1000");
+  const [cashCategoryId, setCashCategoryId] = useState<number | null>(null);
   const [description, setDescription] = useState<string>("");
 
+  const [rows, setRows] = useState<RecentCashFlowRow[]>([]);
+  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string>("");
 
-  const [recent, setRecent] = useState<TransactionRow[]>(initialRecent);
+  const selectedAccountName = useMemo(() => {
+    if (!cashAccountId) return "";
+    return accounts.find((a) => a.id === cashAccountId)?.name ?? "";
+  }, [accounts, cashAccountId]);
 
-  async function reloadRecent() {
-    // ここはあなたの実装に合わせて差し替え
-    // 例：server action があるなら：
-    // const rows = await getRecentTransactions({ cashAccountId, limit: 30 })
-    // setRecent(rows)
+  const loadBase = useCallback(async () => {
+    setLoading(true);
+    setMessage("");
 
-    // いまは最低限：supabase のセッション更新でキャッシュ揺らし（任意）
-    await supabase.auth.getSession();
-  }
+    try {
+      const acc = await getAccounts();
+      setAccounts(acc.map((a: any) => ({ id: a.id, name: a.name })));
+
+      const nextAccountId =
+        cashAccountId != null ? cashAccountId : acc.length ? acc[0].id : null;
+
+      setCashAccountId(nextAccountId);
+
+      const cats = await getCashCategories();
+      setCategories(cats);
+
+      setCashCategoryId((prev) => {
+        if (prev != null) return prev;
+        return cats.length ? cats[0].id : null;
+      });
+
+      if (nextAccountId != null) {
+        const recent = await getRecentCashFlows({ cashAccountId: nextAccountId, limit: 30 });
+        setRows(recent);
+      } else {
+        setRows([]);
+      }
+    } catch (e: any) {
+      setMessage(e?.message ?? String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [cashAccountId]);
+
+  const reloadRecent = useCallback(async () => {
+    if (!cashAccountId) return;
+    const recent = await getRecentCashFlows({ cashAccountId, limit: 30 });
+    setRows(recent);
+  }, [cashAccountId]);
+
+  useEffect(() => {
+    void loadBase();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!cashAccountId) return;
+    void reloadRecent();
+  }, [cashAccountId, reloadRecent]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -75,14 +119,14 @@ export default function TransactionsClient({
       return;
     }
 
-    const amountNum = Number(amountText);
+    const amountNum = Number(amount);
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       setMessage("金額が不正です");
       return;
     }
 
     if (!cashCategoryId) {
-      setMessage("カテゴリが未選択です（manual は必須）");
+      setMessage("カテゴリが未選択です（manualは必須）");
       return;
     }
 
@@ -93,7 +137,7 @@ export default function TransactionsClient({
       amount: amountNum,
       cashCategoryId,
       description: description.trim() ? description.trim() : null,
-      sourceType: "manual",
+      sourceType: "manual" as const,
     };
 
     try {
@@ -101,15 +145,12 @@ export default function TransactionsClient({
       await createCashFlow(payload);
 
       setMessage("登録しました");
-
-      // UX：入力の一部だけ残す
-      setAmountText("1000");
       setDescription("");
+      setAmount("1000");
 
       await reloadRecent();
-    } catch (err: any) {
-      console.error(err);
-      setMessage(err?.message ?? "登録に失敗しました");
+    } catch (e: any) {
+      setMessage(e?.message ?? String(e));
     } finally {
       setSubmitting(false);
     }
@@ -118,25 +159,20 @@ export default function TransactionsClient({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">Transactions</h1>
-        <p className="text-sm opacity-70 mt-1">
-          実務用：最短入力 → 即反映 → 直近が見える
-        </p>
+        <div className="text-xl font-semibold">Transactions</div>
+        <div className="text-sm opacity-70">実務用：最短入力 → 即反映 → 直近が見える</div>
       </div>
 
-      {/* 入力カード */}
-      <div className="border rounded-xl p-5 bg-black/20">
+      <div className="border rounded p-4 bg-black/20">
         <form onSubmit={onSubmit} className="space-y-4">
-          {/* 1行目：口座 + 日付 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex items-center gap-3">
-              <label className="w-16 text-sm opacity-80">口座</label>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm opacity-80 w-10">口座</label>
               <select
-                className="border rounded px-3 py-2 bg-transparent w-full"
+                className="border rounded px-2 py-1 bg-transparent min-w-[220px]"
                 value={cashAccountId ?? ""}
                 onChange={(e) => setCashAccountId(Number(e.target.value) || null)}
               >
-                <option value="">選択してください</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} / id:{a.id}
@@ -145,87 +181,74 @@ export default function TransactionsClient({
               </select>
             </div>
 
-            <div className="flex items-center gap-3">
-              <label className="w-16 text-sm opacity-80">日付</label>
+            <div className="flex items-center gap-2">
+              <label className="text-sm opacity-80 w-10">日付</label>
               <input
                 type="date"
-                className="border rounded px-3 py-2 bg-transparent w-full"
+                className="border rounded px-2 py-1 bg-transparent"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
           </div>
 
-          {/* 2行目：区分 + 金額 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex items-center gap-3">
-              <label className="w-16 text-sm opacity-80">区分</label>
-              <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm opacity-80 w-10">区分</label>
+              <div className="inline-flex border rounded overflow-hidden">
                 <button
                   type="button"
+                  className={`px-3 py-1 text-sm ${section === "in" ? "bg-white/10" : "bg-transparent"}`}
                   onClick={() => setSection("in")}
-                  className={
-                    section === "in"
-                      ? "border rounded px-3 py-2 text-sm bg-emerald-500/10 border-emerald-500/40 text-emerald-200"
-                      : "border rounded px-3 py-2 text-sm opacity-80"
-                  }
                 >
                   収入
                 </button>
                 <button
                   type="button"
+                  className={`px-3 py-1 text-sm ${section === "out" ? "bg-white/10" : "bg-transparent"}`}
                   onClick={() => setSection("out")}
-                  className={
-                    section === "out"
-                      ? "border rounded px-3 py-2 text-sm bg-red-500/10 border-red-500/40 text-red-200"
-                      : "border rounded px-3 py-2 text-sm opacity-80"
-                  }
                 >
                   支出
                 </button>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <label className="w-16 text-sm opacity-80">金額</label>
-              <div className="flex items-center gap-2 w-full">
+            <div className="flex items-center gap-2">
+              <label className="text-sm opacity-80 w-10">金額</label>
+              <div className="flex items-center gap-2">
                 <input
-                  className="border rounded px-3 py-2 bg-transparent w-full text-right"
-                  value={amountText}
-                  onChange={(e) => setAmountText(e.target.value)}
+                  className="border rounded px-2 py-1 bg-transparent text-right w-[140px]"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
                   inputMode="numeric"
-                  placeholder="1000"
                 />
-                <span className="text-sm opacity-70 w-10">円</span>
+                <span className="text-sm opacity-70">円</span>
               </div>
             </div>
           </div>
 
-          {/* 3行目：カテゴリ + メモ */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="flex items-center gap-3">
-              <label className="w-16 text-sm opacity-80">カテゴリ</label>
-              <div className="flex items-center gap-2 w-full">
-                <select
-                  className="border rounded px-3 py-2 bg-transparent w-full"
-                  value={cashCategoryId ?? ""}
-                  onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
-                >
-                  <option value="">選択してください</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} / id:{c.id}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs opacity-60 whitespace-nowrap">manual は必須</span>
-              </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm opacity-80 w-16">カテゴリ</label>
+              <select
+                className="border rounded px-2 py-1 bg-transparent min-w-[220px]"
+                value={cashCategoryId ?? ""}
+                onChange={(e) => setCashCategoryId(Number(e.target.value) || null)}
+              >
+                <option value="">選択してください</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} / id:{c.id}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs opacity-60">manualは必須</span>
             </div>
 
-            <div className="flex items-center gap-3">
-              <label className="w-16 text-sm opacity-80">メモ</label>
+            <div className="flex items-center gap-2 flex-1 min-w-[320px]">
+              <label className="text-sm opacity-80 w-10">メモ</label>
               <input
-                className="border rounded px-3 py-2 bg-transparent w-full"
+                className="border rounded px-2 py-1 bg-transparent w-full"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="任意"
@@ -233,93 +256,58 @@ export default function TransactionsClient({
             </div>
           </div>
 
-          {/* 送信 */}
           <div className="flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="border rounded px-4 py-2 text-sm"
-            >
+            <button type="submit" disabled={submitting} className="border rounded px-3 py-1">
               {submitting ? "登録中..." : "登録"}
             </button>
 
-            {message ? (
-              <span className="text-sm opacity-90">{message}</span>
-            ) : (
-              <span className="text-sm opacity-50">
-                登録すると直近一覧に反映（想定）
+            <button type="button" className="border rounded px-3 py-1 opacity-80" onClick={() => void loadBase()} disabled={loading}>
+              {loading ? "loading..." : "refresh"}
+            </button>
+
+            {message ? <span className="text-sm">{message}</span> : null}
+            {selectedAccountName ? (
+              <span className="text-xs opacity-60">
+                selected: {selectedAccountName} / id:{cashAccountId}
               </span>
-            )}
+            ) : null}
           </div>
         </form>
       </div>
 
-      {/* 直近の取引 */}
-      <div className="border rounded-xl p-5 bg-black/20">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="font-semibold">直近の取引</div>
-            <div className="text-xs opacity-60 mt-1">最新30件（口座フィルタは次で付ける）</div>
-          </div>
-
-          <button
-            className="border rounded px-3 py-1 text-sm"
-            onClick={() => void reloadRecent()}
-          >
-            refresh
-          </button>
-        </div>
+      <div className="border rounded p-4 bg-black/20">
+        <div className="font-semibold mb-1">直近の取引</div>
+        <div className="text-xs opacity-60 mb-3">最新30件（口座フィルタはここで効く）</div>
 
         <div className="overflow-auto">
-          <table className="min-w-[900px] w-full text-sm">
+          <table className="min-w-[860px] w-full text-sm">
             <thead className="opacity-70">
               <tr className="text-left border-b">
-                <th className="py-2 w-[130px]">日付</th>
+                <th className="py-2 w-[140px]">日付</th>
                 <th className="py-2 w-[90px]">区分</th>
-
-                {/* ✅ 要望：金額とカテゴリを分ける */}
-                <th className="py-2 w-[150px] text-right">金額</th>
+                <th className="py-2 w-[160px] text-right">金額</th>
                 <th className="py-2 w-[260px]">カテゴリ</th>
-
                 <th className="py-2">メモ</th>
               </tr>
             </thead>
 
             <tbody>
-              {recent.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.id} className="border-b last:border-b-0">
                   <td className="py-2">{r.date}</td>
-
                   <td className="py-2">
-                    <span
-                      className={
-                        r.section === "in"
-                          ? "text-xs border rounded px-2 py-0.5 border-emerald-500/50 text-emerald-200 bg-emerald-500/10"
-                          : "text-xs border rounded px-2 py-0.5 border-red-500/50 text-red-200 bg-red-500/10"
-                      }
-                    >
-                      {r.section === "in" ? "収入" : "支出"}
-                    </span>
+                    <SectionBadge section={r.section} />
                   </td>
-
-                  <td className="py-2 text-right font-medium">
-                    {yen(r.amount)}
-                  </td>
-
-                  <td className="py-2">
-                    {r.categoryName ?? <span className="opacity-50">（未設定）</span>}
-                  </td>
-
-                  <td className="py-2">
-                    {r.description ?? <span className="opacity-50">-</span>}
-                  </td>
+                  <td className="py-2 text-right font-semibold">{yen(r.amount)}</td>
+                  <td className="py-2">{r.categoryName}</td>
+                  <td className="py-2">{r.description ?? ""}</td>
                 </tr>
               ))}
 
-              {!recent.length && (
+              {!rows.length && (
                 <tr>
                   <td className="py-3 opacity-60" colSpan={5}>
-                    直近データがありません（または page.tsx から渡していません）
+                    No rows
                   </td>
                 </tr>
               )}

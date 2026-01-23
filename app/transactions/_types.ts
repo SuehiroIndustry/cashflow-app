@@ -1,23 +1,24 @@
 // app/transactions/_types.ts
-
 export type Option = { id: number; name: string };
+
+export type CashFlowSection = "in" | "out";
+export type CashFlowSourceType = "manual";
 
 export type CashFlowCreateInput = {
   cashAccountId: number;
   date: string; // YYYY-MM-DD
-  section: "in" | "out";
+  section: CashFlowSection;
   amount: number;
-  cashCategoryId: number; // manual は必須
-  description?: string | null;
-  sourceType?: "manual"; // 今は manual 固定運用
+  cashCategoryId: number;
+  description: string | null;
+  sourceType?: CashFlowSourceType; // default "manual"
 };
 
-export type TransactionRow = {
-  id: string;
+export type RecentCashFlowRow = {
+  id: number;
   date: string; // YYYY-MM-DD
-  section: "in" | "out";
+  section: CashFlowSection;
   amount: number;
-  categoryName: string | null;
+  categoryName: string; // ←ここが分離ポイント
   description: string | null;
- 설명?: never; // 変なキー混入防止（任意）
 };
