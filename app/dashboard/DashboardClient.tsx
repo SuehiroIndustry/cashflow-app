@@ -4,16 +4,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import OverviewCard from "./_components/OverviewCard";
-import EcoCharts from "./_components/EcoCharts";
 
 import { getAccounts } from "./_actions/getAccounts";
-import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalances";
 import { getCashShortForecast } from "./_actions/getCashShortForecast";
 import { getOverview } from "./_actions/getOverview";
 
 import type {
   CashAccount,
-  MonthlyBalanceRow,
   CashShortForecast,
   CashShortForecastInput,
   OverviewPayload,
@@ -57,27 +54,6 @@ function toMonthStartISO(input: string): string {
   return `${y}-${m}-01`;
 }
 
-// "YYYY-MM-01" -> "YYYY年MM月"
-function toJpMonthLabel(yyyyMm01: string): string {
-  const m = (yyyyMm01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
-  if (!m) return yyyyMm01;
-  return `${m[1]}年${m[2]}月`;
-}
-
-// month差（from -> to）。同月なら0。toが過去ならマイナス。
-function diffMonths(fromYYYYMM01: string, toYYYYMM01: string): number {
-  const fm = (fromYYYYMM01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
-  const tm = (toYYYYMM01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
-  if (!fm || !tm) return 0;
-
-  const fy = Number(fm[1]);
-  const fmo = Number(fm[2]);
-  const ty = Number(tm[1]);
-  const tmo = Number(tm[2]);
-
-  return (ty - fy) * 12 + (tmo - fmo);
-}
-
 function ForecastCard(props: { forecast: CashShortForecast; currentBalance: number }) {
   const { forecast, currentBalance } = props;
 
@@ -88,33 +64,12 @@ function ForecastCard(props: { forecast: CashShortForecast; currentBalance: numb
         ? { label: "注意", cls: "border-yellow-500/60 text-yellow-200" }
         : { label: "安全", cls: "border-emerald-500/60 text-emerald-200" };
 
-  const monthsToShort = forecast.shortDate
-    ? diffMonths(forecast.month, forecast.shortDate)
-    : null;
-
-  const headline = forecast.shortDate
-    ? `ショートまで：あと ${Math.max(0, monthsToShort ?? 0)} ヶ月（${toJpMonthLabel(
-        forecast.shortDate
-      )}）`
-    : `予測期間内はショートなし（${forecast.rangeMonths}ヶ月）`;
-
-  const avgNetNote =
-    forecast.avgNet < 0
-      ? `毎月 ¥${Math.abs(forecast.avgNet).toLocaleString()} ずつ減っています`
-      : forecast.avgNet > 0
-        ? `毎月 ¥${forecast.avgNet.toLocaleString()} ずつ増えています`
-        : `増減なし（±0）`;
-
   return (
     <div className="border rounded p-4">
       <div className="flex items-center gap-3 mb-2">
         <div className="font-semibold">資金ショート予測</div>
         <div className={`text-xs border rounded px-2 py-0.5 ${badge.cls}`}>{badge.label}</div>
       </div>
-
-      {/* ★ここが主役：期限が一発で分かる */}
-      <div className="text-sm font-semibold mb-1">{headline}</div>
-      <div className="text-xs opacity-70 mb-3">{avgNetNote}</div>
 
       <div className="text-sm opacity-80 mb-3">{forecast.message}</div>
 
@@ -138,11 +93,8 @@ function ForecastCard(props: { forecast: CashShortForecast; currentBalance: numb
       </div>
 
       <div className="mt-3 text-xs opacity-60">
-        予測対象: {toJpMonthLabel(forecast.month)} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測
-        {forecast.rangeMonths}ヶ月
-        {forecast.shortDate
-          ? ` / ショート見込み: ${toJpMonthLabel(forecast.shortDate)}`
-          : " / ショート見込み: なし"}
+        予測対象: {forecast.month} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測{forecast.rangeMonths}ヶ月
+        {forecast.shortDate ? ` / ショート見込み: ${forecast.shortDate}` : " / ショート見込み: なし"}
       </div>
     </div>
   );
@@ -155,7 +107,6 @@ export default function DashboardClient() {
   const [monthText, setMonthText] = useState<string>("2026年01月");
   const [rangeMonths, setRangeMonths] = useState<number>(12);
 
-  const [monthRows, setMonthRows] = useState<MonthlyBalanceRow[]>([]);
   const [forecast, setForecast] = useState<CashShortForecast | null>(null);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
 
@@ -185,24 +136,12 @@ export default function DashboardClient() {
             : null;
 
       if (nextAccountId == null) {
-        setMonthRows([]);
         setForecast(null);
         setOverview(null);
         return;
       }
 
-      if (selectedAccountId == null) {
-        setSelectedAccountId(nextAccountId);
-      }
-
-      const rows = await getMonthlyCashBalances({
-        cashAccountId: nextAccountId,
-        month: monthISO,
-        rangeMonths,
-      });
-
-      const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
-      setMonthRows(asc);
+      if (selectedAccountId == null) setSelectedAccountId(nextAccountId);
 
       const input: CashShortForecastInput = {
         cashAccountId: nextAccountId,
@@ -218,6 +157,8 @@ export default function DashboardClient() {
       setOverview(ov);
     } catch (e: any) {
       setLoadError(e?.message ?? String(e));
+      setForecast(null);
+      setOverview(null);
     } finally {
       setLoading(false);
     }
@@ -227,19 +168,9 @@ export default function DashboardClient() {
     void load();
   }, [load]);
 
-  const monthSummary = useMemo(() => {
-    if (!monthRows.length) return null;
-    const last = monthRows[monthRows.length - 1];
-    return {
-      income: last.income,
-      expense: last.expense,
-      balance: last.balance,
-    };
-  }, [monthRows]);
-
   return (
     <div className="space-y-6">
-      {/* Controls */}
+      {/* Controls（最低限残す） */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
           <label className="text-sm opacity-80">Account</label>
@@ -286,83 +217,19 @@ export default function DashboardClient() {
         {loadError && <div className="text-sm text-red-300">{loadError}</div>}
       </div>
 
-      {/* Forecast card */}
+      {/* ① Forecast（危険信号） */}
       {forecast ? (
         <ForecastCard forecast={forecast} currentBalance={selectedAccount?.current_balance ?? 0} />
       ) : (
         <div className="text-sm opacity-70">No forecast</div>
       )}
 
-      {/* Overview */}
+      {/* ② Overview（現在値） */}
       {overview ? (
         <OverviewCard payload={overview} />
       ) : (
         <div className="text-sm opacity-60">Overview not available</div>
       )}
-
-      {/* Month summary */}
-      <div className="border rounded p-4">
-        <div className="font-semibold mb-2">月次サマリ</div>
-        {monthSummary ? (
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            <div>
-              <div className="opacity-70">Income</div>
-              <div className="font-semibold">¥{monthSummary.income.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="opacity-70">Expense</div>
-              <div className="font-semibold">¥{monthSummary.expense.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="opacity-70">Balance</div>
-              <div className="font-semibold">¥{monthSummary.balance.toLocaleString()}</div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm opacity-60">No data</div>
-        )}
-      </div>
-
-      {/* Charts + table */}
-      <EcoCharts rows={monthRows} />
-
-      <div className="border rounded p-4">
-        <div className="font-semibold mb-3">last {Math.min(rangeMonths, monthRows.length)} months</div>
-
-        <div className="overflow-auto">
-          <table className="min-w-[720px] w-full text-sm">
-            <thead className="opacity-70">
-              <tr className="text-left border-b">
-                <th className="py-2">Month</th>
-                <th className="py-2">Income</th>
-                <th className="py-2">Expense</th>
-                <th className="py-2">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthRows.map((r: MonthlyBalanceRow) => (
-                <tr key={r.month} className="border-b last:border-b-0">
-                  <td className="py-2">{r.month}</td>
-                  <td className="py-2">¥{r.income.toLocaleString()}</td>
-                  <td className="py-2">¥{r.expense.toLocaleString()}</td>
-                  <td className="py-2">¥{r.balance.toLocaleString()}</td>
-                </tr>
-              ))}
-              {!monthRows.length && (
-                <tr>
-                  <td className="py-2 opacity-60" colSpan={4}>
-                    No rows
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="text-xs opacity-60 mt-3">
-          selectedAccount: {selectedAccount ? selectedAccount.name : "none"} / month: {monthISO}
-        </div>
-      </div>
     </div>
   );
 }
