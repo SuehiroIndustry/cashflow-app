@@ -11,6 +11,12 @@ export type CashCategory = {
   name: string;
 };
 
+export type MonthlyIncomeExpenseRow = {
+  month: string; // "YYYY-MM" or "YYYY-MM-01"
+  income: number;
+  expense: number;
+};
+
 export type MonthlyBalanceRow = {
   month: string; // YYYY-MM
   income: number;
@@ -114,18 +120,11 @@ export type CashProjectionResult = {
   startDate: string; // YYYY-MM-DD
   days: number;
 
-  // ✅ getCashProjection.ts が返してる
   currentBalance: number;
-
-  // ✅ getCashProjection.ts が返してる（ログ上 shortDate）
   shortDate: string | null;
 
-  // ✅ getCashProjection.ts が組み立ててる日次配列
   rows: CashProjectionRow[];
 
-  // 任意（月次まとめがあるなら）
   points?: CashProjectionPoint[];
-
-  // 任意メッセージ
   message?: string;
 };
