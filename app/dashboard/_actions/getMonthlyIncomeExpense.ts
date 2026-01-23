@@ -14,7 +14,7 @@ function normalizeMonthKey(month: string): string {
 
 function addMonths(yyyyMm01: string, delta: number): string {
   // yyyyMm01: "YYYY-MM-01"
-  const [y, m] = yyyyMm01.split("-").map((v) => Number(v));
+  const [y, m] = yyyyMm01.split("-").map(Number);
   const d = new Date(Date.UTC(y, m - 1, 1));
   d.setUTCMonth(d.getUTCMonth() + delta);
   const yy = d.getUTCFullYear();
@@ -32,7 +32,6 @@ export async function getMonthlyIncomeExpense(input: {
   const monthStart = monthKey; // inclusive
   const nextMonthStart = addMonths(monthKey, 1); // exclusive
 
-  // cash_flows を当月分で集計
   const { data, error } = await supabase
     .from("cash_flows")
     .select("section, amount, date")
@@ -52,6 +51,12 @@ export async function getMonthlyIncomeExpense(input: {
     if (section === "out") expense += amt;
   }
 
-  // ✅ month を必ず返す（今回のビルドエラーの解決点）
-  return { month: monthKey, income, expense };
+  const net = income - expense;
+
+  return {
+    month: monthKey,
+    income,
+    expense,
+    net,
+  };
 }
