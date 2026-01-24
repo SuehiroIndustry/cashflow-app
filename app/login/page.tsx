@@ -1,28 +1,65 @@
-import { Suspense } from "react";
-import { redirect } from "next/navigation";
-import { createClient } from "@/utils/supabase/server";
-import LoginClient from "./login-client";
+'use client'
 
-export default async function LoginPage() {
-  // すでにログイン済みなら /dashboard へ
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+import { useState } from 'react'
+import { createClient } from '@supabase/supabase-js'
 
-  if (user) redirect("/dashboard");
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+
+export default function LoginPage() {
+  const [email, setEmail] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const sendMagicLink = async () => {
+    setLoading(true)
+    setMessage(null)
+
+    const redirectTo = `${window.location.origin}/auth/callback`
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: redirectTo, // ✅ これが重要
+      },
+    })
+
+    if (error) {
+      console.error(error)
+      setMessage(`送信に失敗: ${error.message}`)
+    } else {
+      setMessage('メールを送った。受信箱を見て。迷惑メールも。')
+    }
+
+    setLoading(false)
+  }
 
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center p-6">
-      <Suspense
-        fallback={
-          <div className="w-full max-w-md rounded-xl border border-white/10 bg-white/5 p-6">
-            Loading...
-          </div>
-        }
-      >
-        <LoginClient />
-      </Suspense>
-    </main>
-  );
+    <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-6">
+        <div className="text-xl font-semibold">Login</div>
+        <div className="mt-2 text-sm text-neutral-300">メールに Magic Link を送ります。</div>
+
+        <label className="mt-4 block text-sm">Email</label>
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="you@example.com"
+          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
+        />
+
+        <button
+          onClick={sendMagicLink}
+          disabled={loading || !email}
+          className="mt-4 w-full rounded border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800 disabled:opacity-50"
+        >
+          {loading ? 'Sending...' : 'Send Magic Link'}
+        </button>
+
+        {message && <div className="mt-3 text-sm text-neutral-200">{message}</div>}
+      </div>
+    </div>
+  )
 }
