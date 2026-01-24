@@ -1,297 +1,153 @@
-// app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React from "react";
+import Link from "next/link";
 
-import OverviewCard from "./_components/OverviewCard";
-import EcoCharts from "./_components/EcoCharts";
+// 既存で使ってるコンポーネントがあるなら、そのまま import して下の {children} の代わりに置いてOK
+// import OverviewCard from "./_components/OverviewCard";
+// import BalanceCard from "./_components/BalanceCard";
+// import EcoCharts from "./_components/EcoCharts";
 
-import { getAccounts } from "./_actions/getAccounts";
-import { getMonthlyCashBalances } from "./_actions/getMonthlyCashBalances";
-import { getCashShortForecast } from "./_actions/getCashShortForecast";
-import { getOverview } from "./_actions/getOverview";
+type CashStatus = "ok" | "warning" | "danger";
 
-import type {
-  CashAccount,
-  MonthlyBalanceRow,
-  CashShortForecast,
-  CashShortForecastInput,
-  OverviewPayload,
-} from "./_types";
+type DashboardCashStatus = {
+  status: CashStatus;
+  monitored_accounts: number;
+  warning_count: number;
+  danger_count: number;
+  first_alert_month: string | null;
+  worst_balance: number | null;
+};
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
+type DashboardCashAlertCard = {
+  cash_account_id: number;
+  account_name: string;
+  first_alert_month: string;
+  projected_ending_balance: number;
+  alert_level: "warning" | "danger";
+};
 
-function toMonthStartISO(input: string): string {
-  const s = (input ?? "").trim();
-
-  const jp = s.match(/^(\d{4})年(\d{1,2})月$/);
-  if (jp) {
-    const y = jp[1];
-    const m = pad2(Number(jp[2]));
-    return `${y}-${m}-01`;
-  }
-
-  const ym = s.match(/^(\d{4})-(\d{1,2})$/);
-  if (ym) {
-    const y = ym[1];
-    const m = pad2(Number(ym[2]));
-    return `${y}-${m}-01`;
-  }
-
-  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (ymd) return s;
-
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = pad2(d.getMonth() + 1);
-  return `${y}-${m}-01`;
-}
-
-function ForecastCard(props: { forecast: CashShortForecast; currentBalance: number }) {
-  const { forecast, currentBalance } = props;
-
-  const badge =
-    forecast.level === "danger"
-      ? { label: "危険", cls: "border-red-500/60 text-red-200" }
-      : forecast.level === "warn"
-        ? { label: "注意", cls: "border-yellow-500/60 text-yellow-200" }
-        : { label: "安全", cls: "border-emerald-500/60 text-emerald-200" };
-
-  return (
-    <div className="border rounded p-4">
-      <div className="flex items-center gap-3 mb-2">
-        <div className="font-semibold">資金ショート予測（全口座合算）</div>
-        <div className={`text-xs border rounded px-2 py-0.5 ${badge.cls}`}>{badge.label}</div>
-      </div>
-
-      <div className="text-sm opacity-80 mb-3">{forecast.message}</div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-        <div>
-          <div className="opacity-70">現在残高</div>
-          <div className="font-semibold">¥{currentBalance.toLocaleString()}</div>
-        </div>
-        <div>
-          <div className="opacity-70">月平均 収入</div>
-          <div className="font-semibold">¥{forecast.avgIncome.toLocaleString()}</div>
-        </div>
-        <div>
-          <div className="opacity-70">月平均 支出</div>
-          <div className="font-semibold">¥{forecast.avgExpense.toLocaleString()}</div>
-        </div>
-        <div>
-          <div className="opacity-70">月平均 純増減</div>
-          <div className="font-semibold">¥{forecast.avgNet.toLocaleString()}</div>
-        </div>
-      </div>
-
-      <div className="mt-3 text-xs opacity-60">
-        予測対象: {forecast.month} / 直近{forecast.avgWindowMonths}ヶ月平均 / 予測{forecast.rangeMonths}ヶ月
-        {forecast.shortDate ? ` / ショート見込み: ${forecast.shortDate}` : " / ショート見込み: なし"}
-      </div>
-    </div>
-  );
-}
-
-export default function DashboardClient() {
-  const [accounts, setAccounts] = useState<CashAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<number>(0); // ★ default: 全口座
-
-  const [monthText, setMonthText] = useState<string>("2026年01月");
-  const [rangeMonths, setRangeMonths] = useState<number>(12);
-
-  const [monthRows, setMonthRows] = useState<MonthlyBalanceRow[]>([]);
-  const [forecast, setForecast] = useState<CashShortForecast | null>(null);
-  const [overview, setOverview] = useState<OverviewPayload | null>(null);
-
-  const [loading, setLoading] = useState<boolean>(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const monthISO = useMemo(() => toMonthStartISO(monthText), [monthText]);
-
-  const selectedAccount = useMemo(() => {
-    return accounts.find((a) => a.id === selectedAccountId) ?? null;
-  }, [accounts, selectedAccountId]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-
-    try {
-      const acc = await getAccounts();
-      setAccounts(acc);
-
-      const rows = await getMonthlyCashBalances({
-        cashAccountId: selectedAccountId,
-        month: monthISO,
-        rangeMonths,
-      });
-
-      const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
-      setMonthRows(asc);
-
-      const input: CashShortForecastInput = {
-        cashAccountId: selectedAccountId,
-        month: monthISO,
-        rangeMonths,
-        avgWindowMonths: 6,
+function getCashStatusLabel(status: CashStatus) {
+  switch (status) {
+    case "danger":
+      return {
+        badge: "危険",
+        message: "このままだと資金が尽きます。今すぐ手を打ちましょう。",
       };
+    case "warning":
+      return {
+        badge: "注意",
+        message: "このままだと資金余力が細ります。先手で整えましょう。",
+      };
+    default:
+      return { badge: "問題なし", message: "" };
+  }
+}
 
-      const fc = await getCashShortForecast(input);
-      setForecast(fc);
+function formatJPY(value: number) {
+  try {
+    return new Intl.NumberFormat("ja-JP", {
+      style: "currency",
+      currency: "JPY",
+      maximumFractionDigits: 0,
+    }).format(value);
+  } catch {
+    return `¥${Math.round(value).toLocaleString("ja-JP")}`;
+  }
+}
 
-      const ov = await getOverview({ cashAccountId: selectedAccountId, month: monthISO });
-      setOverview(ov);
-    } catch (e: any) {
-      setLoadError(e?.message ?? String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [monthISO, rangeMonths, selectedAccountId]);
+function monthLabel(isoDate: string) {
+  // isoDate: "2026-01-01" などを想定
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}年${m}月`;
+}
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+export default function DashboardClient(props: {
+  cashStatus: DashboardCashStatus; // server から渡す
+  alertCards: DashboardCashAlertCard[]; // server から渡す（okなら空でOK）
+  // 既存のダッシュボード本体をそのまま差し込みたいなら children で囲む
+  children?: React.ReactNode;
+}) {
+  const { cashStatus, alertCards, children } = props;
 
-  const monthSummary = useMemo(() => {
-    if (!monthRows.length) return null;
-    const last = monthRows[monthRows.length - 1];
-    return {
-      income: last.income,
-      expense: last.expense,
-      balance: last.balance,
-    };
-  }, [monthRows]);
-
-  const currentBalanceForForecast = useMemo(() => {
-    // accounts の先頭に “全口座” を入れてるので、それを採用
-    return selectedAccount?.current_balance ?? 0;
-  }, [selectedAccount]);
+  const showAlerts = cashStatus.status !== "ok"; // ④ OKなら出さない
+  const msg = getCashStatusLabel(cashStatus.status);
 
   return (
     <div className="space-y-6">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <label className="text-sm opacity-80">Account</label>
-          <select
-            className="border rounded px-2 py-1 bg-transparent"
-            value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(Number(e.target.value))}
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} / id:{a.id}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="text-sm opacity-80">Month</label>
-          <input
-            className="border rounded px-2 py-1 bg-transparent"
-            value={monthText}
-            onChange={(e) => setMonthText(e.target.value)}
-            placeholder="2026年01月"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="text-sm opacity-80">Range</label>
-          <select
-            className="border rounded px-2 py-1 bg-transparent"
-            value={rangeMonths}
-            onChange={(e) => setRangeMonths(Number(e.target.value))}
-          >
-            <option value={3}>last 3 months</option>
-            <option value={6}>last 6 months</option>
-            <option value={12}>last 12 months</option>
-          </select>
-        </div>
-
-        <button className="border rounded px-3 py-1" onClick={() => void load()} disabled={loading}>
-          {loading ? "loading..." : "refresh"}
-        </button>
-
-        {loadError && <div className="text-sm text-red-300">{loadError}</div>}
-      </div>
-
-      {/* Forecast */}
-      {forecast ? (
-        <ForecastCard forecast={forecast} currentBalance={currentBalanceForForecast} />
-      ) : (
-        <div className="text-sm opacity-70">No forecast</div>
-      )}
-
-      {/* Overview */}
-      {overview ? <OverviewCard payload={overview} /> : <div className="text-sm opacity-60">Overview not available</div>}
-
-      {/* Month summary */}
-      <div className="border rounded p-4">
-        <div className="font-semibold mb-2">月次サマリ</div>
-        {monthSummary ? (
-          <div className="grid grid-cols-3 gap-4 text-sm">
+      {/* ② + ④：warning/danger だけ“意味つき”で表示。OKなら黙る */}
+      {showAlerts && (
+        <section className="rounded-lg border border-neutral-700 bg-neutral-950 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="opacity-70">Income</div>
-              <div className="font-semibold">¥{monthSummary.income.toLocaleString()}</div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex rounded border px-2 py-0.5 text-sm font-semibold">
+                  {msg.badge}
+                </span>
+                <span className="text-sm text-neutral-300">
+                  監視口座：{cashStatus.monitored_accounts} / 警告：{cashStatus.warning_count} / 危険：
+                  {cashStatus.danger_count}
+                </span>
+              </div>
+
+              <p className="mt-2 text-sm text-neutral-200">{msg.message}</p>
+
+              {/* “次の一手”は言葉で */}
+              {cashStatus.first_alert_month && (
+                <p className="mt-1 text-sm text-neutral-300">
+                  最初の警告：{monthLabel(cashStatus.first_alert_month)}
+                  {cashStatus.worst_balance != null && (
+                    <>
+                      {" "}
+                      / 最悪残高：{formatJPY(cashStatus.worst_balance)}
+                    </>
+                  )}
+                </p>
+              )}
             </div>
-            <div>
-              <div className="opacity-70">Expense</div>
-              <div className="font-semibold">¥{monthSummary.expense.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="opacity-70">Balance（推移用）</div>
-              <div className="font-semibold">¥{monthSummary.balance.toLocaleString()}</div>
+
+            <div className="flex items-center gap-3">
+              <Link
+                href="/simulation"
+                className="inline-flex items-center justify-center rounded border px-3 py-2 text-sm hover:bg-neutral-900"
+              >
+                Simulationで手を打つ →
+              </Link>
             </div>
           </div>
-        ) : (
-          <div className="text-sm opacity-60">No data</div>
-        )}
-      </div>
 
-      {/* Charts + table */}
-      <EcoCharts rows={monthRows} />
-
-      <div className="border rounded p-4">
-        <div className="font-semibold mb-3">last {Math.min(rangeMonths, monthRows.length)} months</div>
-
-        <div className="overflow-auto">
-          <table className="min-w-[720px] w-full text-sm">
-            <thead className="opacity-70">
-              <tr className="text-left border-b">
-                <th className="py-2">Month</th>
-                <th className="py-2">Income</th>
-                <th className="py-2">Expense</th>
-                <th className="py-2">Balance（推移）</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthRows.map((r: MonthlyBalanceRow) => (
-                <tr key={r.month} className="border-b last:border-b-0">
-                  <td className="py-2">{r.month}</td>
-                  <td className="py-2">¥{r.income.toLocaleString()}</td>
-                  <td className="py-2">¥{r.expense.toLocaleString()}</td>
-                  <td className="py-2">¥{r.balance.toLocaleString()}</td>
-                </tr>
+          {/* 警告カード（最小） */}
+          {alertCards.length > 0 && (
+            <div className="mt-4 space-y-2">
+              {alertCards.map((c) => (
+                <div key={c.cash_account_id} className="rounded border border-neutral-700 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium">{c.account_name}</div>
+                    <span className="text-xs text-neutral-300">{c.alert_level.toUpperCase()}</span>
+                  </div>
+                  <div className="mt-1 text-sm text-neutral-300">
+                    最初の警告：{monthLabel(c.first_alert_month)} / 予測残高：
+                    {formatJPY(c.projected_ending_balance)}
+                  </div>
+                </div>
               ))}
-              {!monthRows.length && (
-                <tr>
-                  <td className="py-2 opacity-60" colSpan={4}>
-                    No rows
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          )}
+        </section>
+      )}
 
-        <div className="text-xs opacity-60 mt-3">
-          selectedAccount: {selectedAccount ? selectedAccount.name : "none"} / month: {monthISO}
-        </div>
-      </div>
+      {/* ④：OKのときは“警告エリア”は出さない（黙る）。代わりに必要なら静かな1行だけ */}
+      {!showAlerts && (
+        <p className="text-sm text-neutral-400">
+          資金繰り：問題なし
+        </p>
+      )}
+
+      {/* 既存のダッシュボード本体（今までのOverview/Charts/表など）はここにそのまま置く */}
+      {children ?? null}
     </div>
   );
 }

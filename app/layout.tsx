@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import Link from "next/link";
+import { signOutAction } from "@/app/_actions/auth";
 
 export const metadata: Metadata = {
   title: "Cashflow",
@@ -19,15 +21,15 @@ export default function RootLayout({
           <aside className="w-56 border-r border-neutral-800 bg-neutral-900">
             <div className="p-4 font-semibold text-lg">Cashflow</div>
             <nav className="space-y-1 px-2">
-              <a href="/dashboard" className="block rounded px-3 py-2 hover:bg-neutral-800">
+              <Link href="/dashboard" className="block rounded px-3 py-2 hover:bg-neutral-800">
                 📊 Dashboard
-              </a>
-              <a href="/simulation" className="block rounded px-3 py-2 hover:bg-neutral-800">
+              </Link>
+              <Link href="/simulation" className="block rounded px-3 py-2 hover:bg-neutral-800">
                 🧪 Simulation
-              </a>
-              <a href="/transactions" className="block rounded px-3 py-2 hover:bg-neutral-800">
+              </Link>
+              <Link href="/transactions" className="block rounded px-3 py-2 hover:bg-neutral-800">
                 ✍️ Transactions
-              </a>
+              </Link>
             </nav>
           </aside>
 
@@ -36,9 +38,16 @@ export default function RootLayout({
             {/* Header */}
             <header className="flex items-center justify-between border-b border-neutral-800 px-6 py-4">
               <div className="text-lg font-semibold">Cashflow Dashboard</div>
-              <button className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800">
-                Logout
-              </button>
+
+              {/* ✅ Server Actionでログアウト */}
+              <form action={signOutAction}>
+                <button
+                  type="submit"
+                  className="rounded border border-neutral-700 px-3 py-1 text-sm hover:bg-neutral-800"
+                >
+                  Logout
+                </button>
+              </form>
             </header>
 
             {/* Page content */}
