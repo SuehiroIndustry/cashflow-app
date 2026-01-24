@@ -5,17 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      // ✅ これが肝：/auth/callback の route.ts（exchangeCodeForSession）と整合させる
-      flowType: 'pkce',
-      // URL に認証情報が付いて戻ってきた時に拾えるように
-      detectSessionInUrl: true,
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-  }
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
 export default function LoginPage() {
@@ -51,10 +41,19 @@ export default function LoginPage() {
     []
   )
 
-  const callbackBase = useMemo(() => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-    return `${origin}/auth/callback`
+  // ✅ window.location.origin は使わない（preview URL 事故の元）
+  // NEXT_PUBLIC_SITE_URL を Vercel 環境変数に必ず設定する
+  const siteUrl = useMemo(() => {
+    const v = process.env.NEXT_PUBLIC_SITE_URL
+    if (v && v.startsWith('http')) return v.replace(/\/$/, '')
+    // フォールバック（ローカル用）
+    if (typeof window !== 'undefined') return window.location.origin
+    return ''
   }, [])
+
+  const callbackUrl = useMemo(() => {
+    return `${siteUrl}/auth/callback`
+  }, [siteUrl])
 
   const login = async () => {
     setLoading(true)
@@ -80,7 +79,8 @@ export default function LoginPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${callbackBase}?next=/dashboard`,
+        // ✅ confirm email ONなら使われる / OFFなら無視される
+        emailRedirectTo: callbackUrl,
       },
     })
 
@@ -88,7 +88,7 @@ export default function LoginPage() {
       console.error(error)
       setMessage(`登録失敗: ${error.message}`)
     } else {
-      setMessage('登録OK。Confirm email がONならメール確認が必要。OFFならそのままログインして。')
+      setMessage('登録OK。Confirm email をONにしてるならメール確認が必要。OFFならそのままログインして。')
     }
 
     setLoading(false)
@@ -104,12 +104,11 @@ export default function LoginPage() {
       return
     }
 
-    // ✅ 絶対にここ（auth/callback）へ戻す
-    const redirectTo = `${callbackBase}?next=/reset-password`
+    // ✅ ここが肝：redirect_to は /auth/callback “だけ”
+    // （?next=... を付けない。callback 側で type=recovery を見て /reset-password に飛ばす）
+    const redirectTo = callbackUrl
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo,
-    })
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
 
     if (error) {
       console.error(error)
