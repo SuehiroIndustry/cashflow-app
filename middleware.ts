@@ -2,35 +2,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
+// 保護したいパス
 const PROTECTED_PREFIXES = ["/dashboard"];
+
+// ログイン画面（ログイン済みならここに居させない）
 const AUTH_PAGES = ["/login"];
 
-// 🔑 middleware から完全除外するパス
-const PUBLIC_PATHS = ["/auth/callback", "/reset-password"];
+// ✅ recovery / OAuth / magiclink の受け口と、パスワード再設定は「例外で通す」
+const PUBLIC_PREFIXES = ["/auth/callback", "/reset-password"];
 
-function isProtected(pathname: string) {
-  return PROTECTED_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p + "/")
-  );
-}
-
-function isAuthPage(pathname: string) {
-  return AUTH_PAGES.some(
-    (p) => pathname === p || pathname.startsWith(p + "/")
-  );
-}
-
-function isPublicPath(pathname: string) {
-  return PUBLIC_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(p + "/")
-  );
+function startsWithAny(pathname: string, prefixes: string[]) {
+  return prefixes.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  // ✅ recovery / callback は一切触らない
-  if (isPublicPath(pathname)) {
+  // ✅ ここは絶対に弾かない（cookieセット前に弾くと “ぐるぐる” する）
+  if (startsWithAny(pathname, PUBLIC_PREFIXES)) {
     return NextResponse.next();
   }
 
@@ -41,9 +30,11 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll: () => request.cookies.getAll(),
-        setAll: (cookies) => {
-          cookies.forEach(({ name, value, options }) => {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options);
           });
         },
@@ -51,20 +42,21 @@ export async function middleware(request: NextRequest) {
     }
   );
 
+  // セッション確認（必要なら refresh もここで動く）
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // 未ログインで保護ページ
-  if (!user && isProtected(pathname)) {
+  // 未ログインで保護ページ => /login
+  if (!user && startsWithAny(pathname, PROTECTED_PREFIXES)) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname + search);
     return NextResponse.redirect(url);
   }
 
-  // ログイン済みで login
-  if (user && isAuthPage(pathname)) {
+  // ログイン済みで /login => /dashboard へ
+  if (user && startsWithAny(pathname, AUTH_PAGES)) {
     const url = request.nextUrl.clone();
     const next = url.searchParams.get("next") || "/dashboard";
     url.pathname = next;
@@ -75,8 +67,7 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
+// middleware対象（静的ファイル等を除外）
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)"],
 };
