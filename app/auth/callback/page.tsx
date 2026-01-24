@@ -1,94 +1,82 @@
 // app/auth/callback/page.tsx
-"use client";
+'use client'
 
-import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useEffect, useMemo, useState } from 'react'
+import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   {
     auth: {
-      // PKCE/implicit どっちで返ってきても拾えるようにする
-      detectSessionInUrl: true,
       persistSession: true,
       autoRefreshToken: true,
     },
   }
-);
+)
 
 export default function AuthCallbackPage() {
-  const [message, setMessage] = useState("Signing you in...");
+  const [message, setMessage] = useState('Signing you in...')
 
   const cardClass = useMemo(
     () =>
       [
-        "w-full max-w-sm rounded-2xl border border-white/10",
-        "bg-gradient-to-b from-white/10 to-black p-6",
-        "text-white shadow-xl",
-      ].join(" "),
+        'w-full max-w-sm rounded-2xl border border-white/10',
+        'bg-gradient-to-b from-white/10 to-black p-6',
+        'text-white shadow-xl',
+      ].join(' '),
     []
-  );
+  )
 
   useEffect(() => {
-    (async () => {
+    ;(async () => {
       try {
-        const url = new URL(window.location.href);
+        const url = new URL(window.location.href)
 
-        // next の行き先（/reset-password or /dashboard など）
-        const nextParam = url.searchParams.get("next");
-        const safeNext =
-          nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
-            ? nextParam
-            : null;
+        const code = url.searchParams.get('code')
+        const type = url.searchParams.get('type') // recovery 判定
+        const next = url.searchParams.get('next')
 
-        // recovery 判定：search/hash 両方見る（どっちで返ってくるか環境差がある）
-        const isRecovery =
-          url.searchParams.get("type") === "recovery" ||
-          window.location.hash.includes("type=recovery");
+        if (!code) {
+          console.error('No code in callback URL')
+          window.location.href = '/login'
+          return
+        }
 
-        // ✅ ここが肝：URL からセッションを確定（PKCEでもimplicitでも拾う）
-        // - code がある時は exchangeCodeForSession が内部で走る
-        // - hash(#access_token...) の時も拾える
-        const { data, error } = await supabase.auth.getSessionFromUrl({
-          storeSession: true,
-        });
+        // ✅ v2 正式API
+        const { error } = await supabase.auth.exchangeCodeForSession(code)
 
         if (error) {
-          console.error("getSessionFromUrl error:", error);
-          setMessage("Auth failed. Redirecting to login...");
-          window.location.href = "/login";
-          return;
+          console.error('exchangeCodeForSession error:', error)
+          window.location.href = '/login'
+          return
         }
 
-        // セッションが取れてないなら失敗扱い
-        if (!data.session) {
-          setMessage("No session found. Redirecting to login...");
-          window.location.href = "/login";
-          return;
+        // 遷移先決定
+        if (type === 'recovery') {
+          window.location.href = '/reset-password'
+          return
         }
 
-        // ✅ 目的地決定
-        // recovery は reset-password 優先
-        const dest = isRecovery
-          ? "/reset-password"
-          : safeNext ?? "/dashboard";
+        if (next && next.startsWith('/')) {
+          window.location.href = next
+          return
+        }
 
-        window.location.href = dest;
+        window.location.href = '/dashboard'
       } catch (e) {
-        console.error(e);
-        setMessage("Unexpected error. Redirecting to login...");
-        window.location.href = "/login";
+        console.error(e)
+        window.location.href = '/login'
       }
-    })();
-  }, []);
+    })()
+  }, [])
 
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4">
       <div className={cardClass}>
-        <div className="text-lg font-semibold text-white">Auth Callback</div>
+        <div className="text-lg font-semibold">Auth Callback</div>
         <div className="mt-2 text-sm text-white/70">{message}</div>
       </div>
     </div>
-  );
+  )
 }
