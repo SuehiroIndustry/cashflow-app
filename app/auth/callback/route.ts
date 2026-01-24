@@ -1,71 +1,42 @@
-// app/auth/callback/route.ts
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-
-  // Supabase magic link / PKCE callback params
   const code = url.searchParams.get("code");
-  const token_hash = url.searchParams.get("token_hash");
-  const type = url.searchParams.get("type") as
-    | "magiclink"
-    | "recovery"
-    | "invite"
-    | "email_change"
-    | null;
 
-  // どこに戻すか（無ければ dashboard）
-  const next = url.searchParams.get("next") ?? "/dashboard";
-
-  const cookieStore = await cookies();
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return NextResponse.redirect(
-      new URL("/login?error=missing_env", url.origin)
-    );
+  // code 無しならログインへ
+  if (!code) {
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Route Handler では cookies を “確実に書き換える” 必要があるので setAll 形式で作る
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
+  // 交換後の行き先（成功: /dashboard）
+  const response = NextResponse.redirect(new URL("/dashboard", request.url));
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
       },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          cookieStore.set(name, value, options);
-        });
-      },
-    },
-  });
-
-  // 1) PKCE code フロー（推奨）
-  if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
-      return NextResponse.redirect(
-        new URL(`/login?error=${encodeURIComponent(error.message)}`, url.origin)
-      );
     }
-    return NextResponse.redirect(new URL(next, url.origin));
+  );
+
+  const { error } = await supabase.auth.exchangeCodeForSession(code);
+
+  if (error) {
+    // 失敗: /login
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // 2) token_hash フロー（互換）
-  if (token_hash && type) {
-    const { error } = await supabase.auth.verifyOtp({ token_hash, type });
-    if (error) {
-      return NextResponse.redirect(
-        new URL(`/login?error=${encodeURIComponent(error.message)}`, url.origin)
-      );
-    }
-    return NextResponse.redirect(new URL(next, url.origin));
-  }
-
-  // どっちでもない＝リンク不正 / 期限切れ / 何かがおかしい
-  return NextResponse.redirect(new URL("/login?error=missing_params", url.origin));
+  return response;
 }
