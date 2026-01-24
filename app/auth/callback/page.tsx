@@ -11,9 +11,17 @@ const supabase = createClient(
     auth: {
       persistSession: true,
       autoRefreshToken: true,
+      // detectSessionInUrl は v2 でも有効（ただし万能ではないので自前でも拾う）
+      detectSessionInUrl: true,
     },
   }
 )
+
+function parseHashParams(hash: string) {
+  // hash は "#a=b&c=d" 形式
+  const h = hash.startsWith('#') ? hash.slice(1) : hash
+  return new URLSearchParams(h)
+}
 
 export default function AuthCallbackPage() {
   const [message, setMessage] = useState('Signing you in...')
@@ -33,36 +41,80 @@ export default function AuthCallbackPage() {
       try {
         const url = new URL(window.location.href)
 
+        // query
         const code = url.searchParams.get('code')
-        const type = url.searchParams.get('type') // recovery 判定
-        const next = url.searchParams.get('next')
+        const typeQ = url.searchParams.get('type')
+        const nextQ = url.searchParams.get('next')
 
-        if (!code) {
-          console.error('No code in callback URL')
+        // hash（implicit系でここに access_token が来る）
+        const hashParams = parseHashParams(window.location.hash || '')
+        const access_token = hashParams.get('access_token')
+        const refresh_token = hashParams.get('refresh_token')
+        const typeH = hashParams.get('type')
+        const nextH = hashParams.get('next')
+
+        const type = typeQ || typeH || null
+        const next = nextQ || nextH || null
+
+        // ① PKCE（code）で来てるなら exchange
+        if (code) {
+          setMessage('Exchanging code for session...')
+          const { error } = await supabase.auth.exchangeCodeForSession(code)
+
+          if (error) {
+            console.error('exchangeCodeForSession error:', error)
+            setMessage('Auth failed. Redirecting to login...')
+            window.location.href = '/login'
+            return
+          }
+        } else if (access_token && refresh_token) {
+          // ② hash token（implicit）で来てるなら setSession
+          setMessage('Setting session from tokens...')
+          const { error } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          })
+
+          if (error) {
+            console.error('setSession error:', error)
+            setMessage('Auth failed. Redirecting to login...')
+            window.location.href = '/login'
+            return
+          }
+        } else {
+          // ③ どっちも無い：エラーが hash に載ってることがある
+          const err = hashParams.get('error') || url.searchParams.get('error')
+          const desc =
+            hashParams.get('error_description') || url.searchParams.get('error_description')
+
+          console.error('No code / token in callback URL', { err, desc, href: window.location.href })
+
+          setMessage('No auth info found. Redirecting to login...')
           window.location.href = '/login'
           return
         }
 
-        // ✅ v2 正式API
-        const { error } = await supabase.auth.exchangeCodeForSession(code)
-
-        if (error) {
-          console.error('exchangeCodeForSession error:', error)
-          window.location.href = '/login'
-          return
+        // URLをきれいに（#access_token や code を残さない）
+        try {
+          window.history.replaceState({}, '', '/auth/callback')
+        } catch {
+          // ignore
         }
 
-        // 遷移先決定
+        // ④ 遷移先決定
         if (type === 'recovery') {
+          setMessage('Redirecting to reset password...')
           window.location.href = '/reset-password'
           return
         }
 
-        if (next && next.startsWith('/')) {
+        if (next && next.startsWith('/') && !next.startsWith('//')) {
+          setMessage('Redirecting...')
           window.location.href = next
           return
         }
 
+        setMessage('Redirecting to dashboard...')
         window.location.href = '/dashboard'
       } catch (e) {
         console.error(e)
