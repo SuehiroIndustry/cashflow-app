@@ -5,7 +5,17 @@ import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
+    auth: {
+      // ✅ これが肝：/auth/callback の route.ts（exchangeCodeForSession）と整合させる
+      flowType: 'pkce',
+      // URL に認証情報が付いて戻ってきた時に拾えるように
+      detectSessionInUrl: true,
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  }
 )
 
 export default function LoginPage() {
@@ -37,102 +47,78 @@ export default function LoginPage() {
   )
 
   const infoClass = useMemo(
-    () =>
-      'mt-3 rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80',
+    () => 'mt-3 rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80',
     []
   )
 
-  // ✅ 絶対URLは“その場で”作る（SSR / Fast Refresh で壊れない）
-  const getCallbackBase = () => `${window.location.origin}/auth/callback`
+  const callbackBase = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/auth/callback`
+  }, [])
 
   const login = async () => {
     setLoading(true)
     setMessage(null)
 
-    try {
-      const e = email.trim()
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email: e,
-        password,
-      })
-
-      if (error) {
-        console.error(error)
-        setMessage(`ログイン失敗: ${error.message}`)
-        return
-      }
-
-      window.location.href = '/dashboard'
-    } finally {
+    if (error) {
+      console.error(error)
+      setMessage(`ログイン失敗: ${error.message}`)
       setLoading(false)
+      return
     }
+
+    window.location.href = '/dashboard'
   }
 
   const signup = async () => {
     setLoading(true)
     setMessage(null)
 
-    try {
-      const e = email.trim()
-      const callbackBase = getCallbackBase()
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${callbackBase}?next=/dashboard`,
+      },
+    })
 
-      const { data, error } = await supabase.auth.signUp({
-        email: e,
-        password,
-        options: {
-          // Confirm email ON の時に必要（OFFでも害はない）
-          emailRedirectTo: `${callbackBase}?next=/dashboard`,
-        },
-      })
-
-      if (error) {
-        console.error(error)
-        setMessage(`登録失敗: ${error.message}`)
-        return
-      }
-
-      // Confirm email OFF なら session が返ることがある
-      if (data.session) {
-        window.location.href = '/dashboard'
-        return
-      }
-
-      setMessage('登録OK。メール認証が必要なら、届いたメールを確認して。')
-    } finally {
-      setLoading(false)
+    if (error) {
+      console.error(error)
+      setMessage(`登録失敗: ${error.message}`)
+    } else {
+      setMessage('登録OK。Confirm email がONならメール確認が必要。OFFならそのままログインして。')
     }
+
+    setLoading(false)
   }
 
   const forgot = async () => {
     setLoading(true)
     setMessage(null)
 
-    try {
-      const e = email.trim()
-
-      if (!e) {
-        setMessage('Email を入れて。')
-        return
-      }
-
-      // ✅ ここが肝：Supabase verify → /auth/callback → /reset-password に誘導
-      const redirectTo = `${getCallbackBase()}?next=/reset-password`
-
-      const { error } = await supabase.auth.resetPasswordForEmail(e, {
-        redirectTo,
-      })
-
-      if (error) {
-        console.error(error)
-        setMessage(`リセットメール送信失敗: ${error.message}`)
-        return
-      }
-
-      setMessage('リセットメールを送った。受信箱/迷惑メールを確認して、最新メールのリンクだけ踏んで。')
-    } finally {
+    if (!email) {
+      setMessage('Email を入れて。')
       setLoading(false)
+      return
     }
+
+    // ✅ 絶対にここ（auth/callback）へ戻す
+    const redirectTo = `${callbackBase}?next=/reset-password`
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    })
+
+    if (error) {
+      console.error(error)
+      setMessage(`リセットメール送信失敗: ${error.message}`)
+    } else {
+      setMessage('リセットメールを送った。受信箱/迷惑メールを確認して、最新メールのリンクだけ踏んで。')
+    }
+
+    setLoading(false)
   }
 
   return (
@@ -147,7 +133,6 @@ export default function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
           autoComplete="email"
-          inputMode="email"
           className={inputClass}
         />
 
@@ -159,9 +144,6 @@ export default function LoginPage() {
           placeholder="password"
           autoComplete="current-password"
           className={inputClass}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') login()
-          }}
         />
 
         <button onClick={login} disabled={loading || !email || !password} className={`mt-5 ${btnClass}`}>
