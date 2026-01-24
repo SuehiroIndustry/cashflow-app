@@ -1,7 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useEffect, useMemo, useState } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
 
 const supabase = createBrowserClient(
@@ -10,12 +9,23 @@ const supabase = createBrowserClient(
 )
 
 export default function LoginPage() {
-  const searchParams = useSearchParams()
-
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+
+  // ✅ /login?next=... を client でだけ読む（useSearchParams禁止）
+  const [nextPath, setNextPath] = useState<string>('/dashboard')
+
+  useEffect(() => {
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      const next = sp.get('next')
+      if (next && next.startsWith('/')) setNextPath(next)
+    } catch {
+      // 何もしない（デフォルト /dashboard）
+    }
+  }, [])
 
   // ✅ “色が消える”事故を潰す（暗黙依存しない）
   const inputClass = useMemo(
@@ -50,7 +60,6 @@ export default function LoginPage() {
   }, [])
 
   const hardGo = (path: string) => {
-    // ✅ router より確実。middleware絡みでも必ず動く
     window.location.href = path
   }
 
@@ -71,19 +80,13 @@ export default function LoginPage() {
         return
       }
 
-      // ✅ cookie に載っているか最終確認（middleware が見るのはここ）
-      const { data: u, error: uErr } = await supabase.auth.getUser()
+      // ✅ cookie/セッション反映を一回確認（なくても遷移はする）
+      const { data, error: uErr } = await supabase.auth.getUser()
       if (uErr) console.error('getUser after login error:', uErr)
 
-      const ok = !!u.user
-      setMessage(`ログイン成功。session=${ok ? 'OK' : 'NG'}。遷移します…`)
+      setMessage(`ログイン成功。session=${data.user ? 'OK' : 'NG'}。遷移します…`)
 
-      // next パラメータがあれば優先（/login?next=/dashboard など）
-      const next = searchParams?.get('next')
-      const nextPath = next && next.startsWith('/') ? next : '/dashboard'
-
-      // ✅ ハード遷移（確実）
-      hardGo(nextPath)
+      hardGo(nextPath || '/dashboard')
     } catch (e) {
       console.error(e)
       setMessage('ログイン処理で例外が発生。Console を見て。')
@@ -128,7 +131,7 @@ export default function LoginPage() {
         return
       }
 
-      // ✅ これ固定：verify → /auth/callback → /reset-password
+      // ✅ 固定：verify → /auth/callback → /reset-password
       const redirectTo = `${callbackBase}?next=/reset-password`
 
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
