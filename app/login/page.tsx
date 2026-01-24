@@ -20,7 +20,6 @@ export default function LoginPage() {
     if (error) {
       setMessage(`ログイン失敗: ${error.message}`)
     } else {
-      // middleware / layout が拾って /dashboard に通す想定
       window.location.href = '/dashboard'
     }
 
@@ -59,35 +58,35 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-[60vh] items-center justify-center">
-      <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-6">
-        <div className="text-xl font-semibold">Login</div>
+    <div className="flex min-h-[70vh] items-center justify-center px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-lg">
+        <div className="text-xl font-semibold text-neutral-100">Login</div>
         <div className="mt-2 text-sm text-neutral-300">Email + Password でログインします。</div>
 
-        <label className="mt-4 block text-sm">Email</label>
+        <label className="mt-5 block text-sm text-neutral-200">Email</label>
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
+          className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-neutral-400"
           autoComplete="email"
           inputMode="email"
         />
 
-        <label className="mt-4 block text-sm">Password</label>
+        <label className="mt-4 block text-sm text-neutral-200">Password</label>
         <input
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="password"
           type="password"
-          className="mt-1 w-full rounded border border-neutral-700 bg-neutral-950 px-3 py-2"
+          className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-neutral-400"
           autoComplete="current-password"
         />
 
         <button
           onClick={login}
           disabled={loading || !email || !password}
-          className="mt-4 w-full rounded border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800 disabled:opacity-50"
+          className="mt-5 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800 disabled:opacity-50"
         >
           {loading ? 'Loading...' : 'Login'}
         </button>
@@ -95,7 +94,7 @@ export default function LoginPage() {
         <button
           onClick={signup}
           disabled={loading || !email || !password}
-          className="mt-2 w-full rounded border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800 disabled:opacity-50"
+          className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800 disabled:opacity-50"
         >
           {loading ? 'Loading...' : 'Sign up'}
         </button>
@@ -103,12 +102,16 @@ export default function LoginPage() {
         <button
           onClick={forgotPassword}
           disabled={loading || !email}
-          className="mt-2 w-full rounded border border-neutral-700 px-3 py-2 text-sm hover:bg-neutral-800 disabled:opacity-50"
+          className="mt-2 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800 disabled:opacity-50"
         >
           {loading ? 'Loading...' : 'Forgot password'}
         </button>
 
-        {message && <div className="mt-3 text-sm text-neutral-200">{message}</div>}
+        {message && (
+          <div className="mt-3 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-200">
+            {message}
+          </div>
+        )}
       </div>
     </div>
   )
