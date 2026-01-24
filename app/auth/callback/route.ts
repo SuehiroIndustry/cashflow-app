@@ -5,18 +5,21 @@ import { createServerClient } from "@supabase/ssr";
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const code = url.searchParams.get("code");
-  const type = url.searchParams.get("type"); // ← recovery 判定に使う
 
-  // code 無しならログインへ
+  const code = url.searchParams.get("code");
+  const next = url.searchParams.get("next"); // ✅ これで確実に行き先を制御
+  const safeNext =
+    next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+
+  // 交換後の行き先（デフォルトは dashboard）
+  const nextPath = safeNext ?? "/dashboard";
+
+  // code 無しなら、行き先へ（reset-password への遷移も潰さない）
   if (!code) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(new URL(nextPath, request.url));
   }
 
-  // 交換後の行き先
-  // recovery の場合は reset-password、それ以外は dashboard
-  const nextPath = type === "recovery" ? "/reset-password" : "/dashboard";
-
+  // 成功時のリダイレクト先を先に用意（cookie set の受け皿）
   const response = NextResponse.redirect(new URL(nextPath, request.url));
 
   const supabase = createServerClient(
@@ -36,9 +39,11 @@ export async function GET(request: NextRequest) {
     }
   );
 
+  // ✅ code → session (cookie) に交換
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
+    // 失敗は login に返す（next は残してもいいがまずは単純に）
     return NextResponse.redirect(new URL("/login", request.url));
   }
 

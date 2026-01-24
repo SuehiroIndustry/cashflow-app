@@ -1,201 +1,203 @@
-// app/login/page.tsx
-"use client";
+'use client'
 
-import { useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useMemo, useState } from 'react'
+import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+)
 
 export default function LoginPage() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  // ✅ “色が消える”事故を潰す（暗黙依存しない）
+  const inputClass = useMemo(
+    () =>
+      [
+        'mt-1 w-full rounded-md border px-3 py-2',
+        'border-white/10 bg-black/40',
+        'text-white placeholder:text-white/35',
+        'outline-none focus:border-white/25 focus:ring-2 focus:ring-white/10',
+      ].join(' '),
+    []
+  )
 
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const btnClass = useMemo(
+    () =>
+      [
+        'w-full rounded-md border px-3 py-2 text-sm',
+        'border-white/15 bg-white/5 text-white',
+        'hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-white/5',
+      ].join(' '),
+    []
+  )
 
-  const canSubmit = useMemo(() => {
-    return !loading && email.trim().length > 0 && password.length >= 8;
-  }, [loading, email, password]);
+  const infoClass = useMemo(
+    () =>
+      'mt-3 rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80',
+    []
+  )
+
+  // ✅ 絶対URLを“その場で”作る（SSR/初回レンダーのwindow問題を回避）
+  const getCallbackBase = () => {
+    const origin = window.location.origin
+    return `${origin}/auth/callback`
+  }
 
   const login = async () => {
-    if (!canSubmit) return;
-
-    setLoading(true);
-    setMessage(null);
+    setLoading(true)
+    setMessage(null)
 
     const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email,
       password,
-    });
+    })
 
     if (error) {
-      console.error(error);
-      setMessage(`ログイン失敗: ${error.message}`);
-      setLoading(false);
-      return;
+      console.error(error)
+      setMessage(`ログイン失敗: ${error.message}`)
+      setLoading(false)
+      return
     }
 
-    // Cookie が張られるのを待つ意味でも、素直に遷移（pushでもOK）
-    window.location.href = "/dashboard";
-  };
+    // 成功したら遷移（loading解除は不要だが一応揃える）
+    setLoading(false)
+    window.location.href = '/dashboard'
+  }
 
   const signup = async () => {
-    if (!canSubmit) return;
+    setLoading(true)
+    setMessage(null)
 
-    setLoading(true);
-    setMessage(null);
+    try {
+      const callbackBase = getCallbackBase()
 
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password,
-    });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          // Confirm email ON の時はこのURLへ。OFFでも害はないが、絶対URLで固定。
+          emailRedirectTo: `${callbackBase}?next=/dashboard`,
+        },
+      })
 
-    if (error) {
-      console.error(error);
-      setMessage(`登録失敗: ${error.message}`);
-      setLoading(false);
-      return;
+      if (error) {
+        console.error(error)
+        setMessage(`登録失敗: ${error.message}`)
+        setLoading(false)
+        return
+      }
+
+      // data.user は作られてても session が無いパターンがある（Confirm email ON など）
+      const hasSession = !!data.session
+
+      if (hasSession) {
+        setMessage('登録OK。そのまま入れる。')
+        setLoading(false)
+        window.location.href = '/dashboard'
+        return
+      }
+
+      setMessage('登録OK。メール認証が必要なら、届いたメールを確認して。')
+      setLoading(false)
+    } catch (e) {
+      console.error(e)
+      setMessage('登録失敗: 予期しないエラー')
+      setLoading(false)
     }
-
-    // Confirm email を ON にしてる場合、ここで「メール確認してね」になる
-    setMessage("登録した。メール確認が必要な設定なら、受信箱/迷惑メールを確認して。");
-    setLoading(false);
-  };
+  }
 
   const forgot = async () => {
-    if (!email.trim()) {
-      setMessage("メールアドレスを入れて。");
-      return;
+    setLoading(true)
+    setMessage(null)
+
+    if (!email) {
+      setMessage('Email を入れて。')
+      setLoading(false)
+      return
     }
 
-    setLoading(true);
-    setMessage(null);
+    try {
+      const callbackBase = getCallbackBase()
 
-    // ✅ recovery の戻り先は /reset-password に固定
-    const redirectTo = `${window.location.origin}/reset-password`;
+      // ✅ ここが肝：Supabase verify → /auth/callback → /reset-password に誘導
+      const redirectTo = `${callbackBase}?next=/reset-password`
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo,
-    });
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      })
 
-    if (error) {
-      console.error(error);
-      setMessage(`リセットメール送信失敗: ${error.message}`);
-      setLoading(false);
-      return;
+      if (error) {
+        console.error(error)
+        setMessage(`リセットメール送信失敗: ${error.message}`)
+        setLoading(false)
+        return
+      }
+
+      setMessage('リセットメールを送った。受信箱/迷惑メールを確認して、最新メールのリンクだけ踏んで。')
+      setLoading(false)
+    } catch (e) {
+      console.error(e)
+      setMessage('リセットメール送信失敗: 予期しないエラー')
+      setLoading(false)
     }
-
-    setMessage("リセットメールを送った。受信箱/迷惑メールを確認して。");
-    setLoading(false);
-  };
-
-  const onSubmit = async () => {
-    if (mode === "login") return login();
-    return signup();
-  };
+  }
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center px-4 bg-black text-neutral-100">
-      <div className="w-full max-w-sm rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
-        <div className="text-2xl font-semibold text-neutral-100">Login</div>
-        <div className="mt-2 text-sm text-neutral-300">
-          Email + Password でログインします。
-        </div>
+    <div className="flex min-h-[70vh] items-center justify-center px-4">
+      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-gradient-to-b from-white/10 to-black p-6 text-white shadow-xl">
+        <div className="text-2xl font-semibold text-white">Login</div>
+        <div className="mt-2 text-sm text-white/70">Email + Password でログインします。</div>
 
-        {/* mode switch */}
-        <div className="mt-5 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setMode("login");
-              setMessage(null);
-            }}
-            className={[
-              "rounded-lg border px-3 py-2 text-sm",
-              mode === "login"
-                ? "border-neutral-600 bg-neutral-950 text-neutral-100"
-                : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:bg-neutral-800",
-            ].join(" ")}
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("signup");
-              setMessage(null);
-            }}
-            className={[
-              "rounded-lg border px-3 py-2 text-sm",
-              mode === "signup"
-                ? "border-neutral-600 bg-neutral-950 text-neutral-100"
-                : "border-neutral-800 bg-neutral-900 text-neutral-300 hover:bg-neutral-800",
-            ].join(" ")}
-          >
-            Sign up
-          </button>
-        </div>
-
-        {/* Email */}
-        <label className="mt-5 block text-sm text-neutral-200">Email</label>
+        <label className="mt-5 block text-sm text-white/80">Email</label>
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          inputMode="email"
           autoComplete="email"
-          className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-neutral-500"
+          className={inputClass}
         />
 
-        {/* Password */}
-        <label className="mt-4 block text-sm text-neutral-200">Password</label>
+        <label className="mt-3 block text-sm text-white/80">Password</label>
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="password (min 8 chars)"
-          autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          className="mt-1 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-neutral-100 placeholder:text-neutral-500 outline-none focus:border-neutral-500"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmit();
-          }}
+          placeholder="password"
+          autoComplete="current-password"
+          className={inputClass}
         />
 
-        {/* Submit */}
         <button
-          type="button"
-          onClick={onSubmit}
-          disabled={!canSubmit}
-          className="mt-5 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-800 disabled:opacity-50"
+          onClick={login}
+          disabled={loading || !email || !password}
+          className={`mt-5 ${btnClass}`}
         >
-          {loading ? "Loading..." : mode === "login" ? "Login" : "Sign up"}
+          {loading ? 'Loading...' : 'Login'}
         </button>
 
-        {/* Forgot */}
         <button
-          type="button"
+          onClick={signup}
+          disabled={loading || !email || !password}
+          className={`mt-3 ${btnClass}`}
+        >
+          Sign up
+        </button>
+
+        <button
           onClick={forgot}
-          disabled={loading || !email.trim()}
-          className="mt-3 w-full rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+          disabled={loading || !email}
+          className={`mt-3 ${btnClass}`}
         >
           Forgot password
         </button>
 
-        {message && (
-          <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-100">
-            {message}
-          </div>
-        )}
-
-        <div className="mt-4 text-xs text-neutral-500">
-          ※ パスワードは8文字以上推奨。ログインできない場合は、まずリセットで再設定してから試す。
-        </div>
+        {message && <div className={infoClass}>{message}</div>}
       </div>
     </div>
-  );
+  )
 }
