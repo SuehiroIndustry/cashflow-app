@@ -1,65 +1,66 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+// middleware.ts
+import { NextResponse, type NextRequest } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 
-const PUBLIC_PATHS = ["/login", "/reset-password", "/auth/callback"];
+export async function middleware(req: NextRequest) {
+  const res = NextResponse.next()
 
-function isPublicPath(pathname: string) {
-  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"))) return true;
-  // 静的ファイル等は素通し
-  if (pathname.startsWith("/_next")) return true;
-  if (pathname.startsWith("/favicon")) return true;
-  if (pathname.startsWith("/robots")) return true;
-  if (pathname.startsWith("/sitemap")) return true;
-  return false;
-}
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-export async function middleware(request: NextRequest) {
-  const { pathname, search } = request.nextUrl;
-
-  // public は基本スルー（ただしログイン済みなら /dashboard に逃がす）
-  const response = NextResponse.next();
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
-        },
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll()
       },
-    }
-  );
+      setAll(cookies) {
+        cookies.forEach(({ name, value, options }) => {
+          res.cookies.set(name, value, options)
+        })
+      },
+    },
+  })
 
-  // ここが重要：middleware 内で user を引くと、必要なCookie更新が走る
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data } = await supabase.auth.getUser()
+  const user = data.user
 
-  // ✅ 未ログインで protected に来たら /login へ（next を付ける）
-  if (!user && !isPublicPath(pathname)) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = "/login";
-    loginUrl.searchParams.set("next", pathname + search);
-    return NextResponse.redirect(loginUrl);
+  const pathname = req.nextUrl.pathname
+
+  // 認証フロー・公開ページ（ここは絶対に弾かない）
+  const isPublic =
+    pathname === '/login' ||
+    pathname === '/reset-password' ||
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/api')
+
+  // 保護したい領域（必要なら増やす）
+  const isProtected =
+    pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/simulation') ||
+    pathname.startsWith('/inventory')
+
+  // 未ログインで保護領域に来たら /login へ
+  if (!user && isProtected) {
+    const url = req.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('next', pathname + req.nextUrl.search)
+    return NextResponse.redirect(url)
   }
 
-  // ✅ ログイン済みで /login に来たら /dashboard に逃がす
-  if (user && (pathname === "/login" || pathname.startsWith("/login/"))) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
-    dashboardUrl.search = "";
-    return NextResponse.redirect(dashboardUrl);
+  // ログイン済みで /login に来たらダッシュボードへ（next優先）
+  if (user && pathname === '/login') {
+    const next = req.nextUrl.searchParams.get('next')
+    const url = req.nextUrl.clone()
+    url.pathname = next && next.startsWith('/') ? next : '/dashboard'
+    url.search = ''
+    return NextResponse.redirect(url)
   }
 
-  return response;
+  return res
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
-};
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+  ],
+}
