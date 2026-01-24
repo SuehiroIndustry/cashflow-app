@@ -42,31 +42,31 @@ export default function LoginPage() {
     []
   )
 
-  // ✅ 絶対URLを“その場で”作る（SSR/初回レンダーのwindow問題を回避）
-  const getCallbackBase = () => {
-    const origin = window.location.origin
-    return `${origin}/auth/callback`
-  }
+  // ✅ 絶対URLは“その場で”作る（SSR / Fast Refresh で壊れない）
+  const getCallbackBase = () => `${window.location.origin}/auth/callback`
 
   const login = async () => {
     setLoading(true)
     setMessage(null)
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    try {
+      const e = email.trim()
 
-    if (error) {
-      console.error(error)
-      setMessage(`ログイン失敗: ${error.message}`)
+      const { error } = await supabase.auth.signInWithPassword({
+        email: e,
+        password,
+      })
+
+      if (error) {
+        console.error(error)
+        setMessage(`ログイン失敗: ${error.message}`)
+        return
+      }
+
+      window.location.href = '/dashboard'
+    } finally {
       setLoading(false)
-      return
     }
-
-    // 成功したら遷移（loading解除は不要だが一応揃える）
-    setLoading(false)
-    window.location.href = '/dashboard'
   }
 
   const signup = async () => {
@@ -74,13 +74,14 @@ export default function LoginPage() {
     setMessage(null)
 
     try {
+      const e = email.trim()
       const callbackBase = getCallbackBase()
 
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: e,
         password,
         options: {
-          // Confirm email ON の時はこのURLへ。OFFでも害はないが、絶対URLで固定。
+          // Confirm email ON の時に必要（OFFでも害はない）
           emailRedirectTo: `${callbackBase}?next=/dashboard`,
         },
       })
@@ -88,25 +89,17 @@ export default function LoginPage() {
       if (error) {
         console.error(error)
         setMessage(`登録失敗: ${error.message}`)
-        setLoading(false)
         return
       }
 
-      // data.user は作られてても session が無いパターンがある（Confirm email ON など）
-      const hasSession = !!data.session
-
-      if (hasSession) {
-        setMessage('登録OK。そのまま入れる。')
-        setLoading(false)
+      // Confirm email OFF なら session が返ることがある
+      if (data.session) {
         window.location.href = '/dashboard'
         return
       }
 
       setMessage('登録OK。メール認証が必要なら、届いたメールを確認して。')
-      setLoading(false)
-    } catch (e) {
-      console.error(e)
-      setMessage('登録失敗: 予期しないエラー')
+    } finally {
       setLoading(false)
     }
   }
@@ -115,34 +108,29 @@ export default function LoginPage() {
     setLoading(true)
     setMessage(null)
 
-    if (!email) {
-      setMessage('Email を入れて。')
-      setLoading(false)
-      return
-    }
-
     try {
-      const callbackBase = getCallbackBase()
+      const e = email.trim()
+
+      if (!e) {
+        setMessage('Email を入れて。')
+        return
+      }
 
       // ✅ ここが肝：Supabase verify → /auth/callback → /reset-password に誘導
-      const redirectTo = `${callbackBase}?next=/reset-password`
+      const redirectTo = `${getCallbackBase()}?next=/reset-password`
 
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      const { error } = await supabase.auth.resetPasswordForEmail(e, {
         redirectTo,
       })
 
       if (error) {
         console.error(error)
         setMessage(`リセットメール送信失敗: ${error.message}`)
-        setLoading(false)
         return
       }
 
       setMessage('リセットメールを送った。受信箱/迷惑メールを確認して、最新メールのリンクだけ踏んで。')
-      setLoading(false)
-    } catch (e) {
-      console.error(e)
-      setMessage('リセットメール送信失敗: 予期しないエラー')
+    } finally {
       setLoading(false)
     }
   }
@@ -159,6 +147,7 @@ export default function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
           autoComplete="email"
+          inputMode="email"
           className={inputClass}
         />
 
@@ -170,29 +159,20 @@ export default function LoginPage() {
           placeholder="password"
           autoComplete="current-password"
           className={inputClass}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') login()
+          }}
         />
 
-        <button
-          onClick={login}
-          disabled={loading || !email || !password}
-          className={`mt-5 ${btnClass}`}
-        >
+        <button onClick={login} disabled={loading || !email || !password} className={`mt-5 ${btnClass}`}>
           {loading ? 'Loading...' : 'Login'}
         </button>
 
-        <button
-          onClick={signup}
-          disabled={loading || !email || !password}
-          className={`mt-3 ${btnClass}`}
-        >
+        <button onClick={signup} disabled={loading || !email || !password} className={`mt-3 ${btnClass}`}>
           Sign up
         </button>
 
-        <button
-          onClick={forgot}
-          disabled={loading || !email}
-          className={`mt-3 ${btnClass}`}
-        >
+        <button onClick={forgot} disabled={loading || !email} className={`mt-3 ${btnClass}`}>
           Forgot password
         </button>
 
