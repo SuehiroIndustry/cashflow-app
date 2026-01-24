@@ -10,27 +10,41 @@ const supabase = createClient(
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [password, setPassword] = useState('')
   const [message, setMessage] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  const sendMagicLink = async () => {
-    if (!email) return
-
+  const signIn = async () => {
     setLoading(true)
     setMessage(null)
 
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
+      password,
     })
 
     if (error) {
-      console.error(error)
-      setMessage(`送信に失敗しました：${error.message}`)
+      setMessage(error.message)
     } else {
-      setMessage('メールを送信しました。受信箱（迷惑メール含む）を確認してください。')
+      window.location.href = '/dashboard'
+    }
+
+    setLoading(false)
+  }
+
+  const signUp = async () => {
+    setLoading(true)
+    setMessage(null)
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    })
+
+    if (error) {
+      setMessage(error.message)
+    } else {
+      setMessage('登録完了。Login を押してください。')
     }
 
     setLoading(false)
@@ -38,60 +52,41 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-100">
-      <div className="w-full max-w-sm rounded-lg border border-neutral-300 bg-white p-6 shadow">
-        <h1 className="text-xl font-semibold text-neutral-900">Login</h1>
-        <p className="mt-1 text-sm text-neutral-600">
-          メールに Magic Link を送ります
-        </p>
+      <div className="w-full max-w-sm rounded bg-white p-6 shadow">
+        <h1 className="text-lg font-bold">Login</h1>
 
-        <label className="mt-4 block text-sm font-medium text-neutral-700">
-          Email
-        </label>
         <input
-          type="email"
+          className="mt-4 w-full border px-3 py-2"
+          placeholder="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-          className="
-            mt-1
-            w-full
-            rounded-md
-            border
-            border-neutral-400
-            bg-white
-            px-3
-            py-2
-            text-neutral-900
-            placeholder-neutral-400
-            focus:outline-none
-            focus:ring-2
-            focus:ring-blue-500
-          "
+        />
+
+        <input
+          type="password"
+          className="mt-2 w-full border px-3 py-2"
+          placeholder="password（8文字以上）"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
 
         <button
-          onClick={sendMagicLink}
-          disabled={loading || !email}
-          className="
-            mt-4
-            w-full
-            rounded-md
-            bg-blue-600
-            px-4
-            py-2
-            text-sm
-            font-medium
-            text-white
-            hover:bg-blue-700
-            disabled:opacity-50
-          "
+          onClick={signIn}
+          disabled={loading}
+          className="mt-4 w-full bg-black py-2 text-white"
         >
-          {loading ? 'Sending...' : 'Send Magic Link'}
+          Login
         </button>
 
-        {message && (
-          <p className="mt-3 text-sm text-neutral-700">{message}</p>
-        )}
+        <button
+          onClick={signUp}
+          disabled={loading}
+          className="mt-2 w-full border py-2"
+        >
+          Sign up
+        </button>
+
+        {message && <p className="mt-2 text-sm text-red-600">{message}</p>}
       </div>
     </div>
   )
