@@ -1,22 +1,16 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
+import { useSearchParams } from 'next/navigation'
+import { createBrowserClient } from '@supabase/ssr'
 
-const supabase = createClient(
+const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-  }
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
 export default function LoginPage() {
-  const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -50,14 +44,23 @@ export default function LoginPage() {
     []
   )
 
+  const callbackBase = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/auth/callback`
+  }, [])
+
+  const hardGo = (path: string) => {
+    // ✅ router より確実。middleware絡みでも必ず動く
+    window.location.href = path
+  }
+
   const login = async () => {
     if (loading) return
-
     setLoading(true)
     setMessage('ログイン処理を開始…')
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       })
@@ -68,14 +71,19 @@ export default function LoginPage() {
         return
       }
 
-      // 念のためセッション確認（ここで null なら cookie/persist が死んでる）
-      const { data: s } = await supabase.auth.getSession()
-      const hasSession = !!s.session
+      // ✅ cookie に載っているか最終確認（middleware が見るのはここ）
+      const { data: u, error: uErr } = await supabase.auth.getUser()
+      if (uErr) console.error('getUser after login error:', uErr)
 
-      setMessage(`ログイン成功。session=${hasSession ? 'OK' : 'NG（要調査）'}。/dashboard へ移動…`)
+      const ok = !!u.user
+      setMessage(`ログイン成功。session=${ok ? 'OK' : 'NG'}。遷移します…`)
 
-      router.replace('/dashboard')
-      router.refresh()
+      // next パラメータがあれば優先（/login?next=/dashboard など）
+      const next = searchParams?.get('next')
+      const nextPath = next && next.startsWith('/') ? next : '/dashboard'
+
+      // ✅ ハード遷移（確実）
+      hardGo(nextPath)
     } catch (e) {
       console.error(e)
       setMessage('ログイン処理で例外が発生。Console を見て。')
@@ -84,9 +92,33 @@ export default function LoginPage() {
     }
   }
 
+  const signup = async () => {
+    if (loading) return
+    setLoading(true)
+    setMessage(null)
+
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          emailRedirectTo: `${callbackBase}?next=/dashboard`,
+        },
+      })
+
+      if (error) {
+        console.error(error)
+        setMessage(`登録失敗: ${error.message}`)
+      } else {
+        setMessage('登録OK。Confirm email がONならメール確認が必要。OFFならそのままログインして。')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const forgot = async () => {
     if (loading) return
-
     setLoading(true)
     setMessage(null)
 
@@ -96,16 +128,18 @@ export default function LoginPage() {
         return
       }
 
-      // ✅ redirect_to は /auth/callback のみ（今の成功パターン）
-      const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL || window.location.origin}/auth/callback`
+      // ✅ これ固定：verify → /auth/callback → /reset-password
+      const redirectTo = `${callbackBase}?next=/reset-password`
 
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo })
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo,
+      })
 
       if (error) {
         console.error(error)
         setMessage(`リセットメール送信失敗: ${error.message}`)
       } else {
-        setMessage('リセットメールを送った。最新メールのリンクだけ踏んで。')
+        setMessage('リセットメールを送った。受信箱/迷惑メールを確認して、最新メールのリンクだけ踏んで。')
       }
     } finally {
       setLoading(false)
@@ -137,16 +171,15 @@ export default function LoginPage() {
           className={inputClass}
         />
 
-        <button
-          type="button"
-          onClick={login}
-          disabled={loading || !email || !password}
-          className={`mt-5 ${btnClass}`}
-        >
+        <button onClick={login} disabled={loading || !email || !password} className={`mt-5 ${btnClass}`}>
           {loading ? 'Loading...' : 'Login'}
         </button>
 
-        <button type="button" onClick={forgot} disabled={loading || !email} className={`mt-3 ${btnClass}`}>
+        <button onClick={signup} disabled={loading || !email || !password} className={`mt-3 ${btnClass}`}>
+          Sign up
+        </button>
+
+        <button onClick={forgot} disabled={loading || !email} className={`mt-3 ${btnClass}`}>
           Forgot password
         </button>
 
