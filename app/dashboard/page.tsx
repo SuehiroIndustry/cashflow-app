@@ -1,7 +1,3 @@
-  // ① 警告ブロック用（※一旦無効化）
-  const cashStatus = { status: "ok" } as any;
-  const alertCards: any[] = [];
-
 import DashboardClient from "./DashboardClient";
 
 import OverviewCard from "./_components/OverviewCard";
@@ -16,68 +12,96 @@ import type { OverviewPayload, MonthlyBalanceRow } from "./_types";
 
 const THRESHOLD = 1_000_000;
 
-// 取れなかった時に UI を落とさない最低限の値
 function fallbackOverviewPayload(): OverviewPayload {
-  // OverviewPayload の形はプロジェクト側定義に依存するので、
-  // 「落ちない」こと優先で any 経由にしてる（後で厳密化してOK）
   return {} as unknown as OverviewPayload;
 }
 
+function PlaceholderCard({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="rounded-xl border p-4">
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-2 text-sm opacity-80">{message}</div>
+    </div>
+  );
+}
+
 export default async function DashboardPage() {
-  // ① 警告ブロック用（ここは既存通り）
+  // ① 警告ブロック用（落とさない版に直してある前提）
   const cashStatus = await getDashboardCashStatus(THRESHOLD);
   const alertCards =
     cashStatus.status === "ok" ? [] : await getDashboardCashAlertCards(THRESHOLD);
 
-  // ② 既存カード用データ（payload / rows）を Server で用意する
-  //    supabase client 生成が落ちてもページを落とさない
+  // ② Supabase client 生成が落ちてもページを落とさない
   let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
   try {
     supabase = await createSupabaseServerClient();
-  } catch {
+  } catch (e) {
+    console.error("createSupabaseServerClient failed:", e);
     supabase = null;
   }
 
   // monthly rows（BalanceCard / EcoCharts 用）
   let monthlyRows: MonthlyBalanceRow[] = [];
   if (supabase) {
-    const { data, error } = await supabase
-      .from("v_dash_monthly_by_account")
-      .select("*")
-      .order("month", { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from("v_dash_monthly_by_account")
+        .select("*")
+        .order("month", { ascending: true });
 
-    if (!error && data) {
-      monthlyRows = data as unknown as MonthlyBalanceRow[];
-    } else {
-      // 取れなくても画面は落とさない
+      if (!error && data) {
+        monthlyRows = data as unknown as MonthlyBalanceRow[];
+      }
+    } catch (e) {
+      console.error("fetch v_dash_monthly_by_account failed:", e);
       monthlyRows = [];
     }
-  } else {
-    monthlyRows = [];
   }
 
   // overview payload（OverviewCard 用）
   let overviewPayload: OverviewPayload = fallbackOverviewPayload();
-  if (supabase) {
-    const { data, error } = await supabase
-      .from("v_dash_latest_balance_by_account")
-      .select("*");
+  let hasOverview = false;
 
-    if (!error && data) {
-      // OverviewCard が期待する payload 形にここで整形するのが本筋。
-      // いったん any で渡して「画面が進む」状態にする（後で payload を確定させよう）。
-      overviewPayload = ({ latestByAccount: data } as unknown) as OverviewPayload;
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("v_dash_latest_balance_by_account")
+        .select("*");
+
+      if (!error && data) {
+        overviewPayload = ({ latestByAccount: data } as unknown) as OverviewPayload;
+        // “空でも落ちない”ように最低限の存在チェック
+        hasOverview = Array.isArray(data) && data.length > 0;
+      }
+    } catch (e) {
+      console.error("fetch v_dash_latest_balance_by_account failed:", e);
+      overviewPayload = fallbackOverviewPayload();
+      hasOverview = false;
     }
-  } else {
-    overviewPayload = fallbackOverviewPayload();
   }
+
+  const hasMonthly = monthlyRows.length > 0;
 
   return (
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
       <div className="grid gap-4 md:grid-cols-3">
-        <OverviewCard payload={overviewPayload} />
-        <BalanceCard rows={monthlyRows} />
-        <EcoCharts rows={monthlyRows} />
+        {hasOverview ? (
+          <OverviewCard payload={overviewPayload} />
+        ) : (
+          <PlaceholderCard title="Overview" message="データが未取得のため表示できません。" />
+        )}
+
+        {hasMonthly ? (
+          <BalanceCard rows={monthlyRows} />
+        ) : (
+          <PlaceholderCard title="Balance" message="月次データが未取得のため表示できません。" />
+        )}
+
+        {hasMonthly ? (
+          <EcoCharts rows={monthlyRows} />
+        ) : (
+          <PlaceholderCard title="Charts" message="月次データが未取得のため表示できません。" />
+        )}
       </div>
     </DashboardClient>
   );
