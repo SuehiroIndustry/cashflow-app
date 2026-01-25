@@ -20,19 +20,23 @@ function fallbackOverviewPayload(): OverviewPayload {
 }
 
 export default async function DashboardPage() {
-  // ① 警告ブロック用
+  // ① 警告ブロック用（ここは既存通り）
   const cashStatus = await getDashboardCashStatus(THRESHOLD);
   const alertCards =
     cashStatus.status === "ok" ? [] : await getDashboardCashAlertCards(THRESHOLD);
 
   // ② 既存カード用データ（payload / rows）を Server で用意する
-  const supabase = await createSupabaseServerClient();
+  //    supabase client 生成が落ちてもページを落とさない
+  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
+  try {
+    supabase = await createSupabaseServerClient();
+  } catch {
+    supabase = null;
+  }
 
   // monthly rows（BalanceCard / EcoCharts 用）
   let monthlyRows: MonthlyBalanceRow[] = [];
-  {
-    // ここは「あなたのDBに存在してる view を使う」前提で組んでる。
-    // もし view 名が違うなら、ここだけ合わせればOK。
+  if (supabase) {
     const { data, error } = await supabase
       .from("v_dash_monthly_by_account")
       .select("*")
@@ -44,12 +48,13 @@ export default async function DashboardPage() {
       // 取れなくても画面は落とさない
       monthlyRows = [];
     }
+  } else {
+    monthlyRows = [];
   }
 
   // overview payload（OverviewCard 用）
   let overviewPayload: OverviewPayload = fallbackOverviewPayload();
-  {
-    // 例：最新残高ビューから Overview 用の材料を取る（実際の OverviewCard の期待形に合わせて後で整形）
+  if (supabase) {
     const { data, error } = await supabase
       .from("v_dash_latest_balance_by_account")
       .select("*");
@@ -59,6 +64,8 @@ export default async function DashboardPage() {
       // いったん any で渡して「画面が進む」状態にする（後で payload を確定させよう）。
       overviewPayload = ({ latestByAccount: data } as unknown) as OverviewPayload;
     }
+  } else {
+    overviewPayload = fallbackOverviewPayload();
   }
 
   return (
