@@ -1,3 +1,7 @@
+  // ① 警告ブロック用（※一旦無効化）
+  const cashStatus = { status: "ok" } as any;
+  const alertCards: any[] = [];
+
 import DashboardClient from "./DashboardClient";
 
 import OverviewCard from "./_components/OverviewCard";
