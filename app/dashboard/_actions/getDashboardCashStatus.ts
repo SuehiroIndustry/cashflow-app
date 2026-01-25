@@ -1,5 +1,3 @@
-"use server";
-
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type DashboardCashStatus = {
@@ -11,10 +9,9 @@ export type DashboardCashStatus = {
   worst_balance: number | null;
 };
 
-// 取得できない時に UI を落とさないための安全なデフォルト
 function fallbackStatus(): DashboardCashStatus {
   return {
-    status: "warning", // 取得できない＝監視上は「注意」に倒す（見逃し防止）
+    status: "warning",
     monitored_accounts: 0,
     warning_count: 0,
     danger_count: 0,
@@ -23,6 +20,10 @@ function fallbackStatus(): DashboardCashStatus {
   };
 }
 
+/**
+ * Server Component から呼ぶ “通常の” server 関数
+ * ※ Server Action にしない（"use server" を付けない）
+ */
 export async function getDashboardCashStatus(
   threshold: number = 1_000_000
 ): Promise<DashboardCashStatus> {
@@ -38,7 +39,6 @@ export async function getDashboardCashStatus(
       return fallbackStatus();
     }
 
-    // 返り値が壊れてても落とさない（最低限の形を保証）
     const parsed = data as Partial<DashboardCashStatus>;
 
     const status =
@@ -51,10 +51,8 @@ export async function getDashboardCashStatus(
       monitored_accounts: typeof parsed.monitored_accounts === "number" ? parsed.monitored_accounts : 0,
       warning_count: typeof parsed.warning_count === "number" ? parsed.warning_count : 0,
       danger_count: typeof parsed.danger_count === "number" ? parsed.danger_count : 0,
-      first_alert_month:
-        typeof parsed.first_alert_month === "string" ? parsed.first_alert_month : null,
-      worst_balance:
-        typeof parsed.worst_balance === "number" ? parsed.worst_balance : null,
+      first_alert_month: typeof parsed.first_alert_month === "string" ? parsed.first_alert_month : null,
+      worst_balance: typeof parsed.worst_balance === "number" ? parsed.worst_balance : null,
     };
   } catch (e) {
     console.error("getDashboardCashStatus unexpected error:", e);

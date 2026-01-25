@@ -1,5 +1,3 @@
-"use server";
-
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type DashboardCashAlertCard = {
@@ -10,10 +8,8 @@ export type DashboardCashAlertCard = {
   alert_level: "warning" | "danger";
 };
 
-// UI を落とさないための安全な整形
 function normalizeCard(row: unknown): DashboardCashAlertCard | null {
   const r = row as Partial<DashboardCashAlertCard> | null;
-
   if (!r) return null;
 
   const alertLevel =
@@ -38,6 +34,10 @@ function normalizeCard(row: unknown): DashboardCashAlertCard | null {
   };
 }
 
+/**
+ * Server Component から呼ぶ “通常の” server 関数
+ * ※ Server Action にしない（"use server" を付けない）
+ */
 export async function getDashboardCashAlertCards(
   threshold: number = 1_000_000
 ): Promise<DashboardCashAlertCard[]> {
