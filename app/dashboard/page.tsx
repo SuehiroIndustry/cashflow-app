@@ -1,10 +1,13 @@
 // app/dashboard/page.tsx
+
 import DashboardClient, {
   type DashboardCashAlertCard,
   type DashboardCashStatus,
 } from "./DashboardClient";
 
 import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+// EcoCharts は次のステップで接続するので、今は import しない
 
 import {
   getCashAccountRiskAlerts,
@@ -13,6 +16,9 @@ import {
 
 import type { OverviewPayload } from "./_types";
 
+/**
+ * DBの警告View → Dashboard表示用に変換
+ */
 function toCashStatus(
   rows: CashAccountRiskAlertRow[],
 ): { cashStatus: DashboardCashStatus; alertCards: DashboardCashAlertCard[] } {
@@ -22,7 +28,11 @@ function toCashStatus(
   const warningRows = rows.filter((r) => r.risk_level === "YELLOW");
 
   const status: DashboardCashStatus["status"] =
-    dangerRows.length > 0 ? "danger" : warningRows.length > 0 ? "warning" : "ok";
+    dangerRows.length > 0
+      ? "danger"
+      : warningRows.length > 0
+      ? "warning"
+      : "ok";
 
   const nonGreen = rows.filter((r) => r.risk_level !== "GREEN");
 
@@ -60,22 +70,27 @@ function toCashStatus(
 }
 
 export default async function DashboardPage() {
+  // ① DBから警告情報を取得
   const rows = await getCashAccountRiskAlerts();
   const { cashStatus, alertCards } = toCashStatus(rows);
 
-  // OverviewCard は null でOK（落ちない設計）
+  // ② Overview はまず null（落ちない設計なので安全）
   const payload: OverviewPayload | null = null;
 
   return (
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
-      {/* まずは警告 + Overview だけでビルドを通す */}
       <div className="grid gap-4 md:grid-cols-3">
-  <OverviewCard payload={payload} />
-  <BalanceCard />
-  <div className="rounded-xl border p-4 text-sm text-neutral-300">
-    EcoCharts（次に接続）
-  </div>
-</div>
+        {/* Overview */}
+        <OverviewCard payload={payload} />
+
+        {/* Balance */}
+        <BalanceCard />
+
+        {/* EcoCharts は次に接続 */}
+        <div className="rounded-xl border border-neutral-700 bg-neutral-950 p-4 text-sm text-neutral-300">
+          EcoCharts（次に接続）
+        </div>
+      </div>
     </DashboardClient>
   );
 }
