@@ -1,7 +1,6 @@
 // app/dashboard/_actions/getCashAccountRiskAlerts.ts
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/auth-helpers-nextjs";
-import type { Database } from "@/lib/database.types";
 
 export type CashAccountRiskLevel = "GREEN" | "YELLOW" | "RED";
 
@@ -23,13 +22,12 @@ export async function getCashAccountRiskAlerts(): Promise<CashAccountRiskAlertRo
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
   }
 
-  const supabase = createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       get(name: string) {
         return cookieStore.get(name)?.value;
       },
       set(name: string, value: string, options: any) {
-        // Nextのcookiesは set({name,value,...}) 形式
         cookieStore.set({ name, value, ...options });
       },
       remove(name: string, options: any) {
