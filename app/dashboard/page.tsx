@@ -1,29 +1,30 @@
 // app/dashboard/page.tsx
 import DashboardClient from "./DashboardClient";
-
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: { account?: string };
+  searchParams?: { account?: string };
 }) {
   const accounts = await getAccounts();
 
-  // ✅ クエリのaccountを数値化。無ければ先頭口座にフォールバック
-  const requestedId = Number(searchParams?.account ?? "");
-  const fallbackId = accounts[0]?.id ?? null;
+  const requestedId = searchParams?.account ? Number(searchParams.account) : null;
 
   const selectedAccountId =
-    Number.isFinite(requestedId) && requestedId > 0 ? requestedId : fallbackId;
+    requestedId != null &&
+    Number.isFinite(requestedId) &&
+    accounts.some((a) => a.id === requestedId)
+      ? requestedId
+      : accounts[0]?.id ?? null;
 
   const monthly =
-  selectedAccountId != null
-    ? await getMonthlyBalance({ cashAccountId: selectedAccountId, months: 24 })
-    : [];
+    selectedAccountId != null
+      ? await getMonthlyBalance({ cashAccountId: selectedAccountId, months: 24 })
+      : [];
 
-  // 今は一旦ダミー（後で戻す）
+  // いまはダミーのままでOK
   const cashStatus = null;
   const alertCards: any[] = [];
 

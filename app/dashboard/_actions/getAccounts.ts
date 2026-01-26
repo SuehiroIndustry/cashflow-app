@@ -10,12 +10,12 @@ export type AccountRow = {
 };
 
 export async function getAccounts(): Promise<AccountRow[]> {
-  const supabase = await createSupabaseServerClient(); // ✅ await が必須
+  const supabase = await createSupabaseServerClient();
 
   const { data, error } = await supabase
     .from("cash_accounts")
     .select("id, name, current_balance")
-    .order("id");
+    .order("id", { ascending: true });
 
   if (error) {
     console.error("[getAccounts] error:", error);
