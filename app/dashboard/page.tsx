@@ -35,7 +35,6 @@ function riskScore(level: string) {
 function pickMostRiskyAccount(rows: RiskRow[]): number {
   if (rows.length === 0) return 0;
 
-  // 優先度: RED > YELLOW > GREEN → 予測残高が小さい → id 小さい
   let best = rows[0];
 
   for (const r of rows) {
@@ -72,7 +71,6 @@ function computeCashStatus(rows: RiskRow[]) {
   const status: "ok" | "warning" | "danger" =
     danger_count > 0 ? "danger" : warning_count > 0 ? "warning" : "ok";
 
-  // 最初の警告（YELLOW/RED の中で最小の月）
   const alertMonths = rows
     .filter((r) => String(r.risk_level) !== "GREEN")
     .map((r) => r.alert_month)
@@ -81,7 +79,6 @@ function computeCashStatus(rows: RiskRow[]) {
 
   const first_alert_month = alertMonths.length > 0 ? alertMonths[0] : null;
 
-  // 最悪残高（YELLOW/RED の中で最小）
   const worstNums = rows
     .filter((r) => String(r.risk_level) !== "GREEN")
     .map((r) => r.alert_projected_ending_cash)
@@ -99,7 +96,6 @@ function computeCashStatus(rows: RiskRow[]) {
   };
 }
 
-// ✅ ここが今回の修正ポイント：alert_level を "danger" | "warning" に固定
 function computeAlertCards(rows: RiskRow[]) {
   return rows
     .filter((r) => {
@@ -121,27 +117,21 @@ function computeAlertCards(rows: RiskRow[]) {
 }
 
 export default async function DashboardPage() {
-  // ① DBの警告View（Actionの戻り値は「配列」）
   const riskRowsRaw = await getCashAccountRiskAlerts();
   const riskRows = (riskRowsRaw ?? []) as RiskRow[];
 
-  // ② 上部の警告バー用（DashboardClientに渡す）
   const cashStatus = computeCashStatus(riskRows);
   const alertCards = computeAlertCards(riskRows);
 
-  // ③ Overviewは「最も危険な口座」を選ぶ
   const pickedAccountId = pickMostRiskyAccount(riskRows);
-
-  // ④ Overviewの対象月（今月）
   const month = monthStartISO(new Date());
 
-  // ⑤ Overview payload（getOverview を使用）
   const payload = await getOverview({
     cashAccountId: pickedAccountId,
     month,
   });
 
-  // ⑥ BalanceCard は rows 必須。次で本接続するので今は空配列で通す
+  // rows 必須（BalanceCard / EcoCharts 両方）
   const balanceRows: any[] = [];
 
   return (
@@ -149,7 +139,7 @@ export default async function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-3">
         <OverviewCard payload={payload} />
         <BalanceCard rows={balanceRows} />
-        <EcoCharts />
+        <EcoCharts rows={balanceRows} />
       </div>
     </DashboardClient>
   );
