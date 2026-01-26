@@ -99,17 +99,25 @@ function computeCashStatus(rows: RiskRow[]) {
   };
 }
 
+// ✅ ここが今回の修正ポイント：alert_level を "danger" | "warning" に固定
 function computeAlertCards(rows: RiskRow[]) {
-  // YELLOW/RED だけカードに出す
   return rows
-    .filter((r) => String(r.risk_level) === "YELLOW" || String(r.risk_level) === "RED")
-    .map((r) => ({
-      cash_account_id: Number(r.cash_account_id),
-      account_name: r.cash_account_name ?? `口座ID:${r.cash_account_id}`,
-      first_alert_month: r.alert_month ?? monthStartISO(new Date()),
-      projected_ending_balance: Number(r.alert_projected_ending_cash ?? 0),
-      alert_level: String(r.risk_level) === "RED" ? "danger" : "warning",
-    }));
+    .filter((r) => {
+      const lv = String(r.risk_level);
+      return lv === "YELLOW" || lv === "RED";
+    })
+    .map((r) => {
+      const lv = String(r.risk_level);
+      const alert_level: "danger" | "warning" = lv === "RED" ? "danger" : "warning";
+
+      return {
+        cash_account_id: Number(r.cash_account_id),
+        account_name: r.cash_account_name ?? `口座ID:${r.cash_account_id}`,
+        first_alert_month: r.alert_month ?? monthStartISO(new Date()),
+        projected_ending_balance: Number(r.alert_projected_ending_cash ?? 0),
+        alert_level,
+      };
+    });
 }
 
 export default async function DashboardPage() {
@@ -127,7 +135,7 @@ export default async function DashboardPage() {
   // ④ Overviewの対象月（今月）
   const month = monthStartISO(new Date());
 
-  // ⑤ Overview payload（今の getOverview を使用）
+  // ⑤ Overview payload（getOverview を使用）
   const payload = await getOverview({
     cashAccountId: pickedAccountId,
     month,
