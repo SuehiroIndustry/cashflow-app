@@ -22,5 +22,10 @@ export async function getAccounts(): Promise<AccountRow[]> {
     return [];
   }
 
-  return (data ?? []) as AccountRow[];
+  // ✅ 型ズレ殺し（id が string でも number に矯正）
+  return (data ?? []).map((r: any) => ({
+    id: Number(r.id),
+    name: String(r.name ?? ""),
+    current_balance: Number(r.current_balance ?? 0),
+  }));
 }
