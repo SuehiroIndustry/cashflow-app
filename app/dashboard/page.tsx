@@ -15,7 +15,6 @@ import {
 } from "./_actions/getCashAccountRiskAlerts";
 
 import type { OverviewPayload } from "./_types";
-import type { MonthlyBalanceRow } from "./_actions/getMonthlyBalance";
 
 /**
  * DBの警告View → Dashboard表示用に変換
@@ -71,15 +70,15 @@ function toCashStatus(
 }
 
 export default async function DashboardPage() {
-  // ① 警告情報
+  // ① 警告情報（本物）
   const rows = await getCashAccountRiskAlerts();
   const { cashStatus, alertCards } = toCashStatus(rows);
 
   // ② Overview はまだ null でOK
   const payload: OverviewPayload | null = null;
 
-  // ③ Balance は仮データ（空配列）で通す
-  const balanceRows: MonthlyBalanceRow[] = [];
+  // ③ Balance は仮データ（型は今は気にしない）
+  const balanceRows: any[] = [];
 
   return (
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
@@ -87,7 +86,7 @@ export default async function DashboardPage() {
         {/* Overview */}
         <OverviewCard payload={payload} />
 
-        {/* Balance（rows 必須なので空配列を渡す） */}
+        {/* Balance（rows 必須なので空配列） */}
         <BalanceCard rows={balanceRows} />
 
         {/* EcoCharts は次に接続 */}
