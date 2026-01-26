@@ -10,8 +10,7 @@ export type AccountRow = {
 };
 
 export async function getAccounts(): Promise<AccountRow[]> {
-  // ✅ ここがポイント：await する
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient(); // ✅ await が必須
 
   const { data, error } = await supabase
     .from("cash_accounts")
@@ -19,9 +18,9 @@ export async function getAccounts(): Promise<AccountRow[]> {
     .order("id");
 
   if (error) {
-    console.error("getAccounts error:", error);
+    console.error("[getAccounts] error:", error);
     return [];
   }
 
-  return data ?? [];
+  return (data ?? []) as AccountRow[];
 }

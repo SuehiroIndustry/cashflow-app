@@ -1,33 +1,27 @@
 // app/dashboard/page.tsx
 import DashboardClient from "./DashboardClient";
+
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: { account?: string };
+  searchParams: { account?: string };
 }) {
   const accounts = await getAccounts();
 
-  // ✅ 初期口座は「現金」優先（なければ先頭）
-  const preferredId =
-    accounts.find((a) => a.name === "現金")?.id ?? accounts[0]?.id ?? null;
+  // ✅ クエリのaccountを数値化。無ければ先頭口座にフォールバック
+  const requestedId = Number(searchParams?.account ?? "");
+  const fallbackId = accounts[0]?.id ?? null;
 
-  const selectedAccountId = (() => {
-    const q = searchParams?.account;
-    if (!q) return preferredId;
-    const n = Number(q);
-    return Number.isFinite(n) ? n : preferredId;
-  })();
+  const selectedAccountId =
+    Number.isFinite(requestedId) && requestedId > 0 ? requestedId : fallbackId;
 
-  const monthly = await getMonthlyBalance({
-    cashAccountId: selectedAccountId,
-    months: 24,
-  });
+  const monthly =
+    selectedAccountId != null ? await getMonthlyBalance(selectedAccountId) : [];
 
-  // ✅ ひとまずビルドを通すため、リスク/ステータスは空で渡す
-  // （次のステップでDBビューからちゃんと取る）
+  // 今は一旦ダミー（後で戻す）
   const cashStatus = null;
   const alertCards: any[] = [];
 
