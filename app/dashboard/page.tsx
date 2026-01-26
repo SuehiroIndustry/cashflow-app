@@ -8,6 +8,7 @@ import EcoCharts from "./_components/EcoCharts";
 
 import { getOverview } from "./_actions/getOverview";
 import { getCashAccountRiskAlerts } from "./_actions/getCashAccountRiskAlerts";
+import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
 function monthStartISO(d: Date) {
   const y = d.getFullYear();
@@ -117,22 +118,29 @@ function computeAlertCards(rows: RiskRow[]) {
 }
 
 export default async function DashboardPage() {
+  // ① 警告（配列）
   const riskRowsRaw = await getCashAccountRiskAlerts();
   const riskRows = (riskRowsRaw ?? []) as RiskRow[];
 
+  // ② 上部警告バー
   const cashStatus = computeCashStatus(riskRows);
   const alertCards = computeAlertCards(riskRows);
 
+  // ③ Dashboardの“主役口座”＝最も危険な口座
   const pickedAccountId = pickMostRiskyAccount(riskRows);
-  const month = monthStartISO(new Date());
 
+  // ④ Overview
+  const month = monthStartISO(new Date());
   const payload = await getOverview({
     cashAccountId: pickedAccountId,
     month,
   });
 
-  // rows 必須（BalanceCard / EcoCharts 両方）
-  const balanceRows: any[] = [];
+  // ⑤ Balance/EcoCharts：直近12ヶ月（主役口座の月次）
+  const balanceRows = await getMonthlyBalance({
+    cashAccountId: pickedAccountId,
+    months: 12,
+  });
 
   return (
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
