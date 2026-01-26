@@ -15,16 +15,12 @@ function addMonths(d: Date, n: number) {
   return x;
 }
 
-function normalizeSection(raw: unknown): "in" | "out" | "unknown" {
-  const s = String(raw ?? "").trim().toLowerCase();
+function isIncome(section: string) {
+  return section === "in" || section === "income" || section === "収入";
+}
 
-  // ✅ 収入系
-  if (s === "in" || s === "income" || s === "収入" || s === "入金") return "in";
-
-  // ✅ 支出系
-  if (s === "out" || s === "expense" || s === "支出" || s === "出金") return "out";
-
-  return "unknown";
+function isExpense(section: string) {
+  return section === "out" || section === "expense" || section === "支出";
 }
 
 export async function getOverview(input: Input): Promise<OverviewPayload> {
@@ -40,21 +36,18 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   const from = monthStart.toISOString().slice(0, 10);
   const toExclusive = nextMonth.toISOString().slice(0, 10);
 
-  // =========================
   // 現在残高（口座 or 全口座）
-  // =========================
   let accountName = "全口座";
   let currentBalance = 0;
 
   if (cashAccountId === 0) {
-    const { data, error } = await supabase
-      .from("cash_accounts")
-      .select("current_balance");
+    const { data, error } = await supabase.from("cash_accounts").select("current_balance");
     if (error) throw error;
 
-    currentBalance = (data ?? []).reduce((sum: number, r: any) => {
-      return sum + Number(r.current_balance ?? 0);
-    }, 0);
+    currentBalance = (data ?? []).reduce(
+      (sum: number, r: any) => sum + Number(r.current_balance ?? 0),
+      0
+    );
   } else {
     const { data, error } = await supabase
       .from("cash_accounts")
@@ -67,9 +60,7 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     currentBalance = Number(data?.current_balance ?? 0);
   }
 
-  // =========================
   // 今月の in/out
-  // =========================
   let q = supabase
     .from("cash_flows")
     .select("section, amount")
@@ -85,13 +76,10 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   let thisMonthExpense = 0;
 
   for (const r of flows ?? []) {
-    const section = normalizeSection((r as any).section);
+    const section = String((r as any).section ?? "");
     const amount = Number((r as any).amount ?? 0);
-
-    if (!Number.isFinite(amount)) continue;
-
-    if (section === "in") thisMonthIncome += amount;
-    if (section === "out") thisMonthExpense += amount;
+    if (isIncome(section)) thisMonthIncome += amount;
+    if (isExpense(section)) thisMonthExpense += amount;
   }
 
   const net = thisMonthIncome - thisMonthExpense;
