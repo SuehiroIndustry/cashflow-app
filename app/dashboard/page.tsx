@@ -19,7 +19,9 @@ export default async function DashboardPage({
     Number.isFinite(requestedId) && requestedId > 0 ? requestedId : fallbackId;
 
   const monthly =
-    selectedAccountId != null ? await getMonthlyBalance(selectedAccountId) : [];
+  selectedAccountId != null
+    ? await getMonthlyBalance({ cashAccountId: selectedAccountId, months: 24 })
+    : [];
 
   // 今は一旦ダミー（後で戻す）
   const cashStatus = null;
