@@ -1,95 +1,66 @@
 // app/dashboard/page.tsx
 import React from "react";
 
-import DashboardClient from "./DashboardClient";
+import { createClient } from "@/utils/supabase/server";
+
+import DashboardClient, {
+  type DashboardCashStatus,
+  type DashboardCashAlertCard,
+} from "./DashboardClient";
+
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
 import { getOverview } from "./_actions/getOverview";
-import { getCashAccountRiskAlerts } from "./_actions/getCashAccountRiskAlerts";
-import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
+import { getCashAccountRiskAlerts, type CashAccountRiskAlertRow } from "./_actions/getCashAccountRiskAlerts";
 
-function monthStartISO(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}-01`;
+import type { MonthlyBalanceRow, OverviewPayload } from "./_types";
+
+/**
+ * 月初(YYYY-MM-01)を返す
+ */
+function monthStartISO(d = new Date()) {
+  const x = new Date(d.getFullYear(), d.getMonth(), 1);
+  return x.toISOString().slice(0, 10);
 }
 
-type RiskLevel = "GREEN" | "YELLOW" | "RED";
-
-type RiskRow = {
-  cash_account_id: number;
-  cash_account_name?: string | null;
-  risk_level: RiskLevel | string;
-  alert_month?: string | null;
-  alert_projected_ending_cash?: number | null;
-};
-
-function riskScore(level: string) {
-  if (level === "RED") return 3;
-  if (level === "YELLOW") return 2;
-  if (level === "GREEN") return 1;
-  return 0;
+function toStatus(riskLevel: string): "warning" | "danger" | null {
+  if (riskLevel === "RED") return "danger";
+  if (riskLevel === "YELLOW") return "warning";
+  return null;
 }
 
-function pickMostRiskyAccount(rows: RiskRow[]): number {
-  if (rows.length === 0) return 0;
+function computeCashStatus(rows: CashAccountRiskAlertRow[]): DashboardCashStatus {
+  const monitored_accounts = rows.length;
 
-  let best = rows[0];
+  let warning_count = 0;
+  let danger_count = 0;
+
+  let first_alert_month: string | null = null;
+  let worst_balance: number | null = null;
 
   for (const r of rows) {
-    const sa = riskScore(String(best.risk_level));
-    const sb = riskScore(String(r.risk_level));
+    const lv = toStatus(r.risk_level);
+    if (lv === "warning") warning_count += 1;
+    if (lv === "danger") danger_count += 1;
 
-    if (sb > sa) {
-      best = r;
-      continue;
+    if (lv) {
+      if (!first_alert_month || r.alert_month < first_alert_month) {
+        first_alert_month = r.alert_month;
+      }
+      if (worst_balance == null || r.alert_projected_ending_cash < worst_balance) {
+        worst_balance = r.alert_projected_ending_cash;
+      }
     }
-    if (sb < sa) continue;
-
-    const ba = best.alert_projected_ending_cash ?? Number.POSITIVE_INFINITY;
-    const bb = r.alert_projected_ending_cash ?? Number.POSITIVE_INFINITY;
-
-    if (bb < ba) {
-      best = r;
-      continue;
-    }
-    if (bb > ba) continue;
-
-    if ((r.cash_account_id ?? 0) < (best.cash_account_id ?? 0)) best = r;
   }
-
-  return Number(best.cash_account_id) || 0;
-}
-
-function computeCashStatus(rows: RiskRow[]) {
-  const monitored = rows.length;
-
-  const warning_count = rows.filter((r) => String(r.risk_level) === "YELLOW").length;
-  const danger_count = rows.filter((r) => String(r.risk_level) === "RED").length;
 
   const status: "ok" | "warning" | "danger" =
     danger_count > 0 ? "danger" : warning_count > 0 ? "warning" : "ok";
 
-  const alertMonths = rows
-    .filter((r) => String(r.risk_level) !== "GREEN")
-    .map((r) => r.alert_month)
-    .filter((x): x is string => typeof x === "string" && x.length > 0)
-    .sort();
-
-  const first_alert_month = alertMonths.length > 0 ? alertMonths[0] : null;
-
-  const worstNums = rows
-    .filter((r) => String(r.risk_level) !== "GREEN")
-    .map((r) => r.alert_projected_ending_cash)
-    .filter((x): x is number => typeof x === "number" && Number.isFinite(x));
-
-  const worst_balance = worstNums.length > 0 ? Math.min(...worstNums) : null;
-
   return {
     status,
-    monitored_accounts: monitored,
+    monitored_accounts,
     warning_count,
     danger_count,
     first_alert_month,
@@ -97,50 +68,114 @@ function computeCashStatus(rows: RiskRow[]) {
   };
 }
 
-function computeAlertCards(rows: RiskRow[]) {
-  return rows
-    .filter((r) => {
-      const lv = String(r.risk_level);
-      return lv === "YELLOW" || lv === "RED";
-    })
+function computeAlertCards(rows: CashAccountRiskAlertRow[]): DashboardCashAlertCard[] {
+  // ✅ “警告/危険”だけカード化（GREEN は除外）
+  const cards = rows
     .map((r) => {
-      const lv = String(r.risk_level);
-      const alert_level: "danger" | "warning" = lv === "RED" ? "danger" : "warning";
+      const lv = toStatus(r.risk_level);
+      if (!lv) return null;
 
-      return {
-        cash_account_id: Number(r.cash_account_id),
-        account_name: r.cash_account_name ?? `口座ID:${r.cash_account_id}`,
-        first_alert_month: r.alert_month ?? monthStartISO(new Date()),
-        projected_ending_balance: Number(r.alert_projected_ending_cash ?? 0),
-        alert_level,
+      const card: DashboardCashAlertCard = {
+        cash_account_id: r.cash_account_id,
+        account_name: r.cash_account_name,
+        first_alert_month: r.alert_month,
+        projected_ending_balance: r.alert_projected_ending_cash,
+        alert_level: lv, // ← "warning" | "danger" に確定
       };
-    });
+      return card;
+    })
+    .filter(Boolean) as DashboardCashAlertCard[];
+
+  // 重大度順 → 月順 → 残高悪い順
+  cards.sort((a, b) => {
+    const w = (x: "warning" | "danger") => (x === "danger" ? 0 : 1);
+    const d = w(a.alert_level) - w(b.alert_level);
+    if (d !== 0) return d;
+
+    const m = a.first_alert_month.localeCompare(b.first_alert_month);
+    if (m !== 0) return m;
+
+    return a.projected_ending_balance - b.projected_ending_balance;
+  });
+
+  return cards;
+}
+
+/**
+ * “最も危険な口座”を選ぶ（Overview用）
+ * - RED がいれば RED 優先
+ * - 次に YELLOW
+ * - なければ 0(全口座)
+ */
+function pickMostRiskyAccountId(rows: CashAccountRiskAlertRow[]): number {
+  const dangers = rows.filter((r) => r.risk_level === "RED");
+  if (dangers.length) return dangers[0]!.cash_account_id;
+
+  const warns = rows.filter((r) => r.risk_level === "YELLOW");
+  if (warns.length) return warns[0]!.cash_account_id;
+
+  return 0;
+}
+
+/**
+ * 月次残高（BalanceCard / EcoCharts）
+ * - monthly_cash_account_balances が無い/権限NGでも落とさない
+ */
+async function getMonthlyBalanceRows(cashAccountId: number): Promise<MonthlyBalanceRow[]> {
+  try {
+    const supabase = await createClient();
+
+    let q = supabase
+      .from("monthly_cash_account_balances")
+      .select("month,income,expense,balance")
+      .order("month", { ascending: true });
+
+    if (cashAccountId !== 0) q = q.eq("cash_account_id", cashAccountId);
+
+    const { data, error } = await q;
+    if (error) {
+      console.error("[dashboard] monthly balances error:", error);
+      return [];
+    }
+    if (!Array.isArray(data)) return [];
+
+    return data.map((r: any) => ({
+      month: String(r.month ?? ""),
+      income: Number(r.income ?? 0),
+      expense: Number(r.expense ?? 0),
+      balance: Number(r.balance ?? 0),
+    }));
+  } catch (e) {
+    console.error("[dashboard] monthly balances unexpected:", e);
+    return [];
+  }
 }
 
 export default async function DashboardPage() {
-  // ① 警告（配列）
-  const riskRowsRaw = await getCashAccountRiskAlerts();
-  const riskRows = (riskRowsRaw ?? []) as RiskRow[];
+  // ① 上部警告（絶対落とさない）
+  const riskRows: CashAccountRiskAlertRow[] = await getCashAccountRiskAlerts().catch((e) => {
+    console.error("[dashboard] risk alerts failed:", e);
+    return [];
+  });
 
-  // ② 上部警告バー
   const cashStatus = computeCashStatus(riskRows);
   const alertCards = computeAlertCards(riskRows);
 
-  // ③ Dashboardの“主役口座”＝最も危険な口座
-  const pickedAccountId = pickMostRiskyAccount(riskRows);
-
-  // ④ Overview
+  // ② Overview の対象口座
+  const targetAccountId = pickMostRiskyAccountId(riskRows);
   const month = monthStartISO(new Date());
-  const payload = await getOverview({
-    cashAccountId: pickedAccountId,
-    month,
-  });
 
-  // ⑤ Balance/EcoCharts：直近12ヶ月（主役口座の月次）
-  const balanceRows = await getMonthlyBalance({
-    cashAccountId: pickedAccountId,
-    months: 12,
-  });
+  // ③ Overview（落としてもOK：画面は出す）
+  let payload: OverviewPayload | null = null;
+  try {
+    payload = await getOverview({ cashAccountId: targetAccountId, month });
+  } catch (e) {
+    console.error("[dashboard] getOverview failed:", e);
+    payload = null;
+  }
+
+  // ④ 月次残高（落としてもOK）
+  const balanceRows = await getMonthlyBalanceRows(targetAccountId);
 
   return (
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>

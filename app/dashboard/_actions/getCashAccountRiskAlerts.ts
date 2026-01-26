@@ -1,6 +1,7 @@
 // app/dashboard/_actions/getCashAccountRiskAlerts.ts
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/auth-helpers-nextjs";
+"use server";
+
+import { createClient } from "@/utils/supabase/server";
 
 export type CashAccountRiskLevel = "GREEN" | "YELLOW" | "RED";
 
@@ -8,50 +9,63 @@ export type CashAccountRiskAlertRow = {
   cash_account_id: number;
   cash_account_name: string;
   risk_level: CashAccountRiskLevel;
-  alert_month: string; // e.g. "2026-02-01"
+  alert_month: string; // YYYY-MM-01
   alert_projected_ending_cash: number;
 };
 
+/**
+ * Dashboard上部の「危険/注意」判定の元データを返す
+ * - 失敗しても throw しない（本番の Server Component を落とさない）
+ */
 export async function getCashAccountRiskAlerts(): Promise<CashAccountRiskAlertRow[]> {
-  // ✅ Next.js 16: cookies() is async
-  const cookieStore = await cookies();
+  try {
+    const supabase = await createClient();
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const { data, error } = await supabase
+      .from("v_cash_account_risk_alerts")
+      .select(
+        "cash_account_id, cash_account_name, risk_level, alert_month, alert_projected_ending_cash"
+      )
+      .order("cash_account_id", { ascending: true });
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
+    if (error) {
+      console.error("[getCashAccountRiskAlerts] supabase error:", error);
+      return [];
+    }
+
+    if (!Array.isArray(data)) return [];
+
+    // ✅ 形が崩れてても落とさない
+    const rows: CashAccountRiskAlertRow[] = data
+      .map((r: any) => {
+        const cash_account_id = Number(r?.cash_account_id);
+        const cash_account_name = String(r?.cash_account_name ?? "");
+        const risk_level = String(r?.risk_level ?? "") as CashAccountRiskLevel;
+        const alert_month = String(r?.alert_month ?? "");
+        const alert_projected_ending_cash = Number(r?.alert_projected_ending_cash);
+
+        const ok =
+          Number.isFinite(cash_account_id) &&
+          cash_account_name.length > 0 &&
+          (risk_level === "GREEN" || risk_level === "YELLOW" || risk_level === "RED") &&
+          alert_month.length > 0 &&
+          Number.isFinite(alert_projected_ending_cash);
+
+        if (!ok) return null;
+
+        return {
+          cash_account_id,
+          cash_account_name,
+          risk_level,
+          alert_month,
+          alert_projected_ending_cash,
+        };
+      })
+      .filter(Boolean) as CashAccountRiskAlertRow[];
+
+    return rows;
+  } catch (e) {
+    console.error("[getCashAccountRiskAlerts] unexpected error:", e);
+    return [];
   }
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      get(name: string) {
-        return cookieStore.get(name)?.value;
-      },
-      set(name: string, value: string, options: any) {
-        cookieStore.set({ name, value, ...options });
-      },
-      remove(name: string, options: any) {
-        cookieStore.set({ name, value: "", ...options, maxAge: 0 });
-      },
-    },
-  });
-
-  const { data, error } = await supabase
-    .from("v_cash_account_risk_alerts")
-    .select("cash_account_id,cash_account_name,risk_level,alert_month,alert_projected_ending_cash")
-    .order("cash_account_id", { ascending: true });
-
-  if (error) {
-    console.error("[getCashAccountRiskAlerts] error:", error);
-    throw new Error("Failed to fetch cash account risk alerts");
-  }
-
-  return (data ?? []).map((r: any) => ({
-    cash_account_id: Number(r.cash_account_id),
-    cash_account_name: String(r.cash_account_name),
-    risk_level: r.risk_level as CashAccountRiskLevel,
-    alert_month: String(r.alert_month),
-    alert_projected_ending_cash: Number(r.alert_projected_ending_cash),
-  }));
 }
