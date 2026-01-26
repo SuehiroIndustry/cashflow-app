@@ -18,7 +18,6 @@ function addMonths(d: Date, n: number) {
 function isIncome(section: string) {
   return section === "in" || section === "income" || section === "収入";
 }
-
 function isExpense(section: string) {
   return section === "out" || section === "expense" || section === "支出";
 }
@@ -43,11 +42,7 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   if (cashAccountId === 0) {
     const { data, error } = await supabase.from("cash_accounts").select("current_balance");
     if (error) throw error;
-
-    currentBalance = (data ?? []).reduce(
-      (sum: number, r: any) => sum + Number(r.current_balance ?? 0),
-      0
-    );
+    currentBalance = (data ?? []).reduce((sum: number, r: any) => sum + Number(r.current_balance ?? 0), 0);
   } else {
     const { data, error } = await supabase
       .from("cash_accounts")
@@ -60,7 +55,7 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     currentBalance = Number(data?.current_balance ?? 0);
   }
 
-  // 今月の in/out
+  // 今月の in/out（揺れ耐性あり）
   let q = supabase
     .from("cash_flows")
     .select("section, amount")
