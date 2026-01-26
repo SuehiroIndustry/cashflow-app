@@ -13,7 +13,8 @@ export type CashAccountRiskAlertRow = {
 };
 
 export async function getCashAccountRiskAlerts(): Promise<CashAccountRiskAlertRow[]> {
-  const cookieStore = cookies();
+  // ✅ Next.js 16: cookies() is async
+  const cookieStore = await cookies();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
