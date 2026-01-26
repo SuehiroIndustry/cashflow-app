@@ -1,7 +1,7 @@
 // app/dashboard/_actions/getMonthlyBalance.ts
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export type MonthlyBalanceRow = {
   cash_account_id: number;
@@ -12,11 +12,12 @@ export type MonthlyBalanceRow = {
 };
 
 export async function getMonthlyBalance(params: {
-  cashAccountId: number;
+  cashAccountId: number | null;
   months?: number;
 }): Promise<MonthlyBalanceRow[]> {
-  const supabase = await createClient();
+  if (!params.cashAccountId) return [];
 
+  const supabase = await createSupabaseServerClient();
   const months = params.months ?? 12;
 
   const { data, error } = await supabase
@@ -27,7 +28,6 @@ export async function getMonthlyBalance(params: {
     .limit(months);
 
   if (error) {
-    // ここで落とすより空で返す（UIはNo data表示）
     console.error("[getMonthlyBalance] error:", error);
     return [];
   }

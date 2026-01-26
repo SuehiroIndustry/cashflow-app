@@ -1,151 +1,134 @@
 // app/dashboard/DashboardClient.tsx
 "use client";
 
-import React from "react";
-import Link from "next/link";
+import React, { useMemo } from "react";
+import { useRouter } from "next/navigation";
 
-type CashStatus = "ok" | "warning" | "danger";
-
-export type DashboardCashStatus = {
-  status: CashStatus;
-  monitored_accounts: number;
-  warning_count: number;
-  danger_count: number;
-  first_alert_month: string | null;
-  worst_balance: number | null;
+type AccountRow = {
+  id: number;
+  name: string;
+  current_balance: number;
 };
 
-export type DashboardCashAlertCard = {
+type MonthlyBalanceRow = {
   cash_account_id: number;
-  account_name: string;
-  first_alert_month: string;
-  projected_ending_balance: number;
-  alert_level: "warning" | "danger";
+  month: string;
+  income: number;
+  expense: number;
+  balance: number;
 };
-
-function getCashStatusLabel(status: CashStatus) {
-  switch (status) {
-    case "danger":
-      return {
-        badge: "危険",
-        message: "このままだと資金が尽きます。今すぐ手を打ちましょう。",
-      };
-    case "warning":
-      return {
-        badge: "注意",
-        message: "このままだと資金余力が細ります。先手で整えましょう。",
-      };
-    default:
-      return { badge: "問題なし", message: "" };
-  }
-}
-
-function formatJPY(value: number) {
-  try {
-    return new Intl.NumberFormat("ja-JP", {
-      style: "currency",
-      currency: "JPY",
-      maximumFractionDigits: 0,
-    }).format(value);
-  } catch {
-    return `¥${Math.round(value).toLocaleString("ja-JP")}`;
-  }
-}
-
-function monthLabel(isoDate: string) {
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return isoDate;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}年${m}月`;
-}
-
-function levelLabel(level: "warning" | "danger") {
-  return level === "danger" ? "危険" : "注意";
-}
 
 export default function DashboardClient(props: {
-  cashStatus: DashboardCashStatus;
-  alertCards: DashboardCashAlertCard[];
+  accounts: AccountRow[];
+  selectedAccountId: number | null;
+  monthly: MonthlyBalanceRow[];
+  cashStatus: any | null;
+  alertCards: any[];
   children?: React.ReactNode;
 }) {
-  const { cashStatus, alertCards, children } = props;
+  const router = useRouter();
 
-  const showAlerts = cashStatus.status !== "ok";
-  const msg = getCashStatusLabel(cashStatus.status);
+  const selectedAccount = useMemo(() => {
+    if (!props.selectedAccountId) return null;
+    return props.accounts.find((a) => a.id === props.selectedAccountId) ?? null;
+  }, [props.accounts, props.selectedAccountId]);
+
+  const onChangeAccount = (id: number) => {
+    router.push(`/dashboard?account=${id}`);
+  };
 
   return (
-    <div className="space-y-6 text-neutral-100">
-      {/* warning/danger のときだけ表示 */}
-      {showAlerts && (
-        <section className="rounded-lg border border-neutral-700 bg-neutral-950 p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="inline-flex rounded border border-neutral-600 px-2 py-0.5 text-sm font-semibold text-neutral-100">
-                  {msg.badge}
-                </span>
-                <span className="text-sm text-neutral-300">
-                  監視口座：{cashStatus.monitored_accounts} / 注意：
-                  {cashStatus.warning_count} / 危険：{cashStatus.danger_count}
-                </span>
-              </div>
+    <div className="min-h-screen bg-black text-white">
+      <header className="flex items-center justify-between px-6 py-4">
+        <h1 className="text-xl font-semibold text-white">Cashflow Dashboard</h1>
 
-              <p className="mt-2 text-sm text-neutral-200">{msg.message}</p>
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-white/80">Account</label>
+          <select
+            className="rounded-md bg-zinc-900 text-white border border-white/15 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
+            value={props.selectedAccountId ?? ""}
+            onChange={(e) => onChangeAccount(Number(e.target.value))}
+          >
+            {props.accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </header>
 
-              {cashStatus.first_alert_month && (
-                <p className="mt-1 text-sm text-neutral-300">
-                  最初の警告：{monthLabel(cashStatus.first_alert_month)}
-                  {cashStatus.worst_balance != null && (
-                    <> / 最悪残高：{formatJPY(cashStatus.worst_balance)}</>
+      <main className="px-6 pb-10">
+        <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+          <div className="text-sm text-white/80">
+            Selected:{" "}
+            <span className="text-white">
+              {selectedAccount ? selectedAccount.name : "None"}
+            </span>
+          </div>
+          <div className="mt-2 text-sm text-white/80">
+            Current Balance:{" "}
+            <span className="text-white">
+              {selectedAccount
+                ? `${Number(selectedAccount.current_balance).toLocaleString()} 円`
+                : "-"}
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+            <div className="text-sm font-semibold text-white">月次（一覧）</div>
+            <div className="mt-3 overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-white/70">
+                  <tr>
+                    <th className="text-left py-2 pr-4">month</th>
+                    <th className="text-right py-2 pr-4">income</th>
+                    <th className="text-right py-2 pr-4">expense</th>
+                    <th className="text-right py-2">balance</th>
+                  </tr>
+                </thead>
+                <tbody className="text-white">
+                  {props.monthly.length === 0 ? (
+                    <tr>
+                      <td className="py-3 text-white/60" colSpan={4}>
+                        No rows
+                      </td>
+                    </tr>
+                  ) : (
+                    props.monthly.map((r) => (
+                      <tr key={r.month} className="border-t border-white/10">
+                        <td className="py-2 pr-4">{r.month}</td>
+                        <td className="py-2 pr-4 text-right">
+                          {Number(r.income).toLocaleString()}
+                        </td>
+                        <td className="py-2 pr-4 text-right">
+                          {Number(r.expense).toLocaleString()}
+                        </td>
+                        <td className="py-2 text-right">
+                          {Number(r.balance).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))
                   )}
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Link
-                href="/simulation"
-                className="inline-flex items-center justify-center rounded border border-neutral-600 px-3 py-2 text-sm text-neutral-100 hover:bg-neutral-900"
-              >
-                Simulationで手を打つ →
-              </Link>
+                </tbody>
+              </table>
             </div>
           </div>
 
-          {alertCards.length > 0 && (
-            <div className="mt-4 space-y-2">
-              {alertCards.map((c) => (
-                <div
-                  key={c.cash_account_id}
-                  className="rounded border border-neutral-700 p-3"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium text-neutral-100">
-                      {c.account_name}
-                    </div>
-                    <span className="text-xs text-neutral-300">
-                      {levelLabel(c.alert_level)}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-sm text-neutral-300">
-                    最初の警告：{monthLabel(c.first_alert_month)} / 予測残高：
-                    {formatJPY(c.projected_ending_balance)}
-                  </div>
-                </div>
-              ))}
+          <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+            <div className="text-sm font-semibold text-white">アラート</div>
+            <div className="mt-3 text-sm text-white/70">
+              {props.alertCards.length === 0
+                ? "No alerts (yet)"
+                : `${props.alertCards.length} alerts`}
             </div>
-          )}
-        </section>
-      )}
+          </div>
+        </div>
 
-      {/* ok のときは静かに 1 行だけ */}
-      {!showAlerts && (
-        <p className="text-sm text-neutral-400">資金繰り：問題なし</p>
-      )}
-
-      {/* ダッシュボード本体 */}
-      {children ?? null}
+        {props.children ? <div className="mt-6">{props.children}</div> : null}
+      </main>
     </div>
   );
 }
