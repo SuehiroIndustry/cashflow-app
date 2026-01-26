@@ -1,107 +1,76 @@
-import DashboardClient from "./DashboardClient";
+// app/dashboard/page.tsx
+import DashboardClient, {
+  type DashboardCashAlertCard,
+  type DashboardCashStatus,
+} from "./DashboardClient";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-import { getDashboardCashStatus } from "./_actions/getDashboardCashStatus";
-import { getDashboardCashAlertCards } from "./_actions/getDashboardCashAlertCards";
+import {
+  getCashAccountRiskAlerts,
+  type CashAccountRiskAlertRow,
+} from "./_actions/getCashAccountRiskAlerts";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { OverviewPayload, MonthlyBalanceRow } from "./_types";
+function toCashStatus(
+  rows: CashAccountRiskAlertRow[],
+): { cashStatus: DashboardCashStatus; alertCards: DashboardCashAlertCard[] } {
+  const monitored = rows.length;
 
-const THRESHOLD = 1_000_000;
+  const dangerRows = rows.filter((r) => r.risk_level === "RED");
+  const warningRows = rows.filter((r) => r.risk_level === "YELLOW");
 
-function fallbackOverviewPayload(): OverviewPayload {
-  return {} as unknown as OverviewPayload;
-}
+  const status: DashboardCashStatus["status"] =
+    dangerRows.length > 0 ? "danger" : warningRows.length > 0 ? "warning" : "ok";
 
-function PlaceholderCard({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="rounded-xl border p-4">
-      <div className="text-sm font-semibold">{title}</div>
-      <div className="mt-2 text-sm opacity-80">{message}</div>
-    </div>
-  );
+  const nonGreen = rows.filter((r) => r.risk_level !== "GREEN");
+
+  // first_alert_month: nonGreen の中で最小の月
+  const firstAlertMonth =
+    nonGreen.length === 0
+      ? null
+      : nonGreen
+          .map((r) => r.alert_month)
+          .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0];
+
+  // worst_balance: nonGreen の中で最小（最悪）
+  const worstBalance =
+    nonGreen.length === 0
+      ? null
+      : Math.min(...nonGreen.map((r) => r.alert_projected_ending_cash));
+
+  const alertCards: DashboardCashAlertCard[] = nonGreen.map((r) => ({
+    cash_account_id: r.cash_account_id,
+    account_name: r.cash_account_name,
+    first_alert_month: r.alert_month,
+    projected_ending_balance: r.alert_projected_ending_cash,
+    alert_level: r.risk_level === "RED" ? "danger" : "warning",
+  }));
+
+  return {
+    cashStatus: {
+      status,
+      monitored_accounts: monitored,
+      warning_count: warningRows.length,
+      danger_count: dangerRows.length,
+      first_alert_month: firstAlertMonth,
+      worst_balance: worstBalance,
+    },
+    alertCards,
+  };
 }
 
 export default async function DashboardPage() {
-  // ① 警告ブロック用（落とさない版に直してある前提）
-  const cashStatus = await getDashboardCashStatus(THRESHOLD);
-  const alertCards =
-    cashStatus.status === "ok" ? [] : await getDashboardCashAlertCards(THRESHOLD);
-
-  // ② Supabase client 生成が落ちてもページを落とさない
-  let supabase: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
-  try {
-    supabase = await createSupabaseServerClient();
-  } catch (e) {
-    console.error("createSupabaseServerClient failed:", e);
-    supabase = null;
-  }
-
-  // monthly rows（BalanceCard / EcoCharts 用）
-  let monthlyRows: MonthlyBalanceRow[] = [];
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("v_dash_monthly_by_account")
-        .select("*")
-        .order("month", { ascending: true });
-
-      if (!error && data) {
-        monthlyRows = data as unknown as MonthlyBalanceRow[];
-      }
-    } catch (e) {
-      console.error("fetch v_dash_monthly_by_account failed:", e);
-      monthlyRows = [];
-    }
-  }
-
-  // overview payload（OverviewCard 用）
-  let overviewPayload: OverviewPayload = fallbackOverviewPayload();
-  let hasOverview = false;
-
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from("v_dash_latest_balance_by_account")
-        .select("*");
-
-      if (!error && data) {
-        overviewPayload = ({ latestByAccount: data } as unknown) as OverviewPayload;
-        // “空でも落ちない”ように最低限の存在チェック
-        hasOverview = Array.isArray(data) && data.length > 0;
-      }
-    } catch (e) {
-      console.error("fetch v_dash_latest_balance_by_account failed:", e);
-      overviewPayload = fallbackOverviewPayload();
-      hasOverview = false;
-    }
-  }
-
-  const hasMonthly = monthlyRows.length > 0;
+  const rows = await getCashAccountRiskAlerts();
+  const { cashStatus, alertCards } = toCashStatus(rows);
 
   return (
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
       <div className="grid gap-4 md:grid-cols-3">
-        {hasOverview ? (
-          <OverviewCard payload={overviewPayload} />
-        ) : (
-          <PlaceholderCard title="Overview" message="データが未取得のため表示できません。" />
-        )}
-
-        {hasMonthly ? (
-          <BalanceCard rows={monthlyRows} />
-        ) : (
-          <PlaceholderCard title="Balance" message="月次データが未取得のため表示できません。" />
-        )}
-
-        {hasMonthly ? (
-          <EcoCharts rows={monthlyRows} />
-        ) : (
-          <PlaceholderCard title="Charts" message="月次データが未取得のため表示できません。" />
-        )}
+        <OverviewCard />
+        <BalanceCard />
+        <EcoCharts />
       </div>
     </DashboardClient>
   );

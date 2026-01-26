@@ -1,3 +1,4 @@
+// app/dashboard/DashboardClient.tsx
 "use client";
 
 import React from "react";
@@ -59,6 +60,10 @@ function monthLabel(isoDate: string) {
   return `${y}年${m}月`;
 }
 
+function levelLabel(level: "warning" | "danger") {
+  return level === "danger" ? "危険" : "注意";
+}
+
 export default function DashboardClient(props: {
   cashStatus: DashboardCashStatus;
   alertCards: DashboardCashAlertCard[];
@@ -81,7 +86,7 @@ export default function DashboardClient(props: {
                   {msg.badge}
                 </span>
                 <span className="text-sm text-neutral-300">
-                  監視口座：{cashStatus.monitored_accounts} / 警告：
+                  監視口座：{cashStatus.monitored_accounts} / 注意：
                   {cashStatus.warning_count} / 危険：{cashStatus.danger_count}
                 </span>
               </div>
@@ -120,7 +125,7 @@ export default function DashboardClient(props: {
                       {c.account_name}
                     </div>
                     <span className="text-xs text-neutral-300">
-                      {c.alert_level.toUpperCase()}
+                      {levelLabel(c.alert_level)}
                     </span>
                   </div>
                   <div className="mt-1 text-sm text-neutral-300">
@@ -135,9 +140,11 @@ export default function DashboardClient(props: {
       )}
 
       {/* ok のときは静かに 1 行だけ */}
-      {!showAlerts && <p className="text-sm text-neutral-400">資金繰り：問題なし</p>}
+      {!showAlerts && (
+        <p className="text-sm text-neutral-400">資金繰り：問題なし</p>
+      )}
 
-      {/* ダッシュボード本体はここに差し込む */}
+      {/* ダッシュボード本体 */}
       {children ?? null}
     </div>
   );
