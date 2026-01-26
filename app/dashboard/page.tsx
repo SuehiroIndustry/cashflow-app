@@ -7,7 +7,7 @@ import DashboardClient, {
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
-// EcoCharts は次のステップで接続するので、今は import しない
+// EcoCharts は次のステップで接続
 
 import {
   getCashAccountRiskAlerts,
@@ -15,6 +15,7 @@ import {
 } from "./_actions/getCashAccountRiskAlerts";
 
 import type { OverviewPayload } from "./_types";
+import type { MonthlyBalanceRow } from "./_actions/getMonthlyBalance";
 
 /**
  * DBの警告View → Dashboard表示用に変換
@@ -70,12 +71,15 @@ function toCashStatus(
 }
 
 export default async function DashboardPage() {
-  // ① DBから警告情報を取得
+  // ① 警告情報
   const rows = await getCashAccountRiskAlerts();
   const { cashStatus, alertCards } = toCashStatus(rows);
 
-  // ② Overview はまず null（落ちない設計なので安全）
+  // ② Overview はまだ null でOK
   const payload: OverviewPayload | null = null;
+
+  // ③ Balance は仮データ（空配列）で通す
+  const balanceRows: MonthlyBalanceRow[] = [];
 
   return (
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
@@ -83,8 +87,8 @@ export default async function DashboardPage() {
         {/* Overview */}
         <OverviewCard payload={payload} />
 
-        {/* Balance */}
-        <BalanceCard />
+        {/* Balance（rows 必須なので空配列を渡す） */}
+        <BalanceCard rows={balanceRows} />
 
         {/* EcoCharts は次に接続 */}
         <div className="rounded-xl border border-neutral-700 bg-neutral-950 p-4 text-sm text-neutral-300">
