@@ -1,30 +1,45 @@
 // app/dashboard/page.tsx
+
 import DashboardClient from "./DashboardClient";
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
+type SearchParams = {
+  account?: string | string[];
+};
+
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: { account?: string };
+  searchParams: SearchParams;
 }) {
   const accounts = await getAccounts();
 
-  const requestedId = searchParams?.account ? Number(searchParams.account) : null;
+  // --- ✅ account クエリの安全なパース（ここが肝）
+  const accountParam = searchParams?.account;
+
+  const parsedAccountId =
+    typeof accountParam === "string" && accountParam.trim() !== ""
+      ? Number(accountParam)
+      : null;
+
+  const isValidNumber =
+    parsedAccountId != null && Number.isFinite(parsedAccountId);
+
+  // 指定IDが accounts に存在するかもチェック（存在しないIDなら落とす）
+  const existsInAccounts =
+    isValidNumber && accounts.some((a) => a.id === parsedAccountId);
 
   const selectedAccountId =
-    requestedId != null &&
-    Number.isFinite(requestedId) &&
-    accounts.some((a) => a.id === requestedId)
-      ? requestedId
-      : accounts[0]?.id ?? null;
+    existsInAccounts ? (parsedAccountId as number) : accounts[0]?.id ?? null;
 
+  // --- 月次取得
   const monthly =
     selectedAccountId != null
       ? await getMonthlyBalance({ cashAccountId: selectedAccountId, months: 24 })
       : [];
 
-  // いまはダミーのままでOK
+  // 今は一旦ダミー（後で戻す）
   const cashStatus = null;
   const alertCards: any[] = [];
 
