@@ -70,14 +70,12 @@ export default async function DashboardPage() {
     <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
       {/* まずは警告 + Overview だけでビルドを通す */}
       <div className="grid gap-4 md:grid-cols-3">
-        <OverviewCard payload={payload} />
-        <div className="rounded-xl border p-4 text-sm text-neutral-300">
-          BalanceCard（次に接続）
-        </div>
-        <div className="rounded-xl border p-4 text-sm text-neutral-300">
-          EcoCharts（次に接続）
-        </div>
-      </div>
+  <OverviewCard payload={payload} />
+  <BalanceCard />
+  <div className="rounded-xl border p-4 text-sm text-neutral-300">
+    EcoCharts（次に接続）
+  </div>
+</div>
     </DashboardClient>
   );
 }
