@@ -15,6 +15,18 @@ function addMonths(d: Date, n: number) {
   return x;
 }
 
+function normalizeSection(raw: unknown): "in" | "out" | "unknown" {
+  const s = String(raw ?? "").trim().toLowerCase();
+
+  // ✅ 収入系
+  if (s === "in" || s === "income" || s === "収入" || s === "入金") return "in";
+
+  // ✅ 支出系
+  if (s === "out" || s === "expense" || s === "支出" || s === "出金") return "out";
+
+  return "unknown";
+}
+
 export async function getOverview(input: Input): Promise<OverviewPayload> {
   const supabase = await createClient();
 
@@ -28,7 +40,9 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   const from = monthStart.toISOString().slice(0, 10);
   const toExclusive = nextMonth.toISOString().slice(0, 10);
 
+  // =========================
   // 現在残高（口座 or 全口座）
+  // =========================
   let accountName = "全口座";
   let currentBalance = 0;
 
@@ -38,7 +52,9 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
       .select("current_balance");
     if (error) throw error;
 
-    currentBalance = (data ?? []).reduce((sum: number, r: any) => sum + Number(r.current_balance ?? 0), 0);
+    currentBalance = (data ?? []).reduce((sum: number, r: any) => {
+      return sum + Number(r.current_balance ?? 0);
+    }, 0);
   } else {
     const { data, error } = await supabase
       .from("cash_accounts")
@@ -51,16 +67,16 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     currentBalance = Number(data?.current_balance ?? 0);
   }
 
+  // =========================
   // 今月の in/out
+  // =========================
   let q = supabase
     .from("cash_flows")
     .select("section, amount")
     .gte("date", from)
     .lt("date", toExclusive);
 
-  if (cashAccountId !== 0) {
-    q = q.eq("cash_account_id", cashAccountId);
-  }
+  if (cashAccountId !== 0) q = q.eq("cash_account_id", cashAccountId);
 
   const { data: flows, error: flowsError } = await q;
   if (flowsError) throw flowsError;
@@ -69,8 +85,11 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   let thisMonthExpense = 0;
 
   for (const r of flows ?? []) {
-    const section = String((r as any).section);
+    const section = normalizeSection((r as any).section);
     const amount = Number((r as any).amount ?? 0);
+
+    if (!Number.isFinite(amount)) continue;
+
     if (section === "in") thisMonthIncome += amount;
     if (section === "out") thisMonthExpense += amount;
   }
