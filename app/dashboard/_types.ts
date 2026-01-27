@@ -38,8 +38,9 @@ export type AccountRow = {
   current_balance: number;
 };
 
+// ✅ getMonthlyCashBalances.ts が cash_account_id なしで rows を作っているので optional にする
 export type MonthlyBalanceRow = {
-  cash_account_id: number;
+  cash_account_id?: number; // ←ここが修正点
   month: string; // "YYYY-MM" or "YYYY-MM-01"
   income: number;
   expense: number;
@@ -54,7 +55,7 @@ export type CashCategory = {
   id: number;
   name: string;
   kind?: string | null;
-  sort_order?: number | null;
+  sort_order?: string | number | null;
   is_active?: boolean | null;
 };
 
@@ -140,11 +141,6 @@ export type CashShortForecastRow = {
 
 export type CashShortForecastLevel = "safe" | "warn" | "danger" | "short";
 
-/**
- * ✅ getCashShortForecast.ts の return 実態に合わせる
- * - 現状 return に cashAccountId / rows が無い（ログで確定）
- * - なので必須にせず optional にする
- */
 export type CashShortForecast = {
   level: CashShortForecastLevel;
   message: string;
@@ -159,7 +155,7 @@ export type CashShortForecast = {
 
   shortDate: string | null;
 
-  // 将来返すようになっても壊れないように optional で受け止める
+  // optional（返却実態に合わせる）
   cashAccountId?: number;
   rows?: CashShortForecastRow[];
 
