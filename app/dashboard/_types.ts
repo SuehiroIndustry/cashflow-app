@@ -28,6 +28,31 @@ export type CashStatus = {
   updatedAtISO: string;
 };
 
+/**
+ * ✅ getOverview.ts が返す想定の payload
+ * まずは “壊れにくく受け止める型” にしてビルドを通す。
+ * 後で UI が固まったら厳密化すればOK。
+ */
+export type OverviewPayload = {
+  cashAccountId: number; // 0 = all の可能性あり
+
+  // 今月/直近の集計（あれば）
+  month?: string; // "YYYY-MM" or "YYYY-MM-01"
+  income?: number;
+  expense?: number;
+  net?: number;
+
+  // 口座残高（あれば）
+  currentBalance?: number;
+
+  // 危険信号（あれば）
+  level?: "safe" | "warn" | "danger" | "short";
+  message?: string;
+
+  // 追加で何を返しても壊れないように保険
+  [key: string]: unknown;
+};
+
 /* =========================
  * Accounts / Monthly
  * ========================= */
@@ -46,7 +71,6 @@ export type MonthlyBalanceRow = {
   balance: number;
 };
 
-// ✅ net を追加（今回のエラー原因）
 export type MonthlyIncomeExpenseRow = {
   month: string; // "YYYY-MM" or "YYYY-MM-01"
   income: number;
