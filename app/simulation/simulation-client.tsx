@@ -1,13 +1,14 @@
-// app/simulation/simulation-client.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
 
+import type { AccountRow } from "@/app/dashboard/_types";
 import type { SimulationResult } from "./_actions/getSimulation";
 
 type Props = {
-  // ✅ 全口座固定なので accounts / selectedAccountId は不要
+  accounts: AccountRow[];
+  selectedAccountId: number | null; // 0固定で来る想定
   simulation: SimulationResult | null;
 };
 
@@ -38,12 +39,12 @@ function buildFallbackMonths(count = 12) {
   });
 }
 
-export default function SimulationClient({ simulation }: Props) {
+export default function SimulationClient({ accounts, simulation }: Props) {
   const [assumedIncome, setAssumedIncome] = useState<string>(() =>
-    simulation ? String(Math.round((simulation as any).avgIncome ?? 0)) : ""
+    simulation ? String(Math.round(simulation.avgIncome ?? 0)) : ""
   );
   const [assumedExpense, setAssumedExpense] = useState<string>(() =>
-    simulation ? String(Math.round((simulation as any).avgExpense ?? 0)) : ""
+    simulation ? String(Math.round(simulation.avgExpense ?? 0)) : ""
   );
 
   const assumedIncomeNum = useMemo(() => Number(assumedIncome || 0), [assumedIncome]);
@@ -54,11 +55,11 @@ export default function SimulationClient({ simulation }: Props) {
     if (!simulation) return [];
 
     const src =
-      (simulation as any).months && Array.isArray((simulation as any).months)
-        ? ((simulation as any).months as Array<{ month: string }>)
+      simulation.months && Array.isArray(simulation.months)
+        ? simulation.months
         : buildFallbackMonths(12);
 
-    let running = Number((simulation as any).currentBalance ?? 0);
+    let running = Number(simulation.currentBalance ?? 0);
     return src.map((m) => {
       running += assumedNet;
       return {
@@ -69,7 +70,7 @@ export default function SimulationClient({ simulation }: Props) {
     });
   }, [simulation, assumedNet]);
 
-  const level = (simulation as any)?.level ?? "safe";
+  const level = simulation?.level ?? "safe";
   const badge = useMemo(() => {
     if (level === "danger" || level === "short") {
       return {
@@ -89,7 +90,7 @@ export default function SimulationClient({ simulation }: Props) {
       label: "SAFE",
       className:
         "inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950 px-2.5 py-1 text-xs font-semibold text-emerald-200",
-    };
+      };
   }, [level]);
 
   const pageBase = "min-h-screen bg-black text-white";
@@ -111,33 +112,31 @@ export default function SimulationClient({ simulation }: Props) {
           <div>
             <div className="text-xs text-neutral-400">Cashflow Dashboard</div>
             <h1 className="text-2xl font-bold tracking-tight text-white">Simulation</h1>
-            <div className="mt-1 text-xs text-neutral-500">※このページは「全口座」で固定です</div>
           </div>
 
-          {/* ✅ 右上：Dashboardへ戻る（行き来ボタン） */}
-          <div className="flex items-center gap-2">
-            <Link
-              href="/dashboard?account=0"
-              className="inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 px-3 text-sm text-white hover:bg-neutral-900"
-            >
-              Dashboardへ
-            </Link>
-          </div>
+          {/* ✅ 右上：Dashboardへ戻る だけ */}
+          <Link
+            href="/dashboard?account=0"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 px-3 text-sm text-white hover:bg-neutral-900"
+          >
+            Dashboardへ
+          </Link>
         </div>
 
-        {/* Selected（全口座固定表示） */}
+        {/* Selected */}
         <div className={`${card} mb-4`}>
           <div className={cardBody}>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <div className="text-xs text-neutral-400">Selected</div>
-                <div className="text-lg font-semibold text-white">全口座</div>
-                <div className="mt-1 text-sm text-neutral-300">
-                  Current Balance:{" "}
-                  <span className="font-semibold text-white">
-                    {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
-                  </span>
-                </div>
+            <div>
+              <div className="text-xs text-neutral-400">Selected</div>
+              <div className="text-lg font-semibold text-white">全口座</div>
+              <div className="mt-1 text-sm text-neutral-300">
+                Current Balance:{" "}
+                <span className="font-semibold text-white">
+                  {formatJPY(Number(simulation?.currentBalance ?? 0))}
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-neutral-500">
+                対象口座数：{accounts?.length ?? 0}
               </div>
             </div>
           </div>
@@ -151,15 +150,15 @@ export default function SimulationClient({ simulation }: Props) {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className={label}>収入</span>
-                  <span className={value}>{formatJPY(Number((simulation as any)?.avgIncome ?? 0))}</span>
+                  <span className={value}>{formatJPY(Number(simulation?.avgIncome ?? 0))}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>支出</span>
-                  <span className={value}>{formatJPY(Number((simulation as any)?.avgExpense ?? 0))}</span>
+                  <span className={value}>{formatJPY(Number(simulation?.avgExpense ?? 0))}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>差額</span>
-                  <span className={value}>{formatJPY(Number((simulation as any)?.avgNet ?? 0))}</span>
+                  <span className={value}>{formatJPY(Number(simulation?.avgNet ?? 0))}</span>
                 </div>
               </div>
             </div>
@@ -210,7 +209,7 @@ export default function SimulationClient({ simulation }: Props) {
               <div className="flex items-start gap-3">
                 <span className={badge.className}>{badge.label}</span>
                 <div className="text-sm text-neutral-200">
-                  {(simulation as any)?.message ??
+                  {simulation?.message ??
                     "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。"}
                 </div>
               </div>
