@@ -29,27 +29,21 @@ export type CashStatus = {
 };
 
 /**
- * ✅ getOverview.ts が返す想定の payload
- * まずは “壊れにくく受け止める型” にしてビルドを通す。
- * 後で UI が固まったら厳密化すればOK。
+ * ✅ getOverview.ts の return 実態に合わせる
+ * - cashAccountId は返していない（ログで確定）→ optional
+ * - 返却フィールド名は thisMonthIncome / thisMonthExpense / net
  */
 export type OverviewPayload = {
-  cashAccountId: number; // 0 = all の可能性あり
+  cashAccountId?: number; // 0 = all の可能性あり（今は返してないので optional）
 
-  // 今月/直近の集計（あれば）
-  month?: string; // "YYYY-MM" or "YYYY-MM-01"
-  income?: number;
-  expense?: number;
-  net?: number;
+  accountName: string;
+  currentBalance: number;
 
-  // 口座残高（あれば）
-  currentBalance?: number;
+  thisMonthIncome: number;
+  thisMonthExpense: number;
+  net: number;
 
-  // 危険信号（あれば）
-  level?: "safe" | "warn" | "danger" | "short";
-  message?: string;
-
-  // 追加で何を返しても壊れないように保険
+  // 追加で何を返しても壊れない保険
   [key: string]: unknown;
 };
 
