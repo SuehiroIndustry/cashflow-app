@@ -1,8 +1,9 @@
-// ===============================
-// 共通基盤型（dashboard 配下の single source of truth）
-// ===============================
+// app/dashboard/_types.ts
+// dashboard 配下の single source of truth（actions / client が参照する共通型）
 
-/* ---------- Alerts / Dashboard ---------- */
+/* =========================
+ * Dashboard (UI)
+ * ========================= */
 
 export type AlertSeverity = "critical" | "warning" | "info";
 
@@ -19,7 +20,8 @@ export type CashStatus = {
   selectedAccountName: string | null;
   currentBalance: number | null;
 
-  monthLabel: string | null;
+  // 今月（monthly の最新月行）
+  monthLabel: string | null; // "YYYY-MM"
   monthIncome: number | null;
   monthExpense: number | null;
   monthNet: number | null;
@@ -27,15 +29,15 @@ export type CashStatus = {
   updatedAtISO: string;
 };
 
-/* ---------- Accounts ---------- */
+/* =========================
+ * Accounts / Monthly
+ * ========================= */
 
 export type AccountRow = {
   id: number;
   name: string;
   current_balance: number;
 };
-
-/* ---------- Monthly Balance ---------- */
 
 export type MonthlyBalanceRow = {
   cash_account_id: number;
@@ -45,7 +47,9 @@ export type MonthlyBalanceRow = {
   balance: number;
 };
 
-/* ---------- Cash Categories ---------- */
+/* =========================
+ * Categories
+ * ========================= */
 
 export type CashCategory = {
   id: number;
@@ -55,9 +59,10 @@ export type CashCategory = {
   is_active?: boolean | null;
 };
 
-/* ---------- Cash Flows ---------- */
+/* =========================
+ * Cash Flows
+ * ========================= */
 
-// 一覧取得用
 export type CashFlowListRow = {
   id: number;
   cash_account_id: number;
@@ -69,71 +74,88 @@ export type CashFlowListRow = {
   cash_category_name?: string | null;
 };
 
-// 削除用
 export type CashFlowDeleteInput = {
   id: number;
   cashAccountId: number;
 };
 
-/* ---------- 将来拡張用（未使用でもOK） ---------- */
-
-// 作成・更新系が増えても、ここに足せば破綻しない
+// 使ってないなら無視されるが、将来の衝突防止で置いておく（壊れにくい版）
 export type CashFlowUpsertInput = {
   id?: number;
   cash_account_id: number;
-  date: string;
+  date: string; // ISO
   section: "収入" | "支出" | "income" | "expense";
   amount: number;
   memo?: string | null;
   cash_category_id?: number | null;
 };
-/* ---------- Cash Projection / Simulation ---------- */
+
+/* =========================
+ * Cash Projection（Simulation系）
+ * getCashProjection.ts が期待している形に合わせる
+ * ========================= */
 
 export type GetCashProjectionInput = {
   cashAccountId: number;
   startDate: string; // ISO date string (e.g. "2026-01-01")
-  days: number;      // horizon in days
+  days: number; // horizon in days
 };
 
 export type CashProjectionRow = {
-  date: string; // ISO date string
+  date: string; // ISO date
   income: number;
   expense: number;
-  net: number;      // income - expense
-  balance: number;  // projected balance
+  net: number;
+  balance: number;
 };
 
 export type CashProjectionResult = {
   cashAccountId: number;
   startDate: string;
   days: number;
-  currentBalance: number; // ✅ これを追加
+
+  // getCashProjection.ts が返しているので必須
+  currentBalance: number;
+
+  // getCashProjection.ts 内で rows を作って返している
   rows: CashProjectionRow[];
+
+  // あれば入る（getCashProjection.ts 側に合わせて緩め）
   shortDate?: string | null;
   minBalance?: number;
 };
 
-/* ---------- Cash Short Forecast ---------- */
+/* =========================
+ * Cash Short Forecast
+ * getCashShortForecast.ts が期待している input/output に合わせる
+ * ========================= */
 
 export type CashShortForecastInput = {
   cashAccountId: number;
-  // 何ヶ月先まで見るか（関数内で addMonths してるっぽいので）
-  months: number;
+  month: string; // new Date(input.month) されるので "YYYY-MM-01" 推奨
+  rangeMonths?: number; // input.rangeMonths
+  avgWindowMonths?: number; // input.avgWindowMonths
 };
 
-export type CashShortForecastInput = {
-  cashAccountId: number;
-  month: string; // 起点月（Date() に渡してるので "YYYY-MM-01" 推奨）
-  rangeMonths?: number; // 予測レンジ（月数）
-  avgWindowMonths?: number; // 平均算出の窓（月数）
+export type CashShortForecastRow = {
+  month: string; // "YYYY-MM"
+  income: number;
+  expense: number;
+  net: number;
+  projected_balance: number;
 };
 
 export type CashShortForecast = {
   cashAccountId: number;
+
+  // getCashShortForecast.ts が month / rangeMonths / avgWindowMonths を扱う前提
   month: string;
   rangeMonths: number;
   avgWindowMonths: number;
+
   rows: CashShortForecastRow[];
+
+  // あれば入る
   shortMonth?: string | null;
   currentBalance?: number;
   minBalance?: number;
