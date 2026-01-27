@@ -23,7 +23,6 @@ export type CashStatus = {
   updatedAtISO: string; // サーバー生成
 };
 
-// ※ actions の戻り型を import したくなるけど、衝突の元なのでここでは定義しない。
 // DashboardClient で必要な “最低限の形” を固定する。
 export type AccountRow = {
   id: number;
@@ -37,4 +36,15 @@ export type MonthlyBalanceRow = {
   income: number;
   expense: number;
   balance: number;
+};
+
+/**
+ * ✅ ここが今回のビルド失敗の原因。
+ * deleteCashFlow.ts が import している型を _types に復活させる。
+ *
+ * 既存コードが `id` を使っている可能性が最も高いので、まずはこれで通す。
+ * もし呼び出し側が `cashFlowId` を渡している設計だった場合は、次に合わせて直す。
+ */
+export type CashFlowDeleteInput = {
+  id: number;
 };
