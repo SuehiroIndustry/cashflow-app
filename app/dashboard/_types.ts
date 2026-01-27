@@ -106,13 +106,11 @@ export type CashFlowUpsertInput = {
   section: "収入" | "支出" | "income" | "expense";
   amount: number;
 
-  // 既存の memo
   memo?: string | null;
 
-  // ✅ updateCashFlow.ts が見ている camelCase 別名（互換用）
+  // ✅ updateCashFlow.ts / UI が使う camelCase 別名（互換用）
+  cashAccountId?: number; // ←今回のエラー潰し
   cashCategoryId?: number | null;
-
-  // ✅ updateCashFlow.ts が見ている description（互換用）
   description?: string | null;
 };
 
@@ -162,7 +160,7 @@ export type CashShortForecastInput = {
 };
 
 export type CashShortForecastRow = {
-  month: string;
+  month: string; // "YYYY-MM"
   income: number;
   expense: number;
   net: number;
