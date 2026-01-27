@@ -121,18 +121,20 @@ export type CashShortForecastInput = {
   months: number;
 };
 
-export type CashShortForecastRow = {
-  month: string; // "YYYY-MM"
-  income: number;
-  expense: number;
-  net: number;
-  projected_balance: number;
+export type CashShortForecastInput = {
+  cashAccountId: number;
+  month: string; // 起点月（Date() に渡してるので "YYYY-MM-01" 推奨）
+  rangeMonths?: number; // 予測レンジ（月数）
+  avgWindowMonths?: number; // 平均算出の窓（月数）
 };
 
 export type CashShortForecast = {
   cashAccountId: number;
-  months: number;
+  month: string;
+  rangeMonths: number;
+  avgWindowMonths: number;
   rows: CashShortForecastRow[];
-  shortMonth?: string | null; // ショートする月（あれば）
-  currentBalance?: number;    // あれば入る
+  shortMonth?: string | null;
+  currentBalance?: number;
+  minBalance?: number;
 };
