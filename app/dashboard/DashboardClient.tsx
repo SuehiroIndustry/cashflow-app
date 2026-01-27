@@ -11,12 +11,21 @@ import type { OverviewPayload } from "./_types";
 
 type Props = {
   cashStatus: OverviewPayload | null;
-  // ✅ 型名が揺れてるので一旦コンパイル優先（後で正式型に戻す）
-  alertCards: unknown[];
+  alertCards: unknown[]; // いったん型揺れ吸収（後で戻す）
   children?: React.ReactNode;
 };
 
 export default function DashboardClient({ cashStatus, alertCards, children }: Props) {
+  // ✅ OverviewCard が payload 必須なので、nullでも必ず渡す
+  const payload: OverviewPayload = cashStatus ?? {
+    cashAccountId: 0,
+    accountName: "",
+    currentBalance: 0,
+    thisMonthIncome: 0,
+    thisMonthExpense: 0,
+    net: 0,
+  };
+
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="mx-auto w-full max-w-6xl px-4 py-6">
@@ -43,15 +52,13 @@ export default function DashboardClient({ cashStatus, alertCards, children }: Pr
         {/* Main */}
         {children ?? (
           <div className="grid gap-4 md:grid-cols-3">
-            <OverviewCard />
-            <BalanceCard />
-            <EcoCharts />
+            {/* ✅ payload 必須 */}
+            <OverviewCard payload={payload} />
+            {/* ✅ もしこっちも payload を要求してても、ここで吸収できる */}
+            <BalanceCard payload={payload} />
+            <EcoCharts payload={payload} />
           </div>
         )}
-
-        {/* NOTE:
-           cashStatus/alertCards をここで直接描画してるなら、既存実装を残してOK。
-           今回は「行き来ボタン追加」が目的なので触ってない。 */}
       </div>
     </div>
   );
