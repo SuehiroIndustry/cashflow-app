@@ -107,7 +107,8 @@ export type CashProjectionResult = {
   cashAccountId: number;
   startDate: string;
   days: number;
+  currentBalance: number; // ✅ これを追加
   rows: CashProjectionRow[];
-  shortDate?: string | null; // 途中でショートする日があるなら入る想定
+  shortDate?: string | null;
   minBalance?: number;
 };
