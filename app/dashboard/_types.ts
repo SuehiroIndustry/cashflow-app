@@ -28,22 +28,13 @@ export type CashStatus = {
   updatedAtISO: string;
 };
 
-/**
- * ✅ getOverview.ts の return 実態に合わせる
- * - cashAccountId は返していない（ログで確定）→ optional
- * - 返却フィールド名は thisMonthIncome / thisMonthExpense / net
- */
 export type OverviewPayload = {
-  cashAccountId?: number; // 0 = all の可能性あり（今は返してないので optional）
-
+  cashAccountId?: number; // 今は返してないので optional
   accountName: string;
   currentBalance: number;
-
   thisMonthIncome: number;
   thisMonthExpense: number;
   net: number;
-
-  // 追加で何を返しても壊れない保険
   [key: string]: unknown;
 };
 
@@ -113,6 +104,9 @@ export type CashFlowUpsertInput = {
   memo?: string | null;
   cash_category_id?: number | null;
 };
+
+// ✅ updateCashFlow.ts が期待している名前に合わせる（中身は同じでOK）
+export type CashFlowUpdateInput = CashFlowUpsertInput;
 
 /* =========================
  * Cash Projection（Simulation系）
