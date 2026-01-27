@@ -12,7 +12,7 @@ import type { OverviewPayload, MonthlyBalanceRow } from "./_types";
 type Props = {
   cashStatus: OverviewPayload | null;
   alertCards: unknown[]; // いったん型揺れ吸収（後で戻す）
-  monthlyBalanceRows?: MonthlyBalanceRow[]; // ✅ BalanceCard 用
+  monthlyBalanceRows?: MonthlyBalanceRow[]; // ✅ BalanceCard / EcoCharts 用
   children?: React.ReactNode;
 };
 
@@ -22,7 +22,6 @@ export default function DashboardClient({
   monthlyBalanceRows,
   children,
 }: Props) {
-  // ✅ OverviewCard が payload 必須なので、nullでも必ず渡す
   const payload: OverviewPayload = cashStatus ?? {
     cashAccountId: 0,
     accountName: "",
@@ -60,12 +59,9 @@ export default function DashboardClient({
         {children ?? (
           <div className="grid gap-4 md:grid-cols-3">
             <OverviewCard payload={payload} />
-
-            {/* ✅ BalanceCard は rows 必須 */}
             <BalanceCard rows={rows} />
-
-            {/* ✅ ここは一旦 props なしに戻す（要求されたら次で合わせる） */}
-            <EcoCharts />
+            {/* ✅ EcoCharts も rows 必須 */}
+            <EcoCharts rows={rows} />
           </div>
         )}
       </div>
