@@ -142,9 +142,9 @@ export type CashShortForecastRow = {
   projected_balance: number;
 };
 
-// ✅ getCashShortForecast.ts が "safe" を使ってるので、少なくとも safe は必須。
-// 他はコード側で使ってる可能性が高いので、壊れにくいセットで定義。
-export type CashShortForecastLevel = "safe" | "watch" | "danger" | "short";
+// ✅ コード側が "safe" / "warn" / "danger" を使っているのが確定。
+// "short" は入れておく（ショート確定の表現が別名で来ても受け止める）
+export type CashShortForecastLevel = "safe" | "warn" | "danger" | "short";
 
 export type CashShortForecast = {
   cashAccountId: number;
@@ -153,7 +153,6 @@ export type CashShortForecast = {
   rangeMonths: number;
   avgWindowMonths: number;
 
-  // ✅ 今回のエラー原因：これが必要
   level: CashShortForecastLevel;
 
   rows: CashShortForecastRow[];
