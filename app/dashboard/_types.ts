@@ -140,27 +140,30 @@ export type CashShortForecastRow = {
 
 export type CashShortForecastLevel = "safe" | "warn" | "danger" | "short";
 
+/**
+ * ✅ getCashShortForecast.ts の return 実態に合わせる
+ * - 現状 return に cashAccountId / rows が無い（ログで確定）
+ * - なので必須にせず optional にする
+ */
 export type CashShortForecast = {
-  cashAccountId: number;
-
+  level: CashShortForecastLevel;
   message: string;
 
   month: string;
   rangeMonths: number;
   avgWindowMonths: number;
 
-  // ✅ 追加（今回のエラー原因）
   avgIncome: number;
   avgExpense: number;
   avgNet: number;
 
-  level: CashShortForecastLevel;
+  shortDate: string | null;
 
-  rows: CashShortForecastRow[];
+  // 将来返すようになっても壊れないように optional で受け止める
+  cashAccountId?: number;
+  rows?: CashShortForecastRow[];
 
   shortMonth?: string | null;
-  shortDate?: string | null;
-
   currentBalance?: number;
   minBalance?: number;
 };
