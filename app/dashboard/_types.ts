@@ -87,3 +87,30 @@ export type CashFlowUpsertInput = {
   memo?: string | null;
   cash_category_id?: number | null;
 };
+
+/* ---------- Cash Projection / Simulation ---------- */
+
+export type GetCashProjectionInput = {
+  cashAccountId: number;
+  // 未来予測の期間（例: 6, 12, 24）
+  months?: number;
+  // 起点月（"YYYY-MM" or "YYYY-MM-01" など。なければサーバー側で今月）
+  startMonth?: string;
+};
+
+export type CashProjectionPoint = {
+  month: string; // "YYYY-MM"
+  income: number;
+  expense: number;
+  net: number; // income - expense
+  projected_balance: number; // 予測残高（累積）
+};
+
+export type CashProjectionResult = {
+  cashAccountId: number;
+  startMonth: string; // "YYYY-MM"
+  months: number;
+  points: CashProjectionPoint[];
+  // 最低残高など、計算してるなら載せられる（無くてもOK）
+  minBalance?: number;
+};
