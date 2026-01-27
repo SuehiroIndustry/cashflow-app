@@ -47,4 +47,5 @@ export type MonthlyBalanceRow = {
  */
 export type CashFlowDeleteInput = {
   id: number;
+  cashAccountId: number;
 };
