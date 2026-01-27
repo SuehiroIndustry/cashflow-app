@@ -92,10 +92,8 @@ export type CashFlowUpsertInput = {
 
 export type GetCashProjectionInput = {
   cashAccountId: number;
-  // 未来予測の期間（例: 6, 12, 24）
-  months?: number;
-  // 起点月（"YYYY-MM" or "YYYY-MM-01" など。なければサーバー側で今月）
-  startMonth?: string;
+  startDate: string; // ISO date string (e.g. "2026-01-01")
+  days: number;      // projection horizon in days
 };
 
 export type CashProjectionPoint = {
