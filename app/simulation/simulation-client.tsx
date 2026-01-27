@@ -1,15 +1,13 @@
+// app/simulation/simulation-client.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
-import type { AccountRow } from "@/app/dashboard/_types";
 import type { SimulationResult } from "./_actions/getSimulation";
 
 type Props = {
-  accounts: AccountRow[];
-  selectedAccountId: number | null;
+  // ✅ 全口座固定なので accounts / selectedAccountId は不要
   simulation: SimulationResult | null;
 };
 
@@ -40,18 +38,7 @@ function buildFallbackMonths(count = 12) {
   });
 }
 
-export default function SimulationClient({
-  accounts,
-  selectedAccountId,
-  simulation,
-}: Props) {
-  const router = useRouter();
-
-  const selected = useMemo(() => {
-    if (!selectedAccountId) return null;
-    return accounts.find((a) => Number(a.id) === Number(selectedAccountId)) ?? null;
-  }, [accounts, selectedAccountId]);
-
+export default function SimulationClient({ simulation }: Props) {
   const [assumedIncome, setAssumedIncome] = useState<string>(() =>
     simulation ? String(Math.round((simulation as any).avgIncome ?? 0)) : ""
   );
@@ -59,18 +46,9 @@ export default function SimulationClient({
     simulation ? String(Math.round((simulation as any).avgExpense ?? 0)) : ""
   );
 
-  const assumedIncomeNum = useMemo(
-    () => Number(assumedIncome || 0),
-    [assumedIncome]
-  );
-  const assumedExpenseNum = useMemo(
-    () => Number(assumedExpense || 0),
-    [assumedExpense]
-  );
-  const assumedNet = useMemo(
-    () => assumedIncomeNum - assumedExpenseNum,
-    [assumedIncomeNum, assumedExpenseNum]
-  );
+  const assumedIncomeNum = useMemo(() => Number(assumedIncome || 0), [assumedIncome]);
+  const assumedExpenseNum = useMemo(() => Number(assumedExpense || 0), [assumedExpense]);
+  const assumedNet = useMemo(() => assumedIncomeNum - assumedExpenseNum, [assumedIncomeNum, assumedExpenseNum]);
 
   const months = useMemo(() => {
     if (!simulation) return [];
@@ -132,48 +110,28 @@ export default function SimulationClient({
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
             <div className="text-xs text-neutral-400">Cashflow Dashboard</div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              Simulation
-            </h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white">Simulation</h1>
+            <div className="mt-1 text-xs text-neutral-500">※このページは「全口座」で固定です</div>
           </div>
 
-          {/* ✅ 右上：Dashboardへ戻る + Account */}
+          {/* ✅ 右上：Dashboardへ戻る（行き来ボタン） */}
           <div className="flex items-center gap-2">
             <Link
-              href="/dashboard"
+              href="/dashboard?account=0"
               className="inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 px-3 text-sm text-white hover:bg-neutral-900"
             >
               Dashboardへ
             </Link>
-
-            <span className="text-sm text-neutral-400">Account</span>
-            <select
-              className="h-9 rounded-md border border-neutral-800 bg-neutral-900 px-3 text-sm text-white"
-              value={selectedAccountId ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (!v) return;
-                router.push(`/simulation?account=${v}`);
-              }}
-            >
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 
-        {/* Selected */}
+        {/* Selected（全口座固定表示） */}
         <div className={`${card} mb-4`}>
           <div className={cardBody}>
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="text-xs text-neutral-400">Selected</div>
-                <div className="text-lg font-semibold text-white">
-                  {selected?.name ?? (simulation as any)?.accountName ?? "—"}
-                </div>
+                <div className="text-lg font-semibold text-white">全口座</div>
                 <div className="mt-1 text-sm text-neutral-300">
                   Current Balance:{" "}
                   <span className="font-semibold text-white">
@@ -193,21 +151,15 @@ export default function SimulationClient({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className={label}>収入</span>
-                  <span className={value}>
-                    {formatJPY(Number((simulation as any)?.avgIncome ?? 0))}
-                  </span>
+                  <span className={value}>{formatJPY(Number((simulation as any)?.avgIncome ?? 0))}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>支出</span>
-                  <span className={value}>
-                    {formatJPY(Number((simulation as any)?.avgExpense ?? 0))}
-                  </span>
+                  <span className={value}>{formatJPY(Number((simulation as any)?.avgExpense ?? 0))}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>差額</span>
-                  <span className={value}>
-                    {formatJPY(Number((simulation as any)?.avgNet ?? 0))}
-                  </span>
+                  <span className={value}>{formatJPY(Number((simulation as any)?.avgNet ?? 0))}</span>
                 </div>
               </div>
             </div>
@@ -224,9 +176,7 @@ export default function SimulationClient({
                     className={inputBase}
                     inputMode="numeric"
                     value={assumedIncome}
-                    onChange={(e) =>
-                      setAssumedIncome(clampNumberString(e.target.value))
-                    }
+                    onChange={(e) => setAssumedIncome(clampNumberString(e.target.value))}
                     placeholder="例）1200000"
                   />
                 </div>
@@ -236,18 +186,14 @@ export default function SimulationClient({
                     className={inputBase}
                     inputMode="numeric"
                     value={assumedExpense}
-                    onChange={(e) =>
-                      setAssumedExpense(clampNumberString(e.target.value))
-                    }
+                    onChange={(e) => setAssumedExpense(clampNumberString(e.target.value))}
                     placeholder="例）900000"
                   />
                 </div>
 
                 <div className="pt-1 text-sm text-neutral-300">
                   想定差額：{" "}
-                  <span className="font-semibold text-white">
-                    {formatJPY(assumedNet)}
-                  </span>
+                  <span className="font-semibold text-white">{formatJPY(assumedNet)}</span>
                 </div>
 
                 <div className="text-xs text-neutral-500">
@@ -293,18 +239,13 @@ export default function SimulationClient({
                         {new Intl.NumberFormat("ja-JP").format(m.assumedNet)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {new Intl.NumberFormat("ja-JP").format(
-                          m.projectedBalance
-                        )}
+                        {new Intl.NumberFormat("ja-JP").format(m.projectedBalance)}
                       </td>
                     </tr>
                   ))}
                   {months.length === 0 && (
                     <tr>
-                      <td
-                        className="px-3 py-6 text-center text-neutral-500"
-                        colSpan={3}
-                      >
+                      <td className="px-3 py-6 text-center text-neutral-500" colSpan={3}>
                         データがありません
                       </td>
                     </tr>
