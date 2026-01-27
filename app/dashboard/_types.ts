@@ -38,14 +38,16 @@ export type MonthlyBalanceRow = {
   balance: number;
 };
 
-/**
- * ✅ ここが今回のビルド失敗の原因。
- * deleteCashFlow.ts が import している型を _types に復活させる。
- *
- * 既存コードが `id` を使っている可能性が最も高いので、まずはこれで通す。
- * もし呼び出し側が `cashFlowId` を渡している設計だった場合は、次に合わせて直す。
- */
 export type CashFlowDeleteInput = {
   id: number;
   cashAccountId: number;
+};
+
+export type CashCategory = {
+  id: number;
+  name: string;
+  // DBによっては null あり得るので広めにしておく（型で詰まってビルド落とすのが一番ダルい）
+  kind?: string | null;
+  sort_order?: number | null;
+  is_active?: boolean | null;
 };
