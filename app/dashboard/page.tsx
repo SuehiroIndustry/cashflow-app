@@ -163,12 +163,62 @@ export default async function DashboardPage({ searchParams }: Props) {
     updatedAtISO: new Date().toISOString(),
   };
 
-  const alertCards = buildAlerts({
-    currentBalance: cashStatus.currentBalance,
-    monthNet: cashStatus.monthNet,
-    accountsCount: accounts.length,
-    monthlyCount: monthly.length,
-  });
+  function buildAlerts(params: {
+  currentBalance: number | null;
+  monthNet: number | null;
+  accountsCount: number;
+  monthlyCount: number;
+}): AlertCard[] {
+  const { currentBalance, monthNet, accountsCount, monthlyCount } = params;
+
+  const alerts: AlertCard[] = [];
+
+  // ✅ info: データ不足
+  if (accountsCount === 0) {
+    alerts.push({
+      severity: "info",
+      title: "口座が未登録です",
+      description: "まずは口座を登録してください。口座がないとダッシュボードは判断できません。",
+      actionLabel: "口座を確認",
+      href: "/accounts",
+    });
+    return alerts;
+  }
+
+  if (monthlyCount === 0) {
+    alerts.push({
+      severity: "info",
+      title: "月次データがまだありません",
+      description: "取引データが無いか、集計が未実行の可能性があります。",
+      actionLabel: "取引を確認",
+      href: "/cash-flows",
+    });
+  }
+
+  // ✅ critical: 残高が少ない（警告だけ。シミュレーションには飛ばさない）
+  const CRITICAL_BALANCE = 300_000;
+  if (typeof currentBalance === "number" && currentBalance <= CRITICAL_BALANCE) {
+    alerts.push({
+      severity: "critical",
+      title: "残高が危険水域です",
+      description: `現在残高が ${currentBalance.toLocaleString()} 円です。支払い予定があるなら、資金ショートが現実的です。`,
+      // ✅ actionLabel / href を付けない
+    });
+  }
+
+  // ✅ warning: 今月が赤字（これは内訳確認に飛ばしてOK）
+  if (typeof monthNet === "number" && monthNet < 0) {
+    alerts.push({
+      severity: "warning",
+      title: "今月の収支がマイナスです",
+      description: `今月の差額が ${monthNet.toLocaleString()} 円です。固定費か突発支出の内訳確認を推奨します。`,
+      actionLabel: "今月の内訳を見る",
+      href: "/cash-flows",
+    });
+  }
+
+  return alerts;
+}
 
   return (
     <DashboardClient
