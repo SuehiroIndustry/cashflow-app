@@ -3,12 +3,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { AccountRow } from "@/app/dashboard/_actions/getAccounts";
 
-// ✅ ここは “サーバーから渡ってくる simulation の形” に合わせる
-// 既存の getSimulation の戻りに合わせて調整してOK
 export type SimulationLevel = "safe" | "warn" | "danger" | "short";
 
 export type SimulationRow = {
-  month: string; // "YYYY-MM" or "YYYY-MM-01" など
+  month: string; // "YYYY-MM" or "YYYY-MM-01"
   assumedNet: number;
   projectedBalance: number;
 };
@@ -18,13 +16,20 @@ export type SimulationResult = {
   accountName: string;
   currentBalance: number;
 
-  // 直近平均（初期値として使う）
   avgIncome: number;
   avgExpense: number;
   avgNet: number;
 
-  // 表示の基準となる “月の並び”
-  months: string[]; // ex: ["2026-02", "2026-03", ...]
+  // ✅ ここを optional にする（getSimulation に合わせる）
+  months?: string[];
+
+  // ✅ getSimulation が rows を返してるなら、それも受け取れるようにしておく
+  rows?: Array<{
+    month: string;
+    assumedNet?: number;
+    projectedBalance?: number;
+    projected_balance?: number; // もし snake なら吸収
+  }>;
 };
 
 type Props = {
@@ -34,7 +39,6 @@ type Props = {
 };
 
 function normalizeMonthLabel(m: string) {
-  // "YYYY-MM-01" を "YYYY-MM" に寄せる
   if (/^\d{4}-\d{2}-\d{2}$/.test(m)) return m.slice(0, 7);
   return m;
 }
@@ -49,7 +53,6 @@ export default function SimulationClient({
   selectedAccountId,
   simulation,
 }: Props) {
-  // ✅ 初期値（simulation が来たらそこから入れる）
   const [assumedIncome, setAssumedIncome] = useState<number>(0);
   const [assumedExpense, setAssumedExpense] = useState<number>(0);
 
@@ -57,22 +60,26 @@ export default function SimulationClient({
     if (!simulation) return;
     setAssumedIncome(Math.round(simulation.avgIncome ?? 0));
     setAssumedExpense(Math.round(simulation.avgExpense ?? 0));
-  }, [simulation?.cashAccountId]); // 口座切替時に追従
+  }, [simulation?.cashAccountId]);
 
   const currentBalance = useMemo(() => {
     return Math.round(simulation?.currentBalance ?? 0);
   }, [simulation]);
 
+  // ✅ months が無い場合は rows から作る（それも無いなら空）
   const months = useMemo(() => {
-    const ms = simulation?.months ?? [];
-    return ms.map(normalizeMonthLabel);
+    const ms = (simulation?.months ?? []).map(normalizeMonthLabel);
+    if (ms.length > 0) return ms;
+
+    const rs = simulation?.rows ?? [];
+    const fromRows = rs.map((r) => normalizeMonthLabel(r.month));
+    return fromRows;
   }, [simulation]);
 
   const assumedNet = useMemo(() => {
     return Math.round((assumedIncome ?? 0) - (assumedExpense ?? 0));
   }, [assumedIncome, assumedExpense]);
 
-  // ✅ ここが本丸：入力から rows を作る（毎回再計算）
   const rows: SimulationRow[] = useMemo(() => {
     let running = currentBalance;
     return months.map((month) => {
@@ -85,9 +92,7 @@ export default function SimulationClient({
     });
   }, [months, currentBalance, assumedNet]);
 
-  // ✅ 判定（ざっくり運用ルール）
   const { level, shortMonth, message } = useMemo(() => {
-    // ショート判定：初めて projectedBalance が 0 を割る月
     const short = rows.find((r) => r.projectedBalance < 0)?.month ?? null;
 
     if (short) {
@@ -98,8 +103,6 @@ export default function SimulationClient({
       };
     }
 
-    // warn 判定：平均差額がマイナス or 余裕が薄い
-    // ※このルールは後で好きに調整してOK
     if (assumedNet < 0) {
       return {
         level: "warn" as SimulationLevel,
@@ -109,7 +112,6 @@ export default function SimulationClient({
       };
     }
 
-    // “3ヶ月分の支出” を切ったら注意（現場ルール）
     if (currentBalance < (assumedExpense || 0) * 3) {
       return {
         level: "warn" as SimulationLevel,
@@ -133,7 +135,6 @@ export default function SimulationClient({
 
   return (
     <div className="space-y-6">
-      {/* Selected */}
       <div className="rounded-xl border border-white/10 bg-white/5 p-4">
         <div className="text-sm text-white/70">Selected</div>
         <div className="mt-1 text-lg font-semibold text-white">
@@ -147,9 +148,7 @@ export default function SimulationClient({
         </div>
       </div>
 
-      {/* Top cards */}
       <div className="grid gap-4 md:grid-cols-3">
-        {/* Average */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-semibold text-white">
             平均（直近 6 ヶ月）
@@ -177,7 +176,6 @@ export default function SimulationClient({
           </div>
         </div>
 
-        {/* Inputs */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-semibold text-white">予測（12 ヶ月）</div>
 
@@ -216,7 +214,6 @@ export default function SimulationClient({
           </div>
         </div>
 
-        {/* Judge */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-semibold text-white">判定</div>
 
@@ -235,7 +232,6 @@ export default function SimulationClient({
         </div>
       </div>
 
-      {/* Table */}
       <div className="rounded-xl border border-white/10 bg-white/5 p-4">
         <div className="text-sm font-semibold text-white">月別 着地（予測）</div>
 
