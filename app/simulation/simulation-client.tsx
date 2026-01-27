@@ -3,43 +3,8 @@
 import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import type {
-  AccountRow,
-  CashShortForecast,
-  MonthlyBalanceRow,
-} from "@/app/dashboard/_types";
-
-// ここはあなたの実装に合わせて import してOK
-// すでに _actions/getSimulation.ts で返している型を使ってるなら、それに寄せてね
-export type SimulationLevel = "safe" | "warn" | "danger";
-
-export type SimulationMonthRow = {
-  month: string; // "YYYY-MM"
-  assumedNet: number;
-  projectedBalance: number;
-};
-
-export type SimulationResult = {
-  cashAccountId: number;
-  accountName: string;
-  currentBalance: number;
-
-  // 直近平均（参考表示）
-  avgIncome: number;
-  avgExpense: number;
-  avgNet: number;
-
-  // 判定
-  level: SimulationLevel;
-  message: string;
-
-  // 予測（テーブル）
-  months: SimulationMonthRow[];
-
-  // 必要なら将来拡張（ショート予測を載せる）
-  shortForecast?: CashShortForecast | null;
-  monthlyBalances?: MonthlyBalanceRow[]; // 使ってなければ消してOK
-};
+import type { AccountRow } from "@/app/dashboard/_types";
+import type { SimulationResult } from "./_actions/getSimulation";
 
 type Props = {
   accounts: AccountRow[];
@@ -53,9 +18,29 @@ function formatJPY(n: number) {
 }
 
 function clampNumberString(v: string) {
-  // 数字以外を落とす（空は許容）
-  const s = v.replace(/[^\d]/g, "");
-  return s;
+  return v.replace(/[^\d]/g, "");
+}
+
+function toMonthKey(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+/**
+ * サーバーが months を返してなくても表示できるようにする保険。
+ * 今月の次月から12ヶ月ぶん生成する。
+ */
+function buildFallbackMonths(count = 12) {
+  const base = new Date();
+  base.setDate(1);
+  base.setMonth(base.getMonth() + 1);
+
+  return Array.from({ length: count }).map((_, i) => {
+    const d = new Date(base);
+    d.setMonth(base.getMonth() + i);
+    return { month: toMonthKey(d) };
+  });
 }
 
 export default function SimulationClient({
@@ -70,12 +55,11 @@ export default function SimulationClient({
     return accounts.find((a) => Number(a.id) === Number(selectedAccountId)) ?? null;
   }, [accounts, selectedAccountId]);
 
-  // 初期値：simulationの平均値を使う
   const [assumedIncome, setAssumedIncome] = useState<string>(() =>
-    simulation ? String(Math.round(simulation.avgIncome)) : ""
+    simulation ? String(Math.round(simulation.avgIncome ?? 0)) : ""
   );
   const [assumedExpense, setAssumedExpense] = useState<string>(() =>
-    simulation ? String(Math.round(simulation.avgExpense)) : ""
+    simulation ? String(Math.round(simulation.avgExpense ?? 0)) : ""
   );
 
   const assumedIncomeNum = useMemo(
@@ -86,19 +70,21 @@ export default function SimulationClient({
     () => Number(assumedExpense || 0),
     [assumedExpense]
   );
-
   const assumedNet = useMemo(
     () => assumedIncomeNum - assumedExpenseNum,
     [assumedIncomeNum, assumedExpenseNum]
   );
 
-  // months は「入力値に合わせて」画面側で再計算（サーバー再フェッチ無しでも結果が変わる）
-  const months = useMemo<SimulationMonthRow[]>(() => {
+  const months = useMemo(() => {
     if (!simulation) return [];
-    const base = simulation.currentBalance;
-    const src = simulation.months ?? [];
-    // month配列の長さだけ再計算（month文字列はそのまま使う）
-    let running = base;
+
+    // ✅ サーバーから months が来ていればそれを使う。無ければ fallback 12ヶ月
+    const src =
+      (simulation as any).months && Array.isArray((simulation as any).months)
+        ? ((simulation as any).months as Array<{ month: string }>)
+        : buildFallbackMonths(12);
+
+    let running = Number(simulation.currentBalance ?? 0);
     return src.map((m) => {
       running += assumedNet;
       return {
@@ -109,10 +95,9 @@ export default function SimulationClient({
     });
   }, [simulation, assumedNet]);
 
-  const level = simulation?.level ?? "safe";
+  const level = (simulation as any)?.level ?? "safe";
   const badge = useMemo(() => {
-    // 色も明示（テーマ依存ゼロ）
-    if (level === "danger") {
+    if (level === "danger" || level === "short") {
       return {
         label: "CRITICAL",
         className:
@@ -133,23 +118,15 @@ export default function SimulationClient({
     };
   }, [level]);
 
-  const pageBase =
-    "min-h-screen bg-black text-white"; // ← ここで白化を封殺
-  const shell =
-    "mx-auto w-full max-w-6xl px-4 py-6";
-  const gridTop =
-    "grid gap-4 md:grid-cols-3";
+  // ✅ 白化を封殺（ページ内で完結して固定）
+  const pageBase = "min-h-screen bg-black text-white";
+  const shell = "mx-auto w-full max-w-6xl px-4 py-6";
 
-  const card =
-    "rounded-xl border border-neutral-800 bg-neutral-950 shadow-sm";
-  const cardHead =
-    "px-5 pt-4 text-sm font-semibold text-white";
-  const cardBody =
-    "px-5 pb-5 pt-3 text-sm text-neutral-200";
-  const label =
-    "text-xs text-neutral-400";
-  const value =
-    "text-base font-semibold text-white";
+  const card = "rounded-xl border border-neutral-800 bg-neutral-950 shadow-sm";
+  const cardHead = "px-5 pt-4 text-sm font-semibold text-white";
+  const cardBody = "px-5 pb-5 pt-3 text-sm text-neutral-200";
+  const label = "text-xs text-neutral-400";
+  const value = "text-base font-semibold text-white";
 
   const inputBase =
     "h-10 w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 text-sm text-white placeholder:text-neutral-500 outline-none focus:border-neutral-500 focus:ring-2 focus:ring-white/10";
@@ -171,17 +148,16 @@ export default function SimulationClient({
               <div>
                 <div className="text-xs text-neutral-400">Selected</div>
                 <div className="text-lg font-semibold text-white">
-                  {selected?.name ?? simulation?.accountName ?? "—"}
+                  {selected?.name ?? (simulation as any)?.accountName ?? "—"}
                 </div>
                 <div className="mt-1 text-sm text-neutral-300">
                   Current Balance:{" "}
                   <span className="font-semibold text-white">
-                    {formatJPY(simulation?.currentBalance ?? 0)}
+                    {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
                   </span>
                 </div>
               </div>
 
-              {/* Account selector (URLで切り替える想定) */}
               <div className="flex items-center gap-2">
                 <span className="text-sm text-neutral-400">Account</span>
                 <select
@@ -189,7 +165,6 @@ export default function SimulationClient({
                   value={selectedAccountId ?? ""}
                   onChange={(e) => {
                     const v = e.target.value;
-                    // account=0 は全体とかの仕様なら調整して
                     if (!v) return;
                     router.push(`/simulation?account=${v}`);
                   }}
@@ -205,8 +180,7 @@ export default function SimulationClient({
           </div>
         </div>
 
-        {/* 3 cards */}
-        <div className={gridTop}>
+        <div className="grid gap-4 md:grid-cols-3">
           {/* Average */}
           <div className={card}>
             <div className={cardHead}>平均（直近 6ヶ月）</div>
@@ -215,19 +189,19 @@ export default function SimulationClient({
                 <div className="flex items-center justify-between">
                   <span className={label}>収入</span>
                   <span className={value}>
-                    {formatJPY(simulation?.avgIncome ?? 0)}
+                    {formatJPY(Number((simulation as any)?.avgIncome ?? 0))}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>支出</span>
                   <span className={value}>
-                    {formatJPY(simulation?.avgExpense ?? 0)}
+                    {formatJPY(Number((simulation as any)?.avgExpense ?? 0))}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>差額</span>
                   <span className={value}>
-                    {formatJPY(simulation?.avgNet ?? 0)}
+                    {formatJPY(Number((simulation as any)?.avgNet ?? 0))}
                   </span>
                 </div>
               </div>
@@ -272,7 +246,7 @@ export default function SimulationClient({
                 </div>
 
                 <div className="text-xs text-neutral-500">
-                  ※モデル：平均収支（固定）で単純に積み上げ（rows があればそれを表示）
+                  ※入力変更に合わせて、画面側で即時に積み上げ計算します
                 </div>
               </div>
             </div>
@@ -285,8 +259,8 @@ export default function SimulationClient({
               <div className="flex items-start gap-3">
                 <span className={badge.className}>{badge.label}</span>
                 <div className="text-sm text-neutral-200">
-                  {simulation?.message ??
-                    "現状の傾向では、直近12ヶ月で資金ショートの兆候は強くありません。"}
+                  {(simulation as any)?.message ??
+                    "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。"}
                 </div>
               </div>
             </div>
@@ -336,7 +310,6 @@ export default function SimulationClient({
           </div>
         </div>
 
-        {/* 余白 */}
         <div className="h-10" />
       </div>
     </div>
