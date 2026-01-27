@@ -1,410 +1,156 @@
 // app/simulation/simulation-client.tsx
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
+import { useRouter } from "next/navigation";
 
-import { getMonthlyCashBalances } from "@/app/dashboard/_actions/getMonthlyCashBalances";
-import { getCashShortForecast } from "@/app/dashboard/_actions/getCashShortForecast";
+import type { CashAccount } from "@/app/dashboard/_types";
+import type { SimulationResult } from "./_actions/getSimulation";
 
-import type {
-  CashAccount,
-  MonthlyBalanceRow,
-  CashShortForecast,
-  CashShortForecastInput,
-} from "@/app/dashboard/_types";
-
-type Props = {
+export default function SimulationClient(props: {
   accounts: CashAccount[];
-};
-
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
-
-function toMonthStartISO(input: string): string {
-  const s = (input ?? "").trim();
-
-  const jp = s.match(/^(\d{4})年(\d{1,2})月$/);
-  if (jp) {
-    const y = jp[1];
-    const m = pad2(Number(jp[2]));
-    return `${y}-${m}-01`;
-  }
-
-  const ym = s.match(/^(\d{4})-(\d{1,2})$/);
-  if (ym) {
-    const y = ym[1];
-    const m = pad2(Number(ym[2]));
-    return `${y}-${m}-01`;
-  }
-
-  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (ymd) return s;
-
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = pad2(d.getMonth() + 1);
-  return `${y}-${m}-01`;
-}
-
-function toJpMonthLabel(yyyyMm01: string): string {
-  const m = (yyyyMm01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
-  if (!m) return yyyyMm01;
-  return `${m[1]}年${m[2]}月`;
-}
-
-function addMonths(yyyyMm01: string, add: number): string {
-  const m = (yyyyMm01 ?? "").match(/^(\d{4})-(\d{2})-\d{2}$/);
-  if (!m) return yyyyMm01;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const total = y * 12 + (mo - 1) + add;
-  const ny = Math.floor(total / 12);
-  const nmo = (total % 12) + 1;
-  return `${ny}-${pad2(nmo)}-01`;
-}
-
-function calcSeries(params: {
-  startMonth: string; // YYYY-MM-01
-  startBalance: number;
-  avgIncome: number;
-  avgExpense: number;
-  rangeMonths: number;
-  incomeDelta?: number; // What-if：毎月の収入上乗せ
-  expenseDelta?: number; // What-if：毎月の支出上乗せ
+  selectedAccountId: number | null;
+  simulation: SimulationResult | null;
 }) {
-  const {
-    startMonth,
-    startBalance,
-    avgIncome,
-    avgExpense,
-    rangeMonths,
-    incomeDelta = 0,
-    expenseDelta = 0,
-  } = params;
+  const router = useRouter();
 
-  const rows: Array<{ month: string; income: number; expense: number; balance: number }> = [];
+  const selected = useMemo(() => {
+    if (!props.selectedAccountId) return null;
+    return props.accounts.find((a) => a.id === props.selectedAccountId) ?? null;
+  }, [props.accounts, props.selectedAccountId]);
 
-  let bal = startBalance;
+  const onChangeAccount = (id: number) => {
+    router.push(`/simulation?account=${id}`);
+  };
 
-  for (let i = 0; i < rangeMonths; i++) {
-    const month = addMonths(startMonth, i);
-    const income = avgIncome + incomeDelta;
-    const expense = avgExpense + expenseDelta;
-    bal = bal + income - expense;
-
-    rows.push({
-      month,
-      income,
-      expense,
-      balance: bal,
-    });
-  }
-
-  return rows;
-}
-
-function findShortMonth(series: Array<{ month: string; balance: number }>): string | null {
-  for (const r of series) {
-    if (r.balance < 0) return r.month;
-  }
-  return null;
-}
-
-export default function SimulationClient({ accounts }: Props) {
-  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
-    accounts.length ? accounts[0].id : null
-  );
-
-  const [monthText, setMonthText] = useState<string>("2026年01月");
-  const [rangeMonths, setRangeMonths] = useState<number>(12);
-  const [avgWindowMonths, setAvgWindowMonths] = useState<number>(6);
-
-  // What-if
-  const [incomeDelta, setIncomeDelta] = useState<number>(0);
-  const [expenseDelta, setExpenseDelta] = useState<number>(0);
-
-  const [baseForecast, setBaseForecast] = useState<CashShortForecast | null>(null);
-  const [monthRows, setMonthRows] = useState<MonthlyBalanceRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const monthISO = useMemo(() => toMonthStartISO(monthText), [monthText]);
-
-  const selectedAccount = useMemo(() => {
-    if (selectedAccountId == null) return null;
-    return accounts.find((a) => a.id === selectedAccountId) ?? null;
-  }, [accounts, selectedAccountId]);
-
-  const currentBalance = selectedAccount?.current_balance ?? 0;
-
-  const load = useCallback(async () => {
-    if (selectedAccountId == null) return;
-
-    setLoading(true);
-    setErr(null);
-
-    try {
-      const rows = await getMonthlyCashBalances({
-        cashAccountId: selectedAccountId,
-        month: monthISO,
-        rangeMonths,
-      });
-      const asc = [...rows].sort((a, b) => a.month.localeCompare(b.month));
-      setMonthRows(asc);
-
-      const input: CashShortForecastInput = {
-        cashAccountId: selectedAccountId,
-        month: monthISO,
-        rangeMonths,
-        avgWindowMonths,
-      };
-
-      const fc = await getCashShortForecast(input);
-      setBaseForecast(fc);
-    } catch (e: any) {
-      setErr(e?.message ?? String(e));
-      setBaseForecast(null);
-      setMonthRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedAccountId, monthISO, rangeMonths, avgWindowMonths]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const simulated = useMemo(() => {
-    if (!baseForecast) return null;
-
-    const series = calcSeries({
-      startMonth: baseForecast.month,
-      startBalance: currentBalance,
-      avgIncome: baseForecast.avgIncome,
-      avgExpense: baseForecast.avgExpense,
-      rangeMonths: baseForecast.rangeMonths,
-      incomeDelta,
-      expenseDelta,
-    });
-
-    const shortMonth = findShortMonth(series.map((r) => ({ month: r.month, balance: r.balance })));
-    const avgNet = (baseForecast.avgIncome + incomeDelta) - (baseForecast.avgExpense + expenseDelta);
-
-    return {
-      series,
-      shortMonth,
-      avgIncome: baseForecast.avgIncome + incomeDelta,
-      avgExpense: baseForecast.avgExpense + expenseDelta,
-      avgNet,
-    };
-  }, [baseForecast, currentBalance, incomeDelta, expenseDelta]);
-
-  const baseShortLabel = baseForecast?.shortDate
-    ? `ショート: ${toJpMonthLabel(baseForecast.shortDate)}`
-    : "ショートなし";
-
-  const simShortLabel = simulated?.shortMonth
-    ? `ショート: ${toJpMonthLabel(simulated.shortMonth)}`
-    : "ショートなし";
+  const badge = (level: SimulationResult["level"]) => {
+    if (level === "danger") return { label: "CRITICAL", cls: "bg-red-950 border-red-500/30 text-red-200" };
+    if (level === "short") return { label: "SHORT", cls: "bg-red-950 border-red-500/30 text-red-200" };
+    if (level === "warn") return { label: "WARN", cls: "bg-amber-950 border-amber-500/30 text-amber-200" };
+    return { label: "SAFE", cls: "bg-emerald-950 border-emerald-500/30 text-emerald-200" };
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <label className="text-sm opacity-80">Account</label>
+    <div className="min-h-screen bg-black text-white">
+      <header className="flex items-center justify-between px-6 py-4">
+        <div>
+          <div className="text-xs text-white/60">Cashflow Dashboard</div>
+          <h1 className="text-xl font-semibold text-white">Simulation</h1>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-white/80">Account</label>
           <select
-            className="border rounded px-2 py-1 bg-transparent"
-            value={selectedAccountId ?? ""}
-            onChange={(e) => setSelectedAccountId(Number(e.target.value))}
+            className="rounded-md bg-zinc-900 text-white border border-white/15 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
+            value={props.selectedAccountId ?? ""}
+            onChange={(e) => onChangeAccount(Number(e.target.value))}
           >
-            {accounts.map((a) => (
+            {props.accounts.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.name} / id:{a.id}
+                {a.name}
               </option>
             ))}
           </select>
         </div>
+      </header>
 
-        <div className="flex items-center gap-2">
-          <label className="text-sm opacity-80">Month</label>
-          <input
-            className="border rounded px-2 py-1 bg-transparent"
-            value={monthText}
-            onChange={(e) => setMonthText(e.target.value)}
-            placeholder="2026年01月"
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="text-sm opacity-80">Range</label>
-          <select
-            className="border rounded px-2 py-1 bg-transparent"
-            value={rangeMonths}
-            onChange={(e) => setRangeMonths(Number(e.target.value))}
-          >
-            <option value={3}>last 3 months</option>
-            <option value={6}>last 6 months</option>
-            <option value={12}>last 12 months</option>
-            <option value={24}>last 24 months</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label className="text-sm opacity-80">Avg</label>
-          <select
-            className="border rounded px-2 py-1 bg-transparent"
-            value={avgWindowMonths}
-            onChange={(e) => setAvgWindowMonths(Number(e.target.value))}
-          >
-            <option value={3}>3 months</option>
-            <option value={6}>6 months</option>
-            <option value={12}>12 months</option>
-          </select>
-        </div>
-
-        <button className="border rounded px-3 py-1" onClick={() => void load()} disabled={loading}>
-          {loading ? "loading..." : "refresh"}
-        </button>
-
-        {err && <div className="text-sm text-red-300">{err}</div>}
-      </div>
-
-      {/* What-if */}
-      <div className="border rounded p-4 space-y-3">
-        <div className="font-semibold">What-if（毎月の上乗せ）</div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div className="flex items-center gap-3">
-            <label className="w-32 opacity-80">収入 +（円/月）</label>
-            <input
-              className="border rounded px-2 py-1 bg-transparent w-48"
-              inputMode="numeric"
-              value={incomeDelta}
-              onChange={(e) => setIncomeDelta(Number(e.target.value) || 0)}
-            />
+      <main className="px-6 pb-10 space-y-6">
+        <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+          <div className="text-sm text-white/70">Selected</div>
+          <div className="mt-1 text-lg font-semibold text-white">
+            {selected ? selected.name : "None"}
           </div>
-
-          <div className="flex items-center gap-3">
-            <label className="w-32 opacity-80">支出 +（円/月）</label>
-            <input
-              className="border rounded px-2 py-1 bg-transparent w-48"
-              inputMode="numeric"
-              value={expenseDelta}
-              onChange={(e) => setExpenseDelta(Number(e.target.value) || 0)}
-            />
+          <div className="mt-2 text-sm text-white/70">
+            Current Balance:{" "}
+            <span className="text-white">
+              {selected ? `${Number(selected.current_balance).toLocaleString()} 円` : "-"}
+            </span>
           </div>
         </div>
 
-        <div className="text-xs opacity-60">
-          ※ “固定費が月◯万増える/減る” みたいな検討用。単発イベント（ボーナス/設備投資）は次の段で足す。
-        </div>
-      </div>
-
-      {/* Compare */}
-      <div className="border rounded p-4">
-        <div className="font-semibold mb-2">結果（ベース vs What-if）</div>
-
-        {!baseForecast || !simulated ? (
-          <div className="text-sm opacity-70">No forecast</div>
+        {!props.simulation ? (
+          <div className="rounded-xl border border-white/15 bg-zinc-950 p-6 text-white/70">
+            No simulation data.
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div className="border rounded p-3">
-              <div className="font-semibold mb-2">ベース</div>
-              <div>現在残高: ¥{currentBalance.toLocaleString()}</div>
-              <div>月平均 収入: ¥{baseForecast.avgIncome.toLocaleString()}</div>
-              <div>月平均 支出: ¥{baseForecast.avgExpense.toLocaleString()}</div>
-              <div className="font-semibold">月平均 純増減: ¥{baseForecast.avgNet.toLocaleString()}</div>
-              <div className="mt-2">{baseShortLabel}</div>
+          <>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+                <div className="text-sm font-semibold text-white">平均（直近 {props.simulation.avgWindowMonths} ヶ月）</div>
+                <div className="mt-3 space-y-2 text-sm">
+                  <div className="flex justify-between text-white/80">
+                    <span>収入</span>
+                    <span className="text-white">{props.simulation.avgIncome.toLocaleString()} 円</span>
+                  </div>
+                  <div className="flex justify-between text-white/80">
+                    <span>支出</span>
+                    <span className="text-white">{props.simulation.avgExpense.toLocaleString()} 円</span>
+                  </div>
+                  <div className="flex justify-between text-white/80">
+                    <span>差額</span>
+                    <span className="text-white">{props.simulation.avgNet.toLocaleString()} 円</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+                <div className="text-sm font-semibold text-white">予測（{props.simulation.horizonMonths} ヶ月）</div>
+                <div className="mt-3 text-sm text-white/80">
+                  ショート月：{" "}
+                  <span className="text-white">
+                    {props.simulation.shortMonth ? props.simulation.shortMonth : "なし"}
+                  </span>
+                </div>
+                <div className="mt-3 text-sm text-white/60">
+                  ※モデル：平均収支（固定）で単純に積み上げ
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+                <div className="text-sm font-semibold text-white">判定</div>
+                <div className="mt-3 flex items-start gap-3">
+                  <span
+                    className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-semibold ${badge(props.simulation.level).cls}`}
+                  >
+                    {badge(props.simulation.level).label}
+                  </span>
+                  <div className="text-sm text-white/80 leading-relaxed">
+                    {props.simulation.message}
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div className="border rounded p-3">
-              <div className="font-semibold mb-2">What-if</div>
-              <div>現在残高: ¥{currentBalance.toLocaleString()}</div>
-              <div>月平均 収入: ¥{simulated.avgIncome.toLocaleString()}</div>
-              <div>月平均 支出: ¥{simulated.avgExpense.toLocaleString()}</div>
-              <div className="font-semibold">月平均 純増減: ¥{simulated.avgNet.toLocaleString()}</div>
-              <div className="mt-2">{simShortLabel}</div>
+            <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
+              <div className="text-sm font-semibold text-white">月別 着地（予測）</div>
+              <div className="mt-3 overflow-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-white/70">
+                    <tr>
+                      <th className="text-left py-2 pr-4">month</th>
+                      <th className="text-right py-2 pr-4">assumed net</th>
+                      <th className="text-right py-2">projected balance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-white">
+                    {props.simulation.rows.map((r) => (
+                      <tr key={r.month} className="border-t border-white/10">
+                        <td className="py-2 pr-4">{r.month}</td>
+                        <td className="py-2 pr-4 text-right">
+                          {Number(r.net_assumed).toLocaleString()}
+                        </td>
+                        <td className="py-2 text-right">
+                          {Number(r.projected_balance).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          </>
         )}
-      </div>
-
-      {/* Projection table */}
-      <div className="border rounded p-4">
-        <div className="font-semibold mb-3">予測テーブル（What-if）</div>
-
-        {!simulated ? (
-          <div className="text-sm opacity-70">No data</div>
-        ) : (
-          <div className="overflow-auto">
-            <table className="min-w-[900px] w-full text-sm">
-              <thead className="opacity-70">
-                <tr className="text-left border-b">
-                  <th className="py-2">Month</th>
-                  <th className="py-2">Income</th>
-                  <th className="py-2">Expense</th>
-                  <th className="py-2">Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {simulated.series.map((r) => (
-                  <tr key={r.month} className="border-b last:border-b-0">
-                    <td className="py-2">{toJpMonthLabel(r.month)}</td>
-                    <td className="py-2">¥{r.income.toLocaleString()}</td>
-                    <td className="py-2">¥{r.expense.toLocaleString()}</td>
-                    <td className="py-2">¥{r.balance.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="text-xs opacity-60 mt-3">
-          account: {selectedAccount ? selectedAccount.name : "none"} / start: {toJpMonthLabel(monthISO)}
-        </div>
-      </div>
-
-      {/* Context rows (actual month rows) */}
-      <div className="border rounded p-4">
-        <div className="font-semibold mb-3">実績（月次）</div>
-
-        <div className="overflow-auto">
-          <table className="min-w-[900px] w-full text-sm">
-            <thead className="opacity-70">
-              <tr className="text-left border-b">
-                <th className="py-2">Month</th>
-                <th className="py-2">Income</th>
-                <th className="py-2">Expense</th>
-                <th className="py-2">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthRows.map((r: MonthlyBalanceRow) => (
-                <tr key={r.month} className="border-b last:border-b-0">
-                  <td className="py-2">{r.month}</td>
-                  <td className="py-2">¥{r.income.toLocaleString()}</td>
-                  <td className="py-2">¥{r.expense.toLocaleString()}</td>
-                  <td className="py-2">¥{r.balance.toLocaleString()}</td>
-                </tr>
-              ))}
-              {!monthRows.length && (
-                <tr>
-                  <td className="py-2 opacity-60" colSpan={4}>
-                    No rows
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="text-xs opacity-60 mt-3">
-          ※ この実績を元に getCashShortForecast が平均（avg）を作ってる。
-        </div>
-      </div>
+      </main>
     </div>
   );
 }
