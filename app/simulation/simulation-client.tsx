@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import type { AccountRow } from "@/app/dashboard/_types";
@@ -27,10 +28,6 @@ function toMonthKey(d: Date) {
   return `${y}-${m}`;
 }
 
-/**
- * サーバーが months を返してなくても表示できるようにする保険。
- * 今月の次月から12ヶ月ぶん生成する。
- */
 function buildFallbackMonths(count = 12) {
   const base = new Date();
   base.setDate(1);
@@ -56,10 +53,10 @@ export default function SimulationClient({
   }, [accounts, selectedAccountId]);
 
   const [assumedIncome, setAssumedIncome] = useState<string>(() =>
-    simulation ? String(Math.round(simulation.avgIncome ?? 0)) : ""
+    simulation ? String(Math.round((simulation as any).avgIncome ?? 0)) : ""
   );
   const [assumedExpense, setAssumedExpense] = useState<string>(() =>
-    simulation ? String(Math.round(simulation.avgExpense ?? 0)) : ""
+    simulation ? String(Math.round((simulation as any).avgExpense ?? 0)) : ""
   );
 
   const assumedIncomeNum = useMemo(
@@ -78,13 +75,12 @@ export default function SimulationClient({
   const months = useMemo(() => {
     if (!simulation) return [];
 
-    // ✅ サーバーから months が来ていればそれを使う。無ければ fallback 12ヶ月
     const src =
       (simulation as any).months && Array.isArray((simulation as any).months)
         ? ((simulation as any).months as Array<{ month: string }>)
         : buildFallbackMonths(12);
 
-    let running = Number(simulation.currentBalance ?? 0);
+    let running = Number((simulation as any).currentBalance ?? 0);
     return src.map((m) => {
       running += assumedNet;
       return {
@@ -118,7 +114,6 @@ export default function SimulationClient({
     };
   }, [level]);
 
-  // ✅ 白化を封殺（ページ内で完結して固定）
   const pageBase = "min-h-screen bg-black text-white";
   const shell = "mx-auto w-full max-w-6xl px-4 py-6";
 
@@ -134,11 +129,40 @@ export default function SimulationClient({
   return (
     <div className={pageBase}>
       <div className={shell}>
-        <div className="mb-6">
-          <div className="text-xs text-neutral-400">Cashflow Dashboard</div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            Simulation
-          </h1>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs text-neutral-400">Cashflow Dashboard</div>
+            <h1 className="text-2xl font-bold tracking-tight text-white">
+              Simulation
+            </h1>
+          </div>
+
+          {/* ✅ 右上：Dashboardへ戻る + Account */}
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 px-3 text-sm text-white hover:bg-neutral-900"
+            >
+              Dashboardへ
+            </Link>
+
+            <span className="text-sm text-neutral-400">Account</span>
+            <select
+              className="h-9 rounded-md border border-neutral-800 bg-neutral-900 px-3 text-sm text-white"
+              value={selectedAccountId ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) return;
+                router.push(`/simulation?account=${v}`);
+              }}
+            >
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Selected */}
@@ -156,25 +180,6 @@ export default function SimulationClient({
                     {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
                   </span>
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-neutral-400">Account</span>
-                <select
-                  className="h-9 rounded-md border border-neutral-800 bg-neutral-900 px-3 text-sm text-white"
-                  value={selectedAccountId ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    router.push(`/simulation?account=${v}`);
-                  }}
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
           </div>
