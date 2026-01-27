@@ -4,52 +4,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-/**
- * page.tsx 側が accounts: AccountRow[] を渡してくる前提。
- * ここでは最小要件（id, name）だけ満たせばOKにしておく。
- */
+// ✅ server action 側の型をそのまま使う（type-only import）
+import type { SimulationResult } from "./_actions/getSimulation";
+
 type AccountLike = {
   id: number;
   name: string;
-};
-
-/**
- * サーバー側の simulation 結果。
- * いま手元の実装差分が多いので「必要なものだけ」厳密にして、
- * 足りない/余分は許容する形にする。
- */
-type SimulationRow = {
-  month: string; // "YYYY-MM" or "YYYY-MM-01"
-  assumedNet?: number;
-  projectedBalance?: number;
-  // 既存が balance だった場合も吸収
-  balance?: number;
-};
-
-type SimulationResult = {
-  cashAccountId: number;
-  currentBalance: number;
-
-  rangeMonths?: number; // 12など
-  avgWindowMonths?: number; // 6など
-
-  avgIncome?: number;
-  avgExpense?: number;
-  avgNet?: number;
-
-  shortDate?: string | null;
-
-  level?: "safe" | "warn" | "danger";
-  message?: string;
-
-  rows?: SimulationRow[];
 };
 
 type Props = {
   accounts: AccountLike[];
   selectedAccountId: number | null;
 
-  // ✅ page.tsx が渡してる
+  // ✅ page.tsx が渡してくる型と一致させる
   simulation: SimulationResult | null;
 };
 
@@ -72,7 +39,11 @@ function addMonths(d: Date, n: number): Date {
   return x;
 }
 
-export default function SimulationClient({ accounts, selectedAccountId, simulation }: Props) {
+export default function SimulationClient({
+  accounts,
+  selectedAccountId,
+  simulation,
+}: Props) {
   const router = useRouter();
 
   const selectedAccount = useMemo(() => {
@@ -84,47 +55,50 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
     router.push(`/simulation?account=${id}`);
   };
 
-  const currentBalance = Number(simulation?.currentBalance ?? 0);
-  const rangeMonths = Number(simulation?.rangeMonths ?? 12);
-  const avgWindowMonths = Number(simulation?.avgWindowMonths ?? 6);
+  const currentBalance = Number((simulation as any)?.currentBalance ?? 0);
+  const rangeMonths = Number((simulation as any)?.rangeMonths ?? 12);
+  const avgWindowMonths = Number((simulation as any)?.avgWindowMonths ?? 6);
 
-  const baseAvgIncome = Number(simulation?.avgIncome ?? 0);
-  const baseAvgExpense = Number(simulation?.avgExpense ?? 0);
+  const baseAvgIncome = Number((simulation as any)?.avgIncome ?? 0);
+  const baseAvgExpense = Number((simulation as any)?.avgExpense ?? 0);
 
-  // ✅ 入力できない問題の本丸を潰す：state + onChange
-  const [incomeInput, setIncomeInput] = useState<string>(String(Math.round(baseAvgIncome)));
-  const [expenseInput, setExpenseInput] = useState<string>(String(Math.round(baseAvgExpense)));
+  // ✅ 入力欄：state + onChange（数字入れられる）
+  const [incomeInput, setIncomeInput] = useState<string>(
+    String(Math.round(baseAvgIncome))
+  );
+  const [expenseInput, setExpenseInput] = useState<string>(
+    String(Math.round(baseAvgExpense))
+  );
 
-  // 口座切替 or simulation 更新で初期値追従
   useEffect(() => {
-    setIncomeInput(String(Math.round(Number(simulation?.avgIncome ?? 0))));
-    setExpenseInput(String(Math.round(Number(simulation?.avgExpense ?? 0))));
+    setIncomeInput(String(Math.round(Number((simulation as any)?.avgIncome ?? 0))));
+    setExpenseInput(String(Math.round(Number((simulation as any)?.avgExpense ?? 0))));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccountId, simulation?.avgIncome, simulation?.avgExpense]);
+  }, [selectedAccountId, (simulation as any)?.avgIncome, (simulation as any)?.avgExpense]);
 
   const assumedIncome = useMemo(() => toNumberSafe(incomeInput), [incomeInput]);
   const assumedExpense = useMemo(() => toNumberSafe(expenseInput), [expenseInput]);
   const assumedNet = useMemo(() => assumedIncome - assumedExpense, [assumedIncome, assumedExpense]);
 
-  // テーブル：simulation.rows があればそれを優先、無ければローカル生成
+  // rows があれば優先。無ければ単純積み上げで生成。
   const projectionRows = useMemo(() => {
-    const rows = simulation?.rows ?? [];
+    const rows = ((simulation as any)?.rows ?? []) as any[];
     if (rows.length > 0) {
       return rows.map((r) => {
+        const monthStr: string = String(r.month ?? "");
+        const m = monthStr.length === 10 ? monthStr.slice(0, 7) : monthStr; // "YYYY-MM-01" -> "YYYY-MM"
+
         const projected =
-          r.projectedBalance ??
-          r.balance ??
-          0;
+          r.projectedBalance ?? r.projected_balance ?? r.balance ?? 0;
 
         return {
-          month: r.month.length === 10 ? r.month.slice(0, 7) : r.month, // "YYYY-MM-01" -> "YYYY-MM"
-          assumedNet: Math.round(Number(r.assumedNet ?? assumedNet)),
+          month: m,
+          assumedNet: Math.round(Number(r.assumedNet ?? r.assumed_net ?? assumedNet)),
           projectedBalance: Math.round(Number(projected)),
         };
       });
     }
 
-    // 無ければ “平均収支固定の単純積み上げ”
     const start = new Date();
     const base = new Date(start.getFullYear(), start.getMonth(), 1);
 
@@ -141,17 +115,20 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
       });
     }
     return out;
-  }, [simulation?.rows, currentBalance, assumedNet, rangeMonths]);
+  }, [simulation, currentBalance, assumedNet, rangeMonths]);
 
+  // ✅ level: "short" が来るので吸収する
   const levelBadge = useMemo(() => {
-    const lvl = simulation?.level ?? "safe";
-    if (lvl === "danger") return { text: "CRITICAL", cls: "bg-red-600/20 text-red-200 border-red-400/30" };
-    if (lvl === "warn") return { text: "CAUTION", cls: "bg-yellow-600/20 text-yellow-200 border-yellow-400/30" };
+    const lvl = String((simulation as any)?.level ?? "safe"); // "safe" | "warn" | "danger" | "short" ...
+    if (lvl === "danger" || lvl === "short")
+      return { text: "CRITICAL", cls: "bg-red-600/20 text-red-200 border-red-400/30" };
+    if (lvl === "warn")
+      return { text: "CAUTION", cls: "bg-yellow-600/20 text-yellow-200 border-yellow-400/30" };
     return { text: "SAFE", cls: "bg-emerald-600/20 text-emerald-200 border-emerald-400/30" };
-  }, [simulation?.level]);
+  }, [simulation]);
 
   const forecastMessage =
-    simulation?.message ??
+    (simulation as any)?.message ??
     "現状の傾向では、直近12ヶ月で資金ショートの兆候は強くありません。";
 
   return (
@@ -179,7 +156,6 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
       </header>
 
       <main className="px-6 pb-10">
-        {/* Selected */}
         <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
           <div className="text-sm text-white/80">Selected</div>
           <div className="mt-1 text-lg font-semibold text-white">
@@ -187,25 +163,27 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
           </div>
           <div className="mt-2 text-sm text-white/70">
             Current Balance:{" "}
-            <span className="text-white">
-              {currentBalance.toLocaleString()} 円
-            </span>
+            <span className="text-white">{currentBalance.toLocaleString()} 円</span>
           </div>
         </div>
 
-        {/* Cards */}
         <div className="mt-6 grid gap-4 md:grid-cols-3">
-          {/* Average */}
           <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
-            <div className="text-sm font-semibold text-white">平均（直近 {avgWindowMonths} ヶ月）</div>
+            <div className="text-sm font-semibold text-white">
+              平均（直近 {avgWindowMonths} ヶ月）
+            </div>
             <div className="mt-3 grid gap-2 text-sm">
               <div className="flex items-center justify-between text-white/80">
                 <span>収入</span>
-                <span className="text-white">{Math.round(baseAvgIncome).toLocaleString()} 円</span>
+                <span className="text-white">
+                  {Math.round(baseAvgIncome).toLocaleString()} 円
+                </span>
               </div>
               <div className="flex items-center justify-between text-white/80">
                 <span>支出</span>
-                <span className="text-white">{Math.round(baseAvgExpense).toLocaleString()} 円</span>
+                <span className="text-white">
+                  {Math.round(baseAvgExpense).toLocaleString()} 円
+                </span>
               </div>
               <div className="flex items-center justify-between text-white/80">
                 <span>差額</span>
@@ -216,7 +194,6 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
             </div>
           </div>
 
-          {/* What-if inputs */}
           <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
             <div className="text-sm font-semibold text-white">予測（{rangeMonths} ヶ月）</div>
 
@@ -256,7 +233,6 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
             </div>
           </div>
 
-          {/* Judge */}
           <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
             <div className="text-sm font-semibold text-white">判定</div>
 
@@ -273,7 +249,6 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
           </div>
         </div>
 
-        {/* Table */}
         <div className="mt-6 rounded-xl border border-white/15 bg-zinc-950 p-4">
           <div className="text-sm font-semibold text-white">月別 着地（予測）</div>
 
@@ -297,8 +272,12 @@ export default function SimulationClient({ accounts, selectedAccountId, simulati
                   projectionRows.map((r) => (
                     <tr key={r.month} className="border-t border-white/10">
                       <td className="py-2 pr-4">{r.month}</td>
-                      <td className="py-2 pr-4 text-right">{Number(r.assumedNet).toLocaleString()}</td>
-                      <td className="py-2 text-right">{Number(r.projectedBalance).toLocaleString()}</td>
+                      <td className="py-2 pr-4 text-right">
+                        {Number(r.assumedNet).toLocaleString()}
+                      </td>
+                      <td className="py-2 text-right">
+                        {Number(r.projectedBalance).toLocaleString()}
+                      </td>
                     </tr>
                   ))
                 )}
