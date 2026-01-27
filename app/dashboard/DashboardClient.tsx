@@ -7,15 +7,21 @@ import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-import type { OverviewPayload } from "./_types";
+import type { OverviewPayload, MonthlyBalanceRow } from "./_types";
 
 type Props = {
   cashStatus: OverviewPayload | null;
   alertCards: unknown[]; // いったん型揺れ吸収（後で戻す）
+  monthlyBalanceRows?: MonthlyBalanceRow[]; // ✅ BalanceCard 用
   children?: React.ReactNode;
 };
 
-export default function DashboardClient({ cashStatus, alertCards, children }: Props) {
+export default function DashboardClient({
+  cashStatus,
+  alertCards,
+  monthlyBalanceRows,
+  children,
+}: Props) {
   // ✅ OverviewCard が payload 必須なので、nullでも必ず渡す
   const payload: OverviewPayload = cashStatus ?? {
     cashAccountId: 0,
@@ -25,6 +31,8 @@ export default function DashboardClient({ cashStatus, alertCards, children }: Pr
     thisMonthExpense: 0,
     net: 0,
   };
+
+  const rows: MonthlyBalanceRow[] = monthlyBalanceRows ?? [];
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -38,7 +46,6 @@ export default function DashboardClient({ cashStatus, alertCards, children }: Pr
             </h1>
           </div>
 
-          {/* ✅ 右上：Simulationへ */}
           <div className="flex items-center gap-2">
             <Link
               href="/simulation"
@@ -52,11 +59,13 @@ export default function DashboardClient({ cashStatus, alertCards, children }: Pr
         {/* Main */}
         {children ?? (
           <div className="grid gap-4 md:grid-cols-3">
-            {/* ✅ payload 必須 */}
             <OverviewCard payload={payload} />
-            {/* ✅ もしこっちも payload を要求してても、ここで吸収できる */}
-            <BalanceCard payload={payload} />
-            <EcoCharts payload={payload} />
+
+            {/* ✅ BalanceCard は rows 必須 */}
+            <BalanceCard rows={rows} />
+
+            {/* ✅ ここは一旦 props なしに戻す（要求されたら次で合わせる） */}
+            <EcoCharts />
           </div>
         )}
       </div>
