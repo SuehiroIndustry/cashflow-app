@@ -143,11 +143,14 @@ export type CashShortForecastRow = {
 };
 
 // ✅ コード側が "safe" / "warn" / "danger" を使っているのが確定。
-// "short" は入れておく（ショート確定の表現が別名で来ても受け止める）
+// "short" は保険
 export type CashShortForecastLevel = "safe" | "warn" | "danger" | "short";
 
 export type CashShortForecast = {
   cashAccountId: number;
+
+  // ✅ 今回のエラー原因：return に message がある
+  message: string;
 
   month: string;
   rangeMonths: number;
@@ -157,7 +160,6 @@ export type CashShortForecast = {
 
   rows: CashShortForecastRow[];
 
-  // getCashShortForecast.ts 側が shortDate を使ってる可能性があるので両対応
   shortMonth?: string | null;
   shortDate?: string | null;
 
