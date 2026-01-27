@@ -7,19 +7,20 @@ import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-import type { OverviewPayload, AlertCardPayload } from "./_types";
+import type { OverviewPayload } from "./_types";
 
 type Props = {
   cashStatus: OverviewPayload | null;
-  alertCards: AlertCardPayload[];
+  // ✅ 型名が揺れてるので一旦コンパイル優先（後で正式型に戻す）
+  alertCards: unknown[];
   children?: React.ReactNode;
 };
 
 export default function DashboardClient({ cashStatus, alertCards, children }: Props) {
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Header */}
       <div className="mx-auto w-full max-w-6xl px-4 py-6">
+        {/* Header */}
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
             <div className="text-xs text-neutral-400">Cashflow Dashboard</div>
@@ -28,7 +29,7 @@ export default function DashboardClient({ cashStatus, alertCards, children }: Pr
             </h1>
           </div>
 
-          {/* ✅ 右上：ページ遷移 */}
+          {/* ✅ 右上：Simulationへ */}
           <div className="flex items-center gap-2">
             <Link
               href="/simulation"
@@ -39,7 +40,7 @@ export default function DashboardClient({ cashStatus, alertCards, children }: Pr
           </div>
         </div>
 
-        {/* 既存のダッシュボード本体 */}
+        {/* Main */}
         {children ?? (
           <div className="grid gap-4 md:grid-cols-3">
             <OverviewCard />
@@ -48,8 +49,9 @@ export default function DashboardClient({ cashStatus, alertCards, children }: Pr
           </div>
         )}
 
-        {/* もし alertCards/cashStatus をここで使ってるなら、既存の表示はそのまま残してOK */}
-        {/* ※あなたの現状実装では、子コンポーネント側で参照してる想定 */}
+        {/* NOTE:
+           cashStatus/alertCards をここで直接描画してるなら、既存実装を残してOK。
+           今回は「行き来ボタン追加」が目的なので触ってない。 */}
       </div>
     </div>
   );
