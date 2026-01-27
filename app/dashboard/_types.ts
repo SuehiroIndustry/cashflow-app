@@ -20,7 +20,6 @@ export type CashStatus = {
   selectedAccountName: string | null;
   currentBalance: number | null;
 
-  // 今月（monthly の最新月行）
   monthLabel: string | null; // "YYYY-MM"
   monthIncome: number | null;
   monthExpense: number | null;
@@ -79,7 +78,6 @@ export type CashFlowDeleteInput = {
   cashAccountId: number;
 };
 
-// 将来用（未使用でもOK）
 export type CashFlowUpsertInput = {
   id?: number;
   cash_account_id: number;
@@ -92,13 +90,12 @@ export type CashFlowUpsertInput = {
 
 /* =========================
  * Cash Projection（Simulation系）
- * getCashProjection.ts が期待している形に合わせる
  * ========================= */
 
 export type GetCashProjectionInput = {
   cashAccountId: number;
   startDate: string; // ISO date string (e.g. "2026-01-01")
-  days: number; // horizon in days
+  days: number;
 };
 
 export type CashProjectionRow = {
@@ -124,14 +121,13 @@ export type CashProjectionResult = {
 
 /* =========================
  * Cash Short Forecast
- * getCashShortForecast.ts が期待している input/output に合わせる
  * ========================= */
 
 export type CashShortForecastInput = {
   cashAccountId: number;
   month: string; // new Date(input.month) されるので "YYYY-MM-01" 推奨
-  rangeMonths?: number; // input.rangeMonths
-  avgWindowMonths?: number; // input.avgWindowMonths
+  rangeMonths?: number;
+  avgWindowMonths?: number;
 };
 
 export type CashShortForecastRow = {
@@ -142,19 +138,21 @@ export type CashShortForecastRow = {
   projected_balance: number;
 };
 
-// ✅ コード側が "safe" / "warn" / "danger" を使っているのが確定。
-// "short" は保険
 export type CashShortForecastLevel = "safe" | "warn" | "danger" | "short";
 
 export type CashShortForecast = {
   cashAccountId: number;
 
-  // ✅ 今回のエラー原因：return に message がある
   message: string;
 
   month: string;
   rangeMonths: number;
   avgWindowMonths: number;
+
+  // ✅ 追加（今回のエラー原因）
+  avgIncome: number;
+  avgExpense: number;
+  avgNet: number;
 
   level: CashShortForecastLevel;
 
