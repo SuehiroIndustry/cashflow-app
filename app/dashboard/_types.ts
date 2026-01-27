@@ -29,7 +29,7 @@ export type CashStatus = {
 };
 
 export type OverviewPayload = {
-  cashAccountId?: number; // 今は返してないので optional
+  cashAccountId?: number;
   accountName: string;
   currentBalance: number;
   thisMonthIncome: number;
@@ -50,17 +50,17 @@ export type AccountRow = {
 
 export type MonthlyBalanceRow = {
   cash_account_id?: number;
-  month: string; // "YYYY-MM" or "YYYY-MM-01"
+  month: string;
   income: number;
   expense: number;
   balance: number;
 };
 
 export type MonthlyIncomeExpenseRow = {
-  month: string; // "YYYY-MM" or "YYYY-MM-01"
+  month: string;
   income: number;
   expense: number;
-  net: number; // income - expense
+  net: number;
 };
 
 /* =========================
@@ -97,15 +97,26 @@ export type CashFlowDeleteInput = {
 
 export type CashFlowUpsertInput = {
   id?: number;
+
+  // DB列名に合わせた snake_case
   cash_account_id: number;
+  cash_category_id?: number | null;
+
   date: string; // ISO
   section: "収入" | "支出" | "income" | "expense";
   amount: number;
+
+  // 既存の memo
   memo?: string | null;
-  cash_category_id?: number | null;
+
+  // ✅ updateCashFlow.ts が見ている camelCase 別名（互換用）
+  cashCategoryId?: number | null;
+
+  // ✅ updateCashFlow.ts が見ている description（互換用）
+  description?: string | null;
 };
 
-// ✅ updateCashFlow.ts が期待している名前に合わせる（中身は同じでOK）
+// updateCashFlow.ts が期待している名前に合わせる（中身は同じでOK）
 export type CashFlowUpdateInput = CashFlowUpsertInput;
 
 /* =========================
@@ -114,12 +125,12 @@ export type CashFlowUpdateInput = CashFlowUpsertInput;
 
 export type GetCashProjectionInput = {
   cashAccountId: number;
-  startDate: string; // ISO date string (e.g. "2026-01-01")
+  startDate: string;
   days: number;
 };
 
 export type CashProjectionRow = {
-  date: string; // ISO date
+  date: string;
   income: number;
   expense: number;
   net: number;
@@ -145,13 +156,13 @@ export type CashProjectionResult = {
 
 export type CashShortForecastInput = {
   cashAccountId: number;
-  month: string; // new Date(input.month) されるので "YYYY-MM-01" 推奨
+  month: string;
   rangeMonths?: number;
   avgWindowMonths?: number;
 };
 
 export type CashShortForecastRow = {
-  month: string; // "YYYY-MM"
+  month: string;
   income: number;
   expense: number;
   net: number;
