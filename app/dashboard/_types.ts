@@ -112,3 +112,27 @@ export type CashProjectionResult = {
   shortDate?: string | null;
   minBalance?: number;
 };
+
+/* ---------- Cash Short Forecast ---------- */
+
+export type CashShortForecastInput = {
+  cashAccountId: number;
+  // 何ヶ月先まで見るか（関数内で addMonths してるっぽいので）
+  months: number;
+};
+
+export type CashShortForecastRow = {
+  month: string; // "YYYY-MM"
+  income: number;
+  expense: number;
+  net: number;
+  projected_balance: number;
+};
+
+export type CashShortForecast = {
+  cashAccountId: number;
+  months: number;
+  rows: CashShortForecastRow[];
+  shortMonth?: string | null; // ショートする月（あれば）
+  currentBalance?: number;    // あれば入る
+};
