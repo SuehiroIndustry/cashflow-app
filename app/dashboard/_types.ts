@@ -48,6 +48,11 @@ export type AccountRow = {
   current_balance: number;
 };
 
+// ✅ simulation-client.tsx が import してる名前に合わせる
+export type CashAccount = AccountRow;
+// ✅ 念のため別名も用意（揺れ対策）
+export type CashAccountRow = AccountRow;
+
 export type MonthlyBalanceRow = {
   cash_account_id?: number;
   month: string;
@@ -108,13 +113,12 @@ export type CashFlowUpsertInput = {
 
   memo?: string | null;
 
-  // ✅ updateCashFlow.ts / UI が使う camelCase 別名（互換用）
-  cashAccountId?: number; // ←今回のエラー潰し
+  // camelCase 別名（互換用）
+  cashAccountId?: number;
   cashCategoryId?: number | null;
   description?: string | null;
 };
 
-// updateCashFlow.ts が期待している名前に合わせる（中身は同じでOK）
 export type CashFlowUpdateInput = CashFlowUpsertInput;
 
 /* =========================
