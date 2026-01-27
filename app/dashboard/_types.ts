@@ -79,7 +79,7 @@ export type CashFlowDeleteInput = {
   cashAccountId: number;
 };
 
-// 使ってないなら無視されるが、将来の衝突防止で置いておく（壊れにくい版）
+// 将来用（未使用でもOK）
 export type CashFlowUpsertInput = {
   id?: number;
   cash_account_id: number;
@@ -114,13 +114,10 @@ export type CashProjectionResult = {
   startDate: string;
   days: number;
 
-  // getCashProjection.ts が返しているので必須
   currentBalance: number;
 
-  // getCashProjection.ts 内で rows を作って返している
   rows: CashProjectionRow[];
 
-  // あれば入る（getCashProjection.ts 側に合わせて緩め）
   shortDate?: string | null;
   minBalance?: number;
 };
@@ -145,18 +142,26 @@ export type CashShortForecastRow = {
   projected_balance: number;
 };
 
+// ✅ getCashShortForecast.ts が "safe" を使ってるので、少なくとも safe は必須。
+// 他はコード側で使ってる可能性が高いので、壊れにくいセットで定義。
+export type CashShortForecastLevel = "safe" | "watch" | "danger" | "short";
+
 export type CashShortForecast = {
   cashAccountId: number;
 
-  // getCashShortForecast.ts が month / rangeMonths / avgWindowMonths を扱う前提
   month: string;
   rangeMonths: number;
   avgWindowMonths: number;
 
+  // ✅ 今回のエラー原因：これが必要
+  level: CashShortForecastLevel;
+
   rows: CashShortForecastRow[];
 
-  // あれば入る
+  // getCashShortForecast.ts 側が shortDate を使ってる可能性があるので両対応
   shortMonth?: string | null;
+  shortDate?: string | null;
+
   currentBalance?: number;
   minBalance?: number;
 };
