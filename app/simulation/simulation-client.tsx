@@ -1,42 +1,47 @@
-// app/simulation/simulation-client.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import type { AccountRow } from "@/app/dashboard/_actions/getAccounts";
 
-// ✅ server action 側の型をそのまま使う（type-only import）
-import type { SimulationResult } from "./_actions/getSimulation";
+// ✅ ここは “サーバーから渡ってくる simulation の形” に合わせる
+// 既存の getSimulation の戻りに合わせて調整してOK
+export type SimulationLevel = "safe" | "warn" | "danger" | "short";
 
-type AccountLike = {
-  id: number;
-  name: string;
+export type SimulationRow = {
+  month: string; // "YYYY-MM" or "YYYY-MM-01" など
+  assumedNet: number;
+  projectedBalance: number;
+};
+
+export type SimulationResult = {
+  cashAccountId: number;
+  accountName: string;
+  currentBalance: number;
+
+  // 直近平均（初期値として使う）
+  avgIncome: number;
+  avgExpense: number;
+  avgNet: number;
+
+  // 表示の基準となる “月の並び”
+  months: string[]; // ex: ["2026-02", "2026-03", ...]
 };
 
 type Props = {
-  accounts: AccountLike[];
+  accounts: AccountRow[];
   selectedAccountId: number | null;
-
-  // ✅ page.tsx が渡してくる型と一致させる
   simulation: SimulationResult | null;
 };
 
-function toNumberSafe(v: string): number {
-  const cleaned = v.replace(/,/g, "").trim();
-  if (cleaned === "") return 0;
-  const n = Number(cleaned);
-  return Number.isFinite(n) ? n : 0;
+function normalizeMonthLabel(m: string) {
+  // "YYYY-MM-01" を "YYYY-MM" に寄せる
+  if (/^\d{4}-\d{2}-\d{2}$/.test(m)) return m.slice(0, 7);
+  return m;
 }
 
-function monthKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
-
-function addMonths(d: Date, n: number): Date {
-  const x = new Date(d);
-  x.setMonth(x.getMonth() + n);
-  return x;
+function toInt(v: string, fallback = 0) {
+  const n = Number(String(v).replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
 export default function SimulationClient({
@@ -44,248 +49,230 @@ export default function SimulationClient({
   selectedAccountId,
   simulation,
 }: Props) {
-  const router = useRouter();
-
-  const selectedAccount = useMemo(() => {
-    if (!selectedAccountId) return null;
-    return accounts.find((a) => a.id === selectedAccountId) ?? null;
-  }, [accounts, selectedAccountId]);
-
-  const onChangeAccount = (id: number) => {
-    router.push(`/simulation?account=${id}`);
-  };
-
-  const currentBalance = Number((simulation as any)?.currentBalance ?? 0);
-  const rangeMonths = Number((simulation as any)?.rangeMonths ?? 12);
-  const avgWindowMonths = Number((simulation as any)?.avgWindowMonths ?? 6);
-
-  const baseAvgIncome = Number((simulation as any)?.avgIncome ?? 0);
-  const baseAvgExpense = Number((simulation as any)?.avgExpense ?? 0);
-
-  // ✅ 入力欄：state + onChange（数字入れられる）
-  const [incomeInput, setIncomeInput] = useState<string>(
-    String(Math.round(baseAvgIncome))
-  );
-  const [expenseInput, setExpenseInput] = useState<string>(
-    String(Math.round(baseAvgExpense))
-  );
+  // ✅ 初期値（simulation が来たらそこから入れる）
+  const [assumedIncome, setAssumedIncome] = useState<number>(0);
+  const [assumedExpense, setAssumedExpense] = useState<number>(0);
 
   useEffect(() => {
-    setIncomeInput(String(Math.round(Number((simulation as any)?.avgIncome ?? 0))));
-    setExpenseInput(String(Math.round(Number((simulation as any)?.avgExpense ?? 0))));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAccountId, (simulation as any)?.avgIncome, (simulation as any)?.avgExpense]);
+    if (!simulation) return;
+    setAssumedIncome(Math.round(simulation.avgIncome ?? 0));
+    setAssumedExpense(Math.round(simulation.avgExpense ?? 0));
+  }, [simulation?.cashAccountId]); // 口座切替時に追従
 
-  const assumedIncome = useMemo(() => toNumberSafe(incomeInput), [incomeInput]);
-  const assumedExpense = useMemo(() => toNumberSafe(expenseInput), [expenseInput]);
-  const assumedNet = useMemo(() => assumedIncome - assumedExpense, [assumedIncome, assumedExpense]);
-
-  // rows があれば優先。無ければ単純積み上げで生成。
-  const projectionRows = useMemo(() => {
-    const rows = ((simulation as any)?.rows ?? []) as any[];
-    if (rows.length > 0) {
-      return rows.map((r) => {
-        const monthStr: string = String(r.month ?? "");
-        const m = monthStr.length === 10 ? monthStr.slice(0, 7) : monthStr; // "YYYY-MM-01" -> "YYYY-MM"
-
-        const projected =
-          r.projectedBalance ?? r.projected_balance ?? r.balance ?? 0;
-
-        return {
-          month: m,
-          assumedNet: Math.round(Number(r.assumedNet ?? r.assumed_net ?? assumedNet)),
-          projectedBalance: Math.round(Number(projected)),
-        };
-      });
-    }
-
-    const start = new Date();
-    const base = new Date(start.getFullYear(), start.getMonth(), 1);
-
-    let running = currentBalance;
-    const out: Array<{ month: string; assumedNet: number; projectedBalance: number }> = [];
-
-    for (let i = 1; i <= rangeMonths; i++) {
-      const m = addMonths(base, i);
-      running += assumedNet;
-      out.push({
-        month: monthKey(m),
-        assumedNet: Math.round(assumedNet),
-        projectedBalance: Math.round(running),
-      });
-    }
-    return out;
-  }, [simulation, currentBalance, assumedNet, rangeMonths]);
-
-  // ✅ level: "short" が来るので吸収する
-  const levelBadge = useMemo(() => {
-    const lvl = String((simulation as any)?.level ?? "safe"); // "safe" | "warn" | "danger" | "short" ...
-    if (lvl === "danger" || lvl === "short")
-      return { text: "CRITICAL", cls: "bg-red-600/20 text-red-200 border-red-400/30" };
-    if (lvl === "warn")
-      return { text: "CAUTION", cls: "bg-yellow-600/20 text-yellow-200 border-yellow-400/30" };
-    return { text: "SAFE", cls: "bg-emerald-600/20 text-emerald-200 border-emerald-400/30" };
+  const currentBalance = useMemo(() => {
+    return Math.round(simulation?.currentBalance ?? 0);
   }, [simulation]);
 
-  const forecastMessage =
-    (simulation as any)?.message ??
-    "現状の傾向では、直近12ヶ月で資金ショートの兆候は強くありません。";
+  const months = useMemo(() => {
+    const ms = simulation?.months ?? [];
+    return ms.map(normalizeMonthLabel);
+  }, [simulation]);
+
+  const assumedNet = useMemo(() => {
+    return Math.round((assumedIncome ?? 0) - (assumedExpense ?? 0));
+  }, [assumedIncome, assumedExpense]);
+
+  // ✅ ここが本丸：入力から rows を作る（毎回再計算）
+  const rows: SimulationRow[] = useMemo(() => {
+    let running = currentBalance;
+    return months.map((month) => {
+      running += assumedNet;
+      return {
+        month,
+        assumedNet,
+        projectedBalance: Math.round(running),
+      };
+    });
+  }, [months, currentBalance, assumedNet]);
+
+  // ✅ 判定（ざっくり運用ルール）
+  const { level, shortMonth, message } = useMemo(() => {
+    // ショート判定：初めて projectedBalance が 0 を割る月
+    const short = rows.find((r) => r.projectedBalance < 0)?.month ?? null;
+
+    if (short) {
+      return {
+        level: "short" as SimulationLevel,
+        shortMonth: short,
+        message: `資金ショート見込み：${short}（この月に残高がマイナスになります）`,
+      };
+    }
+
+    // warn 判定：平均差額がマイナス or 余裕が薄い
+    // ※このルールは後で好きに調整してOK
+    if (assumedNet < 0) {
+      return {
+        level: "warn" as SimulationLevel,
+        shortMonth: null,
+        message:
+          "現状の想定では、毎月の差額がマイナスです。固定費圧縮か収入の底上げを検討してください。",
+      };
+    }
+
+    // “3ヶ月分の支出” を切ったら注意（現場ルール）
+    if (currentBalance < (assumedExpense || 0) * 3) {
+      return {
+        level: "warn" as SimulationLevel,
+        shortMonth: null,
+        message:
+          "残高の余裕が薄めです（目安：支出3ヶ月分未満）。入金遅延・突発支出に備えてください。",
+      };
+    }
+
+    return {
+      level: "safe" as SimulationLevel,
+      shortMonth: null,
+      message: "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。",
+    };
+  }, [rows, assumedNet, currentBalance, assumedExpense]);
+
+  const selectedAccountName = useMemo(() => {
+    const a = accounts.find((x) => x.id === selectedAccountId);
+    return a?.name ?? "";
+  }, [accounts, selectedAccountId]);
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <header className="flex items-center justify-between px-6 py-4">
-        <div>
-          <div className="text-sm text-white/70">Cashflow Dashboard</div>
-          <h1 className="text-2xl font-semibold text-white">Simulation</h1>
+    <div className="space-y-6">
+      {/* Selected */}
+      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+        <div className="text-sm text-white/70">Selected</div>
+        <div className="mt-1 text-lg font-semibold text-white">
+          {selectedAccountName || simulation?.accountName || "-"}
         </div>
-
-        <div className="flex items-center gap-3">
-          <label className="text-sm text-white/80">Account</label>
-          <select
-            className="rounded-md bg-zinc-900 text-white placeholder:text-white/40 border border-white/15 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
-            value={selectedAccountId ?? ""}
-            onChange={(e) => onChangeAccount(Number(e.target.value))}
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+        <div className="mt-2 text-sm text-white/80">
+          Current Balance:{" "}
+          <span className="font-semibold text-white">
+            {currentBalance.toLocaleString()} 円
+          </span>
         </div>
-      </header>
+      </div>
 
-      <main className="px-6 pb-10">
-        <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
-          <div className="text-sm text-white/80">Selected</div>
-          <div className="mt-1 text-lg font-semibold text-white">
-            {selectedAccount ? selectedAccount.name : "None"}
-          </div>
-          <div className="mt-2 text-sm text-white/70">
-            Current Balance:{" "}
-            <span className="text-white">{currentBalance.toLocaleString()} 円</span>
-          </div>
-        </div>
-
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
-          <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
-            <div className="text-sm font-semibold text-white">
-              平均（直近 {avgWindowMonths} ヶ月）
-            </div>
-            <div className="mt-3 grid gap-2 text-sm">
-              <div className="flex items-center justify-between text-white/80">
-                <span>収入</span>
-                <span className="text-white">
-                  {Math.round(baseAvgIncome).toLocaleString()} 円
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-white/80">
-                <span>支出</span>
-                <span className="text-white">
-                  {Math.round(baseAvgExpense).toLocaleString()} 円
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-white/80">
-                <span>差額</span>
-                <span className="text-white">
-                  {Math.round(baseAvgIncome - baseAvgExpense).toLocaleString()} 円
-                </span>
-              </div>
-            </div>
+      {/* Top cards */}
+      <div className="grid gap-4 md:grid-cols-3">
+        {/* Average */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="text-sm font-semibold text-white">
+            平均（直近 6 ヶ月）
           </div>
 
-          <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
-            <div className="text-sm font-semibold text-white">予測（{rangeMonths} ヶ月）</div>
-
-            <div className="mt-3 grid gap-3">
-              <div className="grid gap-2">
-                <div className="text-xs text-white/70">想定 収入（円 / 月）</div>
-                <input
-                  inputMode="numeric"
-                  className="w-full rounded-md bg-zinc-900 text-white placeholder:text-white/40 border border-white/15 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
-                  value={incomeInput}
-                  onChange={(e) => setIncomeInput(e.target.value)}
-                  placeholder="例: 1500000"
-                />
-              </div>
-
-              <div className="grid gap-2">
-                <div className="text-xs text-white/70">想定 支出（円 / 月）</div>
-                <input
-                  inputMode="numeric"
-                  className="w-full rounded-md bg-zinc-900 text-white placeholder:text-white/40 border border-white/15 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-white/20"
-                  value={expenseInput}
-                  onChange={(e) => setExpenseInput(e.target.value)}
-                  placeholder="例: 900000"
-                />
-              </div>
-
-              <div className="pt-1 text-sm text-white/80">
-                想定差額:{" "}
-                <span className="text-white font-semibold">
-                  {Math.round(assumedNet).toLocaleString()} 円
-                </span>
-              </div>
-
-              <div className="text-xs text-white/50">
-                ※モデル：平均収支（固定）で単純に積み上げ（rows があればそれを表示）
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-white/15 bg-zinc-950 p-4">
-            <div className="text-sm font-semibold text-white">判定</div>
-
-            <div className="mt-3 flex items-start gap-3">
-              <span
-                className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-semibold ${levelBadge.cls}`}
-              >
-                {levelBadge.text}
+          <div className="mt-3 space-y-1 text-sm">
+            <div className="flex items-center justify-between text-white/80">
+              <span>収入</span>
+              <span className="font-semibold text-white">
+                {Math.round(simulation?.avgIncome ?? 0).toLocaleString()} 円
               </span>
-              <div className="text-sm text-white/80 leading-relaxed">
-                {forecastMessage}
-              </div>
+            </div>
+            <div className="flex items-center justify-between text-white/80">
+              <span>支出</span>
+              <span className="font-semibold text-white">
+                {Math.round(simulation?.avgExpense ?? 0).toLocaleString()} 円
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-white/80">
+              <span>差額</span>
+              <span className="font-semibold text-white">
+                {Math.round(simulation?.avgNet ?? 0).toLocaleString()} 円
+              </span>
             </div>
           </div>
         </div>
 
-        <div className="mt-6 rounded-xl border border-white/15 bg-zinc-950 p-4">
-          <div className="text-sm font-semibold text-white">月別 着地（予測）</div>
+        {/* Inputs */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="text-sm font-semibold text-white">予測（12 ヶ月）</div>
 
-          <div className="mt-3 overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="text-white/70">
-                <tr>
-                  <th className="text-left py-2 pr-4">month</th>
-                  <th className="text-right py-2 pr-4">assumed net</th>
-                  <th className="text-right py-2">projected balance</th>
-                </tr>
-              </thead>
-              <tbody className="text-white">
-                {projectionRows.length === 0 ? (
-                  <tr>
-                    <td className="py-3 text-white/60" colSpan={3}>
-                      No rows
-                    </td>
-                  </tr>
-                ) : (
-                  projectionRows.map((r) => (
-                    <tr key={r.month} className="border-t border-white/10">
-                      <td className="py-2 pr-4">{r.month}</td>
-                      <td className="py-2 pr-4 text-right">
-                        {Number(r.assumedNet).toLocaleString()}
-                      </td>
-                      <td className="py-2 text-right">
-                        {Number(r.projectedBalance).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+          <div className="mt-3 space-y-3">
+            <div>
+              <div className="text-xs text-white/70">想定 収入（月 / 月）</div>
+              <input
+                type="number"
+                inputMode="numeric"
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/20"
+                value={assumedIncome}
+                onChange={(e) => setAssumedIncome(toInt(e.target.value, 0))}
+              />
+            </div>
+
+            <div>
+              <div className="text-xs text-white/70">想定 支出（月 / 月）</div>
+              <input
+                type="number"
+                inputMode="numeric"
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/20"
+                value={assumedExpense}
+                onChange={(e) => setAssumedExpense(toInt(e.target.value, 0))}
+              />
+            </div>
+
+            <div className="text-sm text-white/80">
+              想定差額:{" "}
+              <span className="font-semibold text-white">
+                {assumedNet.toLocaleString()} 円
+              </span>
+            </div>
+            <div className="text-xs text-white/50">
+              ※モデル：入力値（固定）で単純に積み上げ（＝いまは What-if 用）
+            </div>
           </div>
         </div>
-      </main>
+
+        {/* Judge */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="text-sm font-semibold text-white">判定</div>
+
+          <div className="mt-3 flex items-start gap-3">
+            <div className="rounded-md bg-white/10 px-2 py-1 text-xs font-semibold text-white">
+              {level.toUpperCase()}
+            </div>
+            <div className="text-sm text-white/80">{message}</div>
+          </div>
+
+          {shortMonth && (
+            <div className="mt-3 text-xs text-white/60">
+              ショート月: <span className="text-white">{shortMonth}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+        <div className="text-sm font-semibold text-white">月別 着地（予測）</div>
+
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="text-white/60">
+              <tr className="border-b border-white/10">
+                <th className="py-2 text-left font-medium">month</th>
+                <th className="py-2 text-right font-medium">assumed net</th>
+                <th className="py-2 text-right font-medium">
+                  projected balance
+                </th>
+              </tr>
+            </thead>
+            <tbody className="text-white/80">
+              {rows.map((r) => (
+                <tr key={r.month} className="border-b border-white/5">
+                  <td className="py-2 text-left">{r.month}</td>
+                  <td className="py-2 text-right">
+                    {r.assumedNet.toLocaleString()}
+                  </td>
+                  <td className="py-2 text-right">
+                    {r.projectedBalance.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td className="py-3 text-white/60" colSpan={3}>
+                    データがありません
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
