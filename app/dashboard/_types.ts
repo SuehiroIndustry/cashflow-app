@@ -38,7 +38,6 @@ export type AccountRow = {
   current_balance: number;
 };
 
-// ✅ getMonthlyCashBalances.ts が cash_account_id なしで rows を作るので optional
 export type MonthlyBalanceRow = {
   cash_account_id?: number;
   month: string; // "YYYY-MM" or "YYYY-MM-01"
@@ -47,11 +46,12 @@ export type MonthlyBalanceRow = {
   balance: number;
 };
 
-// ✅ getMonthlyIncomeExpense.ts 用（export missing を解消）
+// ✅ net を追加（今回のエラー原因）
 export type MonthlyIncomeExpenseRow = {
   month: string; // "YYYY-MM" or "YYYY-MM-01"
   income: number;
   expense: number;
+  net: number; // income - expense
 };
 
 /* =========================
@@ -162,7 +162,6 @@ export type CashShortForecast = {
 
   shortDate: string | null;
 
-  // optional（返却実態に合わせる）
   cashAccountId?: number;
   rows?: CashShortForecastRow[];
 
