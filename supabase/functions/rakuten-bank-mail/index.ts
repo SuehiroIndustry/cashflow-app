@@ -70,7 +70,7 @@ Deno.serve(async (req: Request) => {
 
   // ---- Secret 検証 ----
   const providedSecret = req.headers.get("x-webhook-secret") ?? "";
-  const expectedSecret = Deno.env.get("WEBHOOK_SECRET") ?? "";
+  const expectedSecret = Deno.env.get("RAKUTEN_WEBHOOK_SECRET") ?? "";
 
   if (!expectedSecret) {
     // Secrets 未設定が一発でわかるログ
