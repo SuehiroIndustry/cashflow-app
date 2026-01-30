@@ -1,145 +1,149 @@
 // supabase/functions/rakuten-bank-mail/index.ts
-// ログを確実に出す版（まずは疎通と観測を安定させる）
-//
-// 期待する呼び出し元:
-// - Google Apps Script から POST
-// - header: X-Webhook-Secret: <SECRET>
-// - JSON body: { from, subject, date, body } など
 
-type IncomingPayload = {
+type Payload = {
   from?: string;
   subject?: string;
-  date?: string; // ISO string想定
+  date?: string;
   body?: string;
-  [key: string]: unknown;
 };
 
-function jsonResponse(
-  status: number,
-  data: Record<string, unknown>,
-  extraHeaders: Record<string, string> = {},
-) {
-  return new Response(JSON.stringify(data), {
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      ...extraHeaders,
     },
   });
 }
 
-function safePreview(value: unknown, maxLen = 800): string {
-  try {
-    const s =
-      typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    if (s.length <= maxLen) return s;
-    return s.slice(0, maxLen) + `... (truncated, len=${s.length})`;
-  } catch {
-    return String(value);
-  }
+function mask(v: string, visible = 4) {
+  if (!v) return "";
+  if (v.length <= visible * 2) return "*".repeat(v.length);
+  return v.slice(0, visible) + "****" + v.slice(-visible);
 }
 
-Deno.serve(async (req: Request) => {
-  const startedAt = Date.now();
-  const reqId = crypto.randomUUID();
+function getHeader(req: Request, name: string) {
+  // Supabase/Cloudflare経由で大文字小文字が揺れることがあるので吸収
+  const direct = req.headers.get(name);
+  if (direct) return direct;
+  const lower = req.headers.get(name.toLowerCase());
+  if (lower) return lower;
 
-  // ---- 基本メタログ（ここが出れば Logs タブが埋まる）----
-  console.log(`[${reqId}] rakuten-bank-mail: called`);
-  console.log(`[${reqId}] method=${req.method} url=${req.url}`);
+  // 全探索（最後の保険）
+  const target = name.toLowerCase();
+  for (const [k, v] of req.headers.entries()) {
+    if (k.toLowerCase() === target) return v;
+  }
+  return null;
+}
 
-  // ---- CORS（必要なら。Apps Script なら基本不要だが安全に）----
+Deno.serve(async (req) => {
+  const started = Date.now();
+
+  // Supabaseが付けるrequest id（ログ突合に超便利）
+  const requestId =
+    req.headers.get("x-sb-request-id") ??
+    req.headers.get("x-request-id") ??
+    crypto.randomUUID();
+
+  const url = new URL(req.url);
+
+  // Preflight
   if (req.method === "OPTIONS") {
-    console.log(`[${reqId}] OPTIONS preflight`);
     return new Response(null, {
       status: 204,
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers":
-          "content-type, x-webhook-secret, authorization",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers":
+          "content-type, authorization, apikey, x-webhook-secret",
       },
     });
   }
 
   if (req.method !== "POST") {
-    console.warn(`[${reqId}] rejected: method not allowed`);
-    return jsonResponse(405, { ok: false, error: "Method Not Allowed" }, {
-      "Access-Control-Allow-Origin": "*",
-    });
+    console.log(`[rakuten-bank-mail] (${requestId}) method not allowed`, req.method);
+    return json({ ok: false, error: "Method Not Allowed", requestId }, 405);
   }
 
-  // ---- Secret 検証 ----
-  const providedSecret = req.headers.get("x-webhook-secret") ?? "";
-  const expectedSecret = Deno.env.get("RAKUTEN_WEBHOOK_SECRET") ?? "";
+  // ---- ここから「絶対にログに残す」セクション ----
+  const authorization = getHeader(req, "Authorization");
+  const apikey = getHeader(req, "apikey");
+  const xWebhookSecret = getHeader(req, "X-Webhook-Secret");
 
-  if (!expectedSecret) {
-    // Secrets 未設定が一発でわかるログ
-    console.error(
-      `[${reqId}] WEBHOOK_SECRET is not set in Supabase Secrets`,
-    );
-    return jsonResponse(500, { ok: false, error: "Server secret not set" }, {
-      "Access-Control-Allow-Origin": "*",
-    });
-  }
-
-  if (providedSecret !== expectedSecret) {
-    console.warn(
-      `[${reqId}] forbidden: secret mismatch (got len=${providedSecret.length})`,
-    );
-    return jsonResponse(403, { ok: false, error: "Forbidden" }, {
-      "Access-Control-Allow-Origin": "*",
-    });
-  }
-
-  // ---- Payload パース（壊れてても落とさない）----
-  const contentType = (req.headers.get("content-type") ?? "").toLowerCase();
-  let payload: IncomingPayload | null = null;
-  let rawText: string | null = null;
-
-  try {
-    if (contentType.includes("application/json")) {
-      payload = (await req.json()) as IncomingPayload;
-    } else {
-      rawText = await req.text();
-      // JSONっぽければパース試行
-      try {
-        payload = JSON.parse(rawText) as IncomingPayload;
-      } catch {
-        payload = { raw: rawText } as IncomingPayload;
-      }
-    }
-  } catch (e) {
-    console.error(`[${reqId}] payload parse failed`, e);
-    return jsonResponse(400, { ok: false, error: "Bad Request" }, {
-      "Access-Control-Allow-Origin": "*",
-    });
-  }
-
-  // ---- 受信内容ログ（長すぎると見づらいのでプレビュー）----
-  console.log(
-    `[${reqId}] payload preview:\n${safePreview(payload)}`,
-  );
-
-  // ---- よく使うフィールドを整形してログ ----
-  const from = String(payload?.from ?? "");
-  const subject = String(payload?.subject ?? "");
-  const date = String(payload?.date ?? "");
-  const body = String(payload?.body ?? "");
-
-  console.log(`[${reqId}] parsed: from="${from}" subject="${subject}" date="${date}"`);
-  console.log(`[${reqId}] body preview:\n${safePreview(body, 600)}`);
-
-  // ---- ここにDB書き込み等を入れる ----
-  // TODO: 既存のDB保存処理があるならここへ移植する
-  // 例）supabase client で insert するなど
-  // console.log(`[${reqId}] db insert start`);
-  // ...insert...
-  // console.log(`[${reqId}] db insert done`);
-
-  const elapsedMs = Date.now() - startedAt;
-  console.log(`[${reqId}] done: ${elapsedMs}ms`);
-
-  return jsonResponse(200, { ok: true, reqId, elapsedMs }, {
-    "Access-Control-Allow-Origin": "*",
+  console.log(`[rakuten-bank-mail] (${requestId}) called`, {
+    method: req.method,
+    path: url.pathname,
+    contentType: getHeader(req, "Content-Type"),
+    authSet: Boolean(authorization),
+    apikeySet: Boolean(apikey),
+    xWebhookSecretSet: Boolean(xWebhookSecret),
+    ua: getHeader(req, "User-Agent"),
   });
+
+  // Secretチェック（必要ならON）
+  const expectedSecret = Deno.env.get("RAKUTEN_WEBHOOK_SECRET") ?? "";
+  if (!expectedSecret) {
+    console.error(
+      `[rakuten-bank-mail] (${requestId}) missing env RAKUTEN_WEBHOOK_SECRET`,
+    );
+    return json(
+      { ok: false, error: "Server misconfigured: missing secret", requestId },
+      500,
+    );
+  }
+
+  if ((xWebhookSecret ?? "") !== expectedSecret) {
+    console.warn(`[rakuten-bank-mail] (${requestId}) unauthorized: secret mismatch`, {
+      provided: xWebhookSecret ? mask(xWebhookSecret) : null,
+      expected: mask(expectedSecret),
+    });
+    return json({ ok: false, error: "Unauthorized", requestId }, 401);
+  }
+
+  // Body受信
+  const raw = await req.text();
+  console.log(`[rakuten-bank-mail] (${requestId}) body received`, {
+    bytes: raw.length,
+  });
+
+  let payload: Payload | null = null;
+  try {
+    payload = raw ? (JSON.parse(raw) as Payload) : null;
+  } catch (e) {
+    console.error(`[rakuten-bank-mail] (${requestId}) invalid json`, String(e));
+    return json({ ok: false, error: "Invalid JSON", requestId }, 400);
+  }
+
+  // 中身を安全にログ（本文は長いので先頭だけ）
+  console.log(`[rakuten-bank-mail] (${requestId}) payload summary`, {
+    from: payload?.from ?? null,
+    subject: payload?.subject ?? null,
+    date: payload?.date ?? null,
+    bodyPreview: payload?.body ? payload.body.slice(0, 120) : null,
+  });
+
+  const elapsed = Date.now() - started;
+
+  // 返す（Apps Script側のログにもここが出る）
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      requestId,
+      elapsedMs: elapsed,
+      received: {
+        from: payload?.from ?? null,
+        subject: payload?.subject ?? null,
+        date: payload?.date ?? null,
+        bodyBytes: payload?.body?.length ?? 0,
+      },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      },
+    },
+  );
 });
