@@ -1,14 +1,19 @@
-// app/dashboard/DashboardClient.tsx
 "use client";
 
-import React from "react";
+import React, { useMemo, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
 
 import type {
   AccountRow,
   MonthlyBalanceRow,
   CashStatus,
   AlertCard,
+  OverviewPayload,
 } from "./_types";
 
 type Props = {
@@ -17,31 +22,8 @@ type Props = {
   monthly: MonthlyBalanceRow[];
   cashStatus: CashStatus;
   alertCards: AlertCard[];
-  children?: React.ReactNode; // ✅ optional に変更
+  children?: React.ReactNode;
 };
-
-function ImportLinks() {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 text-slate-900">
-      <h2 className="text-sm font-semibold mb-2">データ取り込み</h2>
-
-      <ul className="space-y-2 text-sm">
-        <li>
-          <Link
-            href="/cash/import/rakuten"
-            className="text-blue-600 hover:underline"
-          >
-            ▶ 楽天銀行 明細CSVアップロード
-          </Link>
-        </li>
-      </ul>
-
-      <p className="mt-3 text-xs text-slate-500">
-        ※ 週1でCSVを手動アップロードする運用
-      </p>
-    </div>
-  );
-}
 
 export default function DashboardClient({
   accounts,
@@ -51,42 +33,94 @@ export default function DashboardClient({
   alertCards,
   children,
 }: Props) {
-  // 未使用警告が気になる場合の保険（ビルドでは落ちない）
-  void accounts;
-  void selectedAccountId;
-  void monthly;
-  void cashStatus;
+  const router = useRouter();
+
+  const onLogout = useCallback(async () => {
+    try {
+      await fetch("/auth/signout", { method: "POST" });
+    } catch {
+      // 失敗しても詰まらせない
+    }
+    router.refresh();
+    router.push("/login");
+  }, [router]);
+
+  /**
+   * Overview 用 payload
+   * ※ 正確さより「落ちない・判断材料が見える」を優先
+   */
+  const overviewPayload: OverviewPayload | null = useMemo(() => {
+    if (!selectedAccountId) return null;
+
+    const account = accounts.find(a => a.id === selectedAccountId);
+    const latestMonth = monthly?.[monthly.length - 1];
+
+    return {
+      accountName: account?.name ?? "-",
+      currentBalance: account?.balance ?? 0,
+      thisMonthIncome: latestMonth?.income ?? 0,
+      thisMonthExpense: latestMonth?.expense ?? 0,
+      net:
+        (latestMonth?.income ?? 0) -
+        (latestMonth?.expense ?? 0),
+    };
+  }, [accounts, selectedAccountId, monthly]);
 
   return (
-    <div className="w-full text-slate-900">
-      {/* アラート */}
-      {Array.isArray(alertCards) && alertCards.length > 0 ? (
-        <div className="mb-4 space-y-2">
-          {alertCards.map((card, idx) => (
-            <div
-              key={(card as any)?.id ?? idx}
-              className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-slate-900"
-            >
-              <div className="text-sm font-semibold">
-                {(card as any)?.title ?? "アラート"}
-              </div>
-              {(card as any)?.description ? (
-                <div className="mt-1 text-sm text-slate-700">
-                  {(card as any).description}
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : null}
+    <div className="min-h-screen bg-black text-white">
+      {/* ===== Header ===== */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div className="text-lg font-semibold">Cashflow Dashboard</div>
 
-      {/* ✅ 楽天CSVアップロードへの導線 */}
-      <div className="mb-4">
-        <ImportLinks />
+        <button
+          type="button"
+          onClick={onLogout}
+          className="rounded-md border border-white/20 bg-white/5 px-3 py-1.5 text-sm hover:bg-white/10"
+        >
+          Logout
+        </button>
       </div>
 
-      {/* ダッシュボード本体（子があれば表示） */}
-      {children ?? null}
+      <div className="px-6 py-6 space-y-6">
+        {/* ===== 危険信号 ===== */}
+        <div className="rounded-lg border border-white/10 bg-white text-black p-4">
+          <div className="font-semibold">
+            {cashStatus?.headline ?? "状況を確認中"}
+          </div>
+          <div className="text-sm mt-1">
+            {cashStatus?.message ??
+              "最新データを取得後、判断に必要な情報のみ表示します。"}
+          </div>
+        </div>
+
+        {/* ===== データ取り込み ===== */}
+        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
+          <div className="font-semibold">データ取り込み</div>
+
+          <ul className="mt-2 text-sm space-y-1">
+            <li>
+              <Link
+                href="/cash/import/rakuten"
+                className="text-blue-300 hover:underline"
+              >
+                ▶ 楽天銀行 明細CSVアップロード
+              </Link>
+            </li>
+            <li className="text-white/60">
+              ※ 週1回CSVを手動アップロードする運用
+            </li>
+          </ul>
+        </div>
+
+        {/* ===== Dashboard 本体 ===== */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <OverviewCard payload={overviewPayload} />
+          <BalanceCard />
+          <EcoCharts />
+        </div>
+
+        {children}
+      </div>
     </div>
   );
 }

@@ -14,14 +14,15 @@ export default async function DashboardPage() {
   // 1) 基本データ取得
   const accounts = await getAccounts();
 
-  // 選択口座（今は “先頭をデフォルト” にしておく。必要なら後でユーザー設定にする）
+  // 選択口座（暫定：先頭）
   const selectedAccountId = accounts?.[0]?.id ?? null;
 
-  // 2) 月次残高（選択口座がある時だけ）
-  const monthly = selectedAccountId ? await getMonthlyBalance(selectedAccountId) : [];
+  // 2) 月次残高（✅ getMonthlyBalance はオブジェクト引数）
+  const monthly = selectedAccountId
+    ? await getMonthlyBalance({ cashAccountId: selectedAccountId })
+    : [];
 
-  // 3) 画面上部のステータス（最低限の現実解）
-  //    ※ここは後で「危険信号のみ表示」ポリシーに合わせて洗練していけばOK
+  // 3) 画面上部のステータス（最低限）
   const latestBalance = monthly?.length ? (monthly[monthly.length - 1]?.balance ?? 0) : 0;
 
   const cashStatus: CashStatus =
@@ -45,8 +46,7 @@ export default async function DashboardPage() {
           message: "直近の残高は安定しています。引き続き週次で更新しましょう。",
         };
 
-  // 4) アラートカード（DashboardClient 側で描画）
-  //    今は「データ取り込み」枠のリンクだけでもOKなので最低限で入れておく
+  // 4) アラートカード（データ取り込みリンク）
   const alertCards: AlertCard[] = [
     {
       id: "rakuten-csv",
@@ -61,7 +61,6 @@ export default async function DashboardPage() {
     },
   ];
 
-  // ✅ ここが肝心：DashboardClient に children を渡す（カード類を“中身”として表示）
   return (
     <DashboardClient
       accounts={accounts}
@@ -70,7 +69,6 @@ export default async function DashboardPage() {
       cashStatus={cashStatus}
       alertCards={alertCards}
     >
-      {/* ✅ ダッシュボード本体（カード等） */}
       <div className="grid gap-4 md:grid-cols-3">
         <OverviewCard />
         <BalanceCard />
