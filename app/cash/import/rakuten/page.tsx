@@ -1,4 +1,5 @@
 // app/cash/import/rakuten/page.tsx
+import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
 // ★ここだけ、君のプロジェクトに合わせて調整してOK

@@ -2,11 +2,6 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-/**
- * Next.js App Router（cookies async対応）版
- * - cookies() は Promise なので await 必須
- * - Server Component / Route Handler から安全に使える
- */
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
 
@@ -31,4 +26,5 @@ export async function createSupabaseServerClient() {
   });
 }
 
+// ✅ これを追加（createClient() で呼べるようにする）
 export const createClient = createSupabaseServerClient;
