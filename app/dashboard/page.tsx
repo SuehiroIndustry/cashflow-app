@@ -7,67 +7,54 @@ import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 import type { AccountRow, MonthlyBalanceRow, CashStatus, AlertCard } from "./_types";
 
 type PageProps = {
-  searchParams?: { [key: string]: string | string[] | undefined };
+  searchParams?: {
+    cashAccountId?: string;
+  };
 };
-
-function toNumber(v: unknown): number | null {
-  if (typeof v !== "string") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   // 1) 口座一覧
   const accounts: AccountRow[] = await getAccounts();
 
-  // 2) 選択口座ID（URLクエリ優先、なければ先頭、なければ null）
-  const qs = searchParams?.cashAccountId;
-  const cashAccountIdFromQS = Array.isArray(qs) ? toNumber(qs[0]) : toNumber(qs);
-  const fallbackId = accounts.length ? accounts[0].id : null;
+  // 2) URL（cashAccountId）を最優先にする。なければ先頭口座。
+  const requestedId =
+    typeof searchParams?.cashAccountId === "string"
+      ? Number(searchParams.cashAccountId)
+      : NaN;
 
-  const selectedAccountId: number | null = cashAccountIdFromQS ?? fallbackId;
+  const fallbackId = accounts[0]?.id ?? null;
+  const selectedAccountId =
+    Number.isFinite(requestedId) && accounts.some((a) => a.id === requestedId)
+      ? requestedId
+      : fallbackId;
 
-  const selectedAccount: AccountRow | null =
-    selectedAccountId != null
-      ? accounts.find((a) => a.id === selectedAccountId) ?? null
-      : null;
+  // 3) 月次残高（選択口座がある時だけ）
+  const monthly: MonthlyBalanceRow[] = selectedAccountId
+    ? await getMonthlyBalance({ cashAccountId: selectedAccountId })
+    : [];
 
-  // 3) 月次（選択口座がある時だけ）
-  const monthly: MonthlyBalanceRow[] =
-    selectedAccountId != null
-      ? await getMonthlyBalance({ cashAccountId: selectedAccountId, months: 12 })
-      : [];
+  // 4) CashStatus（UI用。DashboardClient でも作れるが、SSRで固定しておく）
+  const selected = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const latest = monthly.length ? monthly[monthly.length - 1] : null;
 
-  const latestMonth = monthly.length ? monthly[monthly.length - 1] : null;
-
-  // 4) CashStatus（_types.ts に合わせる）
   const cashStatus: CashStatus = {
-    selectedAccountId,
-    selectedAccountName: selectedAccount?.name ?? null,
-    currentBalance: selectedAccount?.current_balance ?? null,
+    selectedAccountId: selectedAccountId ?? null,
+    selectedAccountName: selected?.name ?? null,
+    currentBalance: selected?.current_balance ?? null,
 
-    monthLabel: latestMonth?.month ?? null,
-    monthIncome: latestMonth?.income ?? null,
-    monthExpense: latestMonth?.expense ?? null,
+    monthLabel: latest?.month ?? null,
+    monthIncome: latest?.income ?? null,
+    monthExpense: latest?.expense ?? null,
     monthNet:
-      latestMonth != null
-        ? (latestMonth.income ?? 0) - (latestMonth.expense ?? 0)
-        : null,
+      latest ? (latest.income ?? 0) - (latest.expense ?? 0) : null,
 
     updatedAtISO: new Date().toISOString(),
   };
 
-  // 5) アラート（AlertCard 型に合わせる）
+  // 5) アラートカード（必要最低限。将来拡張OK）
   const alertCards: AlertCard[] = [];
   const bal = cashStatus.currentBalance ?? 0;
-
-  if (selectedAccountId == null) {
-    alertCards.push({
-      severity: "warning",
-      title: "口座が未選択です",
-      description: "口座を選択してください。",
-    });
-  } else if (bal <= 0) {
+  if (selectedAccountId && bal <= 0) {
     alertCards.push({
       severity: "critical",
       title: "残高が危険水域です",

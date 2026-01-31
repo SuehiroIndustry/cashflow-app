@@ -1,7 +1,8 @@
 // app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useMemo, useCallback } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import OverviewCard from "./_components/OverviewCard";
@@ -11,9 +12,9 @@ import EcoCharts from "./_components/EcoCharts";
 import type {
   AccountRow,
   MonthlyBalanceRow,
+  OverviewPayload,
   CashStatus,
   AlertCard,
-  OverviewPayload,
 } from "./_types";
 
 type Props = {
@@ -22,179 +23,149 @@ type Props = {
   monthly: MonthlyBalanceRow[];
   cashStatus: CashStatus;
   alertCards: AlertCard[];
-  children?: React.ReactNode;
 };
 
-// ルートは実プロジェクトに合わせてOK
-const SIMULATION_PATH = "/simulation";
-const RAKUTEN_IMPORT_PATH = "/cash/import/rakuten";
-
-function formatJST(iso: string) {
+function fmtUpdated(iso: string) {
   try {
-    return new Date(iso).toLocaleString("ja-JP");
+    const d = new Date(iso);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${y}/${m}/${day} ${hh}:${mm}:${ss}`;
   } catch {
-    return iso;
+    return "-";
   }
 }
 
-export default function DashboardClient({
-  accounts,
-  selectedAccountId,
-  monthly,
-  cashStatus,
-  alertCards,
-  children,
-}: Props) {
+export default function DashboardClient(props: Props) {
   const router = useRouter();
 
-  const selectedAccount = useMemo(() => {
-    if (selectedAccountId == null) return null;
-    return accounts.find((a) => a.id === selectedAccountId) ?? null;
-  }, [accounts, selectedAccountId]);
-
-  const selectedIdMissing = useMemo(() => {
-    return selectedAccountId != null && !selectedAccount;
-  }, [selectedAccountId, selectedAccount]);
-
-  /**
-   * ✅ ここが今回の肝
-   * - select の value は「文字列」で統一
-   * - option の value も「文字列」で統一
-   */
-  const selectedAccountIdStr = selectedAccountId == null ? "" : String(selectedAccountId);
-
-  const onChangeAccount = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const v = e.target.value; // 文字列
-      const id = Number(v);
-      if (!Number.isFinite(id)) return;
-      router.push(`/dashboard?cashAccountId=${id}`);
-    },
-    [router]
+  // ✅ ここが肝：props.selectedAccountId を初期値にする（勝手に先頭へ戻さない）
+  const [selectedId, setSelectedId] = useState<number | null>(
+    props.selectedAccountId
   );
 
-  // OverviewCard 用 payload（君の OverviewCard.tsx の Props に合わせる）
+  // ✅ Server側で選択口座が変わったら state も追従
+  useEffect(() => {
+    setSelectedId(props.selectedAccountId);
+  }, [props.selectedAccountId]);
+
+  const selectedAccount = useMemo(() => {
+    if (!selectedId) return null;
+    return props.accounts.find((a) => a.id === selectedId) ?? null;
+  }, [props.accounts, selectedId]);
+
   const overviewPayload: OverviewPayload | null = useMemo(() => {
-    const latest = monthly.length ? monthly[monthly.length - 1] : null;
-    const income = latest?.income ?? 0;
-    const expense = latest?.expense ?? 0;
+    const latest = props.monthly.length
+      ? props.monthly[props.monthly.length - 1]
+      : null;
 
     return {
-      cashAccountId: selectedAccountId ?? undefined,
-      accountName:
-        selectedAccount?.name ??
-        (selectedAccountId != null ? `不明(ID=${selectedAccountId})` : "全口座"),
+      cashAccountId: selectedId ?? undefined,
+      accountName: selectedAccount?.name ?? "-",
       currentBalance: selectedAccount?.current_balance ?? 0,
-      thisMonthIncome: income,
-      thisMonthExpense: expense,
-      net: income - expense,
+      thisMonthIncome: latest?.income ?? 0,
+      thisMonthExpense: latest?.expense ?? 0,
+      net: (latest?.income ?? 0) - (latest?.expense ?? 0),
     };
-  }, [monthly, selectedAccount, selectedAccountId]);
+  }, [props.monthly, selectedAccount, selectedId]);
+
+  // ✅ 口座変更：URLを更新 → Server Component がその口座で再計算
+  const onChangeAccount = (id: number) => {
+    setSelectedId(id);
+
+    const url = `/dashboard?cashAccountId=${id}`;
+    router.push(url);
+    // Next.js の挙動次第で再取得が遅れる環境があるので保険で refresh
+    router.refresh();
+  };
+
+  const topButtonsHref = useMemo(() => {
+    const id = selectedId ?? props.selectedAccountId ?? props.accounts[0]?.id ?? 1;
+    return {
+      simulation: `/simulation?cashAccountId=${id}`,
+      rakutenImport: `/cash/import/rakuten`,
+    };
+  }, [selectedId, props.selectedAccountId, props.accounts]);
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-        <div>
-          <div className="text-xl font-semibold">Cashflow Dashboard</div>
-          <div className="text-xs opacity-70">更新: {formatJST(cashStatus.updatedAtISO)}</div>
+      {/* Header */}
+      <div className="px-6 py-5 border-b border-white/10">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-xl font-semibold">Cashflow Dashboard</div>
+            <div className="text-xs text-white/60 mt-1">
+              更新: {fmtUpdated(props.cashStatus.updatedAtISO)}
+            </div>
+          </div>
+
+          {/* ✅ 右上ボタン（指示通り：楽天銀行へは削除） */}
+          <div className="flex items-center gap-2">
+            <Link
+              href={topButtonsHref.simulation}
+              className="px-4 py-2 rounded-lg border border-white/20 text-sm text-white hover:bg-white/10"
+            >
+              Simulation
+            </Link>
+
+            <Link
+              href={topButtonsHref.rakutenImport}
+              className="px-4 py-2 rounded-lg border border-white/20 text-sm text-white hover:bg-white/10"
+            >
+              楽天銀行・明細インポート
+            </Link>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
-            onClick={() => router.push(SIMULATION_PATH)}
-          >
-            Simulation
-          </button>
-
-          <button
-            type="button"
-            className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
-            onClick={() => router.push(RAKUTEN_IMPORT_PATH)}
-          >
-            楽天銀行・明細インポート
-          </button>
-        </div>
-      </div>
-
-      <div className="px-6 py-6 space-y-4">
         {/* Account selector */}
-        <div className="flex items-center gap-3">
-          <div className="text-sm opacity-80">口座:</div>
-
+        <div className="mt-4 flex items-center gap-3">
+          <div className="text-sm text-white/70">口座:</div>
           <select
-            value={selectedAccountIdStr} // ✅ string
-            onChange={onChangeAccount}
-            className="bg-black text-white border border-white/20 rounded-md px-2 py-1 text-sm"
+            className="bg-black text-white border border-white/20 rounded-md px-3 py-2 text-sm outline-none"
+            value={selectedId ?? ""}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v)) onChangeAccount(v);
+            }}
           >
-            {/* ✅ URLで指定されたIDが accounts に無い場合は、先頭に「不明ID」を出して可視化 */}
-            {selectedIdMissing && selectedAccountId != null && (
-              <option value={String(selectedAccountId)}>
-                {`不明な口座 (ID=${selectedAccountId})`}
-              </option>
-            )}
-
-            {accounts.map((a) => (
-              <option key={a.id} value={String(a.id)}>
+            {props.accounts.map((a) => (
+              <option key={a.id} value={a.id}>
                 {a.name}
               </option>
             ))}
           </select>
-
-          {accounts.length === 0 && (
-            <div className="text-sm text-red-300">
-              口座が0件。getAccounts() / RLS / データを確認。
-            </div>
-          )}
         </div>
+      </div>
 
-        {selectedIdMissing && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm">
-            <div className="font-semibold text-red-200">
-              指定した口座IDが「口座一覧」に存在しません
-            </div>
-            <div className="mt-1 opacity-90">
-              URLの cashAccountId={selectedAccountId} は来ていますが、accounts にそのIDが無いので表示名を出せません。
-              これはUIではなく、口座取得（getAccounts）かRLS、またはDBに口座が無いのが原因です。
-            </div>
+      {/* Body */}
+      <div className="px-6 py-6 space-y-4">
+        {/* Alert */}
+        {props.alertCards.map((a, idx) => (
+          <div
+            key={`${a.title}-${idx}`}
+            className="rounded-lg border border-white/10 bg-white text-black p-4"
+          >
+            <div className="font-semibold">{a.title}</div>
+            <div className="text-sm mt-1">{a.description}</div>
           </div>
-        )}
+        ))}
 
-        {/* Alerts */}
-        {alertCards.length > 0 && (
-          <div className="space-y-2">
-            {alertCards.map((a, idx) => (
-              <div
-                key={idx}
-                className="rounded-lg border border-white/10 bg-white text-black p-4"
-              >
-                <div className="font-semibold">{a.title}</div>
-                <div className="text-sm mt-1">{a.description}</div>
-
-                {a.href && a.actionLabel && (
-                  <button
-                    type="button"
-                    className="mt-3 text-sm underline"
-                    onClick={() => router.push(a.href!)}
-                  >
-                    {a.actionLabel}
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* ✅ 「楽天銀行の明細CSV（説明ブロック）」は不要なので出さない */}
 
         {/* Main cards */}
         <div className="grid gap-4 md:grid-cols-3">
           <OverviewCard payload={overviewPayload} />
-          <BalanceCard rows={monthly} />
-          <EcoCharts rows={monthly} />
-        </div>
 
-        {children}
+          {/* BalanceCard は rows 必須の想定（エラー履歴から） */}
+          <BalanceCard rows={props.monthly} />
+
+          {/* EcoCharts も rows 必須（提示コード通り） */}
+          <EcoCharts rows={props.monthly} />
+        </div>
       </div>
     </div>
   );
