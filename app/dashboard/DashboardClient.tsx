@@ -184,12 +184,12 @@ export default function DashboardClient({
 
         {/* ===== Dashboard 本体 ===== */}
         <div className="grid gap-4 md:grid-cols-3">
-          <OverviewCard payload={overviewPayload} />
-
-          {/* ✅ ここが修正点：BalanceCard は rows 必須 */}
-          <BalanceCard rows={monthly} />
-
-          <EcoCharts />
+  <OverviewCard payload={overviewPayload} />
+  <BalanceCard rows={monthly} />
+  <EcoCharts rows={monthly} />
+</div>
+          - <EcoCharts />
++ <EcoCharts rows={monthly} />
         </div>
 
         {children}
