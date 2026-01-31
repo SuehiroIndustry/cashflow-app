@@ -25,40 +25,55 @@ type Props = {
   children?: React.ReactNode;
 };
 
-/**
- * AccountRow は環境/実装で「残高のプロパティ名」がブレやすい。
- * なので「存在するなら拾う」方式で安全に取り出す。
- */
-function pickAccountBalance(account: AccountRow | undefined): number {
-  if (!account) return 0;
+function formatJPY(n: number | null | undefined) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return "-";
+  return new Intl.NumberFormat("ja-JP").format(Math.round(n)) + " 円";
+}
 
-  const a = account as unknown as Record<string, unknown>;
+function severityStyle(sev: AlertCard["severity"]) {
+  if (sev === "critical") {
+    return "border-red-800 bg-red-950 text-red-100";
+  }
+  if (sev === "warning") {
+    return "border-yellow-800 bg-yellow-950 text-yellow-100";
+  }
+  return "border-neutral-700 bg-neutral-900 text-neutral-100";
+}
 
-  const candidates = [
-    "balance",
-    "current_balance",
-    "currentBalance",
-    "amount",
-    "currentAmount",
-    "last_balance",
-    "lastBalance",
-  ];
+function statusHeadline(cs: CashStatus): string {
+  // 最低限の判断メッセージ（型にある情報だけで組み立て）
+  const bal = cs.currentBalance;
+  const net = cs.monthNet;
 
-  for (const key of candidates) {
-    const v = a[key];
-    if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof bal === "number" && bal <= 300_000) return "残高が危険水域です";
+  if (typeof net === "number" && net < 0) return "今月の収支がマイナスです";
+
+  if (cs.selectedAccountName) return `${cs.selectedAccountName} の状況`;
+  return "状況を確認中";
+}
+
+function statusBody(cs: CashStatus): string {
+  const parts: string[] = [];
+
+  if (cs.selectedAccountName) {
+    parts.push(`口座：${cs.selectedAccountName}`);
+  } else {
+    parts.push("口座：—");
   }
 
-  // 文字列で来るケースも一応拾う（"12345" とか）
-  for (const key of candidates) {
-    const v = a[key];
-    if (typeof v === "string" && v.trim() !== "") {
-      const n = Number(v.replace(/,/g, ""));
-      if (Number.isFinite(n)) return n;
-    }
+  parts.push(`現在残高：${formatJPY(cs.currentBalance)}`);
+
+  if (cs.monthLabel) {
+    parts.push(
+      `${cs.monthLabel}：収入 ${formatJPY(cs.monthIncome)} / 支出 ${formatJPY(
+        cs.monthExpense
+      )} / 差額 ${formatJPY(cs.monthNet)}`
+    );
+  } else {
+    parts.push("月次：—");
   }
 
-  return 0;
+  return parts.join("　|　");
 }
 
 export default function DashboardClient({
@@ -71,6 +86,29 @@ export default function DashboardClient({
 }: Props) {
   const router = useRouter();
 
+  const selectedAccount = useMemo(() => {
+    if (!selectedAccountId) return null;
+    return accounts.find((a) => a.id === selectedAccountId) ?? null;
+  }, [accounts, selectedAccountId]);
+
+  const overviewPayload: OverviewPayload | null = useMemo(() => {
+    // OverviewCard.tsx 側が null/undefined を許容して落ちない設計なので、ここも安全に
+    const latestMonth =
+      monthly && monthly.length > 0 ? monthly[monthly.length - 1] : null;
+
+    return {
+      cashAccountId: selectedAccountId ?? undefined,
+      accountName: selectedAccount?.name ?? "—",
+      currentBalance:
+        typeof selectedAccount?.current_balance === "number"
+          ? selectedAccount.current_balance
+          : 0,
+      thisMonthIncome: latestMonth?.income ?? 0,
+      thisMonthExpense: latestMonth?.expense ?? 0,
+      net: (latestMonth?.income ?? 0) - (latestMonth?.expense ?? 0),
+    };
+  }, [monthly, selectedAccount, selectedAccountId]);
+
   const onLogout = useCallback(async () => {
     try {
       await fetch("/auth/signout", { method: "POST" });
@@ -80,30 +118,6 @@ export default function DashboardClient({
     router.refresh();
     router.push("/login");
   }, [router]);
-
-  /**
-   * Overview 用 payload
-   * ※ 正確さより「落ちない・判断材料が見える」を優先
-   */
-  const overviewPayload: OverviewPayload | null = useMemo(() => {
-    if (!selectedAccountId) return null;
-
-    const account = accounts.find((a) => a.id === selectedAccountId);
-    const latestMonth = monthly?.[monthly.length - 1];
-
-    const currentBalance = pickAccountBalance(account);
-
-    const thisMonthIncome = latestMonth?.income ?? 0;
-    const thisMonthExpense = latestMonth?.expense ?? 0;
-
-    return {
-      accountName: account?.name ?? "-",
-      currentBalance,
-      thisMonthIncome,
-      thisMonthExpense,
-      net: thisMonthIncome - thisMonthExpense,
-    };
-  }, [accounts, selectedAccountId, monthly]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -121,14 +135,12 @@ export default function DashboardClient({
       </div>
 
       <div className="px-6 py-6 space-y-6">
-        {/* ===== 危険信号 ===== */}
+        {/* ===== ステータス（CashStatusから表示） ===== */}
         <div className="rounded-lg border border-white/10 bg-white text-black p-4">
-          <div className="font-semibold">
-            {cashStatus?.headline ?? "状況を確認中"}
-          </div>
-          <div className="text-sm mt-1">
-            {cashStatus?.message ??
-              "最新データを取得後、判断に必要な情報のみ表示します。"}
+          <div className="font-semibold">{statusHeadline(cashStatus)}</div>
+          <div className="text-sm mt-1">{statusBody(cashStatus)}</div>
+          <div className="text-xs mt-2 text-black/60">
+            updated: {cashStatus.updatedAtISO}
           </div>
         </div>
 
@@ -136,18 +148,55 @@ export default function DashboardClient({
         <div className="rounded-lg border border-white/10 bg-white/5 p-4">
           <div className="font-semibold">データ取り込み</div>
 
-          <ul className="mt-2 text-sm space-y-1">
-            <li>
+          <ul className="mt-2 text-sm space-y-2">
+            <li className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-white">楽天銀行 明細CSV</div>
+                <div className="text-white/60 text-xs">
+                  週1回、楽天銀行からCSVを手動ダウンロードしてアップロード
+                </div>
+              </div>
               <Link
                 href="/cash/import/rakuten"
-                className="text-blue-300 hover:underline"
+                className="inline-flex h-9 items-center justify-center rounded-md border border-white/20 bg-white/5 px-3 text-sm text-white hover:bg-white/10"
               >
-                ▶ 楽天銀行 明細CSVアップロード
+                アップロードへ
               </Link>
             </li>
-            <li className="text-white/60">※ 週1回CSVを手動アップロードする運用</li>
           </ul>
         </div>
+
+        {/* ===== アラート ===== */}
+        {alertCards?.length > 0 ? (
+          <div className="space-y-3">
+            {alertCards.map((a, idx) => {
+              const clickable = !!(a.href && a.actionLabel);
+              return (
+                <div
+                  key={`${a.severity}-${idx}`}
+                  className={`rounded-lg border p-4 ${severityStyle(a.severity)}`}
+                >
+                  <div className="font-semibold">{a.title}</div>
+                  <div className="text-sm mt-1 text-white/90">
+                    {a.description}
+                  </div>
+
+                  {/* ✅ あなたの要望：シミュレーションへ飛ばさない（警告だけ） */}
+                  {clickable ? (
+                    <div className="mt-3">
+                      <Link
+                        href={a.href!}
+                        className="inline-flex h-9 items-center justify-center rounded-md border border-white/20 bg-white/5 px-3 text-sm text-white hover:bg-white/10"
+                      >
+                        {a.actionLabel}
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
 
         {/* ===== Dashboard 本体 ===== */}
         <div className="grid gap-4 md:grid-cols-3">
