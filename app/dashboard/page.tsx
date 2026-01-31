@@ -115,7 +115,7 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   const monthForOverview = latest?.month ?? monthStartISO();
 
-  // getOverview は「今月のin/out」算出用（ただし口座名/残高は必ずcash_accountsを正にする）
+  // getOverview は「今月のin/out」算出用
   const overviewFromAction = await getOverview({
     cashAccountId: selectedAccountId,
     month: monthForOverview,
@@ -126,10 +126,18 @@ export default async function DashboardPage({ searchParams }: Props) {
   const thisMonthExpense = latest?.expense ?? 0;
   const monthNet = thisMonthIncome - thisMonthExpense;
 
+  // ✅ ここが本丸：currentBalance の正を統一する
+  // monthly があるなら latest.balance を採用
+  // monthly が無い場合のみ cash_accounts.current_balance をフォールバック
+  const currentBalanceResolved =
+    typeof (latest as any)?.balance === "number"
+      ? (latest as any).balance
+      : currentAccount.current_balance ?? 0;
+
   const overviewPayload: OverviewPayload = {
     ...(overviewFromAction ?? {}),
     accountName: currentAccount.name || "-",
-    currentBalance: currentAccount.current_balance ?? 0,
+    currentBalance: currentBalanceResolved,
     thisMonthIncome:
       typeof overviewFromAction?.thisMonthIncome === "number"
         ? overviewFromAction.thisMonthIncome
@@ -149,7 +157,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const cashStatus: CashStatus = {
     selectedAccountId,
     selectedAccountName: currentAccount.name ?? null,
-    currentBalance: currentAccount.current_balance ?? null,
+    currentBalance: currentBalanceResolved,
     monthLabel,
     monthIncome: latest?.income ?? null,
     monthExpense: latest?.expense ?? null,
