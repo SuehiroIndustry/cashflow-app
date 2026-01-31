@@ -43,12 +43,14 @@ function monthStartISO(d = new Date()): string {
 export default async function DashboardPage({ searchParams }: Props) {
   const rawAccounts = await getAccounts();
 
+  // ✅ 念のためここでも number 正規化（bigint/string地雷の二重防御）
   const accounts: AccountRow[] = (rawAccounts ?? []).map((a: any) => ({
     id: Number(a.id),
     name: String(a.name ?? ""),
     current_balance: Number(a.current_balance ?? 0),
   }));
 
+  // --- 口座未登録（early return） ---
   if (!accounts.length) {
     const cashStatus: CashStatus = {
       selectedAccountId: null,
@@ -79,19 +81,24 @@ export default async function DashboardPage({ searchParams }: Props) {
 
     const monthly: MonthlyBalanceRow[] = [];
 
+    // ✅ selectedAccountId を参照しない key（宣言順の事故を防ぐ）
+    const emptyKey = `dash-empty-${String(searchParams?.cashAccountId ?? "none")}`;
+
     return (
-  <DashboardClient
-    key={`dash-${selectedAccountId}`}   // ✅ これ
-    accounts={accounts}
-    selectedAccountId={selectedAccountId}
-    monthly={monthly}
-    cashStatus={cashStatus}
-    alertCards={alertCards}
-    overviewPayload={overviewPayload}
-  />
-);
+      <DashboardClient
+        key={emptyKey}
+        accounts={accounts}
+        selectedAccountId={null}
+        monthly={monthly}
+        cashStatus={cashStatus}
+        alertCards={alertCards}
+        overviewPayload={overviewPayload}
+      />
+    );
   }
 
+  // --- 通常ルート ---
+  // ✅ URLの cashAccountId を唯一の基準にする（なければ先頭）
   const requestedId = toInt(searchParams?.cashAccountId);
 
   const selectedAccountId =
@@ -114,8 +121,7 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   const monthForOverview = latest?.month ?? monthStartISO();
 
-  // getOverview は「今月のin/out」算出用…だが今は信用しない（0で上書きされるため）
-  // いったん呼ぶだけにして、値は使わない（将来直したら使う）
+  // getOverview は今後の整備対象（現状は信用しない）
   await getOverview({
     cashAccountId: selectedAccountId,
     month: monthForOverview,
@@ -126,7 +132,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const thisMonthExpense = latest?.expense ?? 0;
   const monthNet = thisMonthIncome - thisMonthExpense;
 
-  // ✅ currentBalance も monthly があればそちらを採用
+  // ✅ currentBalance は monthly があれば latest.balance（なければ current_balance）
   const currentBalanceResolved =
     typeof (latest as any)?.balance === "number"
       ? (latest as any).balance
@@ -165,8 +171,12 @@ export default async function DashboardPage({ searchParams }: Props) {
     });
   }
 
+  // ✅ ここで selectedAccountId を使う key（宣言済みなのでOK）
+  const dashKey = `dash-${selectedAccountId}`;
+
   return (
     <DashboardClient
+      key={dashKey}
       accounts={accounts}
       selectedAccountId={selectedAccountId}
       monthly={monthly}
