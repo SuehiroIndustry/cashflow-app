@@ -1,9 +1,8 @@
 // app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import React, { useMemo, useCallback } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
@@ -19,100 +18,109 @@ import type {
 
 type Props = {
   accounts: AccountRow[];
-  selectedAccountId: number | null;
+  selectedAccountId: number | null; // server が計算した現在の口座
   monthly: MonthlyBalanceRow[];
   overviewPayload: OverviewPayload | null;
   cashStatus: CashStatus;
   alertCards: AlertCard[];
+  children?: React.ReactNode;
 };
 
-function fmtYmdHms(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const yy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mi = String(d.getMinutes()).padStart(2, "0");
-    const ss = String(d.getSeconds()).padStart(2, "0");
-    return `${yy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
-  } catch {
-    return iso;
-  }
+function toInt(v: string | null): number | null {
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
-export default function DashboardClient({
-  accounts,
-  selectedAccountId,
-  monthly,
-  overviewPayload,
-  cashStatus,
-  alertCards,
-}: Props) {
+function pickTopAlert(alerts: AlertCard[]): AlertCard | null {
+  if (!alerts?.length) return null;
+  const priority = { critical: 0, warning: 1, info: 2 } as const;
+  return [...alerts].sort((a, b) => priority[a.severity] - priority[b.severity])[0];
+}
+
+export default function DashboardClient(props: Props) {
+  const {
+    accounts,
+    selectedAccountId,
+    monthly,
+    overviewPayload,
+    cashStatus,
+    alertCards,
+    children,
+  } = props;
+
   const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
 
-  // UI操作用の選択状態（URL基準に同期）
-  const [selected, setSelected] = useState<number>(
-    selectedAccountId ?? (accounts[0]?.id ?? 0)
+  // ✅ URL を正とする（ここが肝）
+  const urlAccountId = useMemo(() => toInt(sp.get("cashAccountId")), [sp]);
+  const effectiveAccountId = useMemo(() => {
+    // URLが不正なら server の selectedAccountId を使う
+    if (urlAccountId != null && accounts.some((a) => a.id === urlAccountId)) return urlAccountId;
+    if (selectedAccountId != null && accounts.some((a) => a.id === selectedAccountId))
+      return selectedAccountId;
+    return accounts[0]?.id ?? null;
+  }, [urlAccountId, selectedAccountId, accounts]);
+
+  const effectiveAccountName = useMemo(() => {
+    const a = accounts.find((x) => x.id === effectiveAccountId);
+    return a?.name ?? "-";
+  }, [accounts, effectiveAccountId]);
+
+  const onChangeAccount = useCallback(
+    (nextId: number) => {
+      const next = new URLSearchParams(sp.toString());
+      next.set("cashAccountId", String(nextId));
+
+      // ✅ push だけだと再取得が噛み合わないことがあるので refresh を噛ます
+      router.push(`${pathname}?${next.toString()}`);
+      router.refresh();
+    },
+    [router, pathname, sp]
   );
 
-  useEffect(() => {
-    const next = selectedAccountId ?? (accounts[0]?.id ?? 0);
-    setSelected(next);
-  }, [selectedAccountId, accounts]);
-
-  const updatedLabel = useMemo(
-    () => fmtYmdHms(cashStatus.updatedAtISO),
-    [cashStatus.updatedAtISO]
-  );
-
-  const onChangeAccount = (nextId: number) => {
-    setSelected(nextId);
-    // ✅ これで「現金→楽天銀行に変わらない」系を根絶
-    router.push(`/dashboard?cashAccountId=${nextId}`);
-  };
-
-  const importHref =
-    selected ? `/cash/import/rakuten?cashAccountId=${selected}` : "/cash/import/rakuten";
-  const simulationHref =
-    selected ? `/simulation?cashAccountId=${selected}` : "/simulation";
+  const topAlert = useMemo(() => pickTopAlert(alertCards), [alertCards]);
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Header */}
-      <div className="px-6 pt-6 pb-4 border-b border-white/10">
+      <div className="mx-auto max-w-7xl px-6 py-8 space-y-6">
+        {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xl font-semibold">Cashflow Dashboard</div>
-            <div className="text-xs text-white/60 mt-1">更新: {updatedLabel}</div>
+            <h1 className="text-xl font-semibold">Cashflow Dashboard</h1>
+            <div className="text-xs opacity-70">
+              更新: {new Date(cashStatus.updatedAtISO).toLocaleString("ja-JP")}
+            </div>
           </div>
 
+          {/* ✅ 右上ボタン（「楽天銀行へ」は消す） */}
           <div className="flex items-center gap-2">
-            {/* ✅ Simulation */}
-            <Link
-              href={simulationHref}
-              className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
+            <button
+              type="button"
+              onClick={() => router.push("/simulation")}
+              className="rounded-md border border-white/20 px-3 py-2 text-sm hover:bg-white/10"
             >
               Simulation
-            </Link>
+            </button>
 
-            {/* ✅ 楽天銀行・明細インポート */}
-            <Link
-              href={importHref}
-              className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
+            <button
+              type="button"
+              onClick={() => router.push("/cash/import/rakuten")}
+              className="rounded-md border border-white/20 px-3 py-2 text-sm hover:bg-white/10"
             >
               楽天銀行・明細インポート
-            </Link>
+            </button>
           </div>
         </div>
 
         {/* Account selector */}
-        <div className="mt-4 flex items-center gap-2">
-          <div className="text-sm text-white/70">口座:</div>
+        <div className="flex items-center gap-3">
+          <div className="text-sm opacity-80">口座:</div>
           <select
-            value={selected}
+            className="rounded-md border border-white/20 bg-black px-3 py-2 text-sm text-white"
+            value={effectiveAccountId ?? ""}
             onChange={(e) => onChangeAccount(Number(e.target.value))}
-            className="bg-black text-white border border-white/15 rounded-md px-3 py-2 text-sm"
           >
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
@@ -120,32 +128,37 @@ export default function DashboardClient({
               </option>
             ))}
           </select>
+
+          <div className="text-xs opacity-60">表示中: {effectiveAccountName}</div>
         </div>
-      </div>
 
-      {/* Alerts */}
-      <div className="px-6 pt-4">
-        {alertCards.map((a, idx) => (
-          <div
-            key={`${a.severity}-${idx}`}
-            className="rounded-lg border border-white/10 bg-white text-black p-4 mb-4"
-          >
-            <div className="font-semibold">{a.title}</div>
-            <div className="text-sm mt-1">{a.description}</div>
+        {/* Alert banner */}
+        {topAlert && (
+          <div className="rounded-lg border border-white/10 bg-white text-black p-4">
+            <div className="font-semibold">{topAlert.title}</div>
+            <div className="text-sm mt-1">{topAlert.description}</div>
+            {topAlert.href && topAlert.actionLabel && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => router.push(topAlert.href!)}
+                  className="rounded-md border border-black/20 px-3 py-2 text-sm hover:bg-black/5"
+                >
+                  {topAlert.actionLabel}
+                </button>
+              </div>
+            )}
           </div>
-        ))}
-      </div>
+        )}
 
-      {/* Main */}
-      <div className="px-6 pb-10">
+        {/* Main cards */}
         <div className="grid gap-4 md:grid-cols-3">
-          {/* ✅ OverviewCard は payload */}
           <OverviewCard payload={overviewPayload} />
-
-          {/* ✅ BalanceCard / EcoCharts は rows 必須 */}
           <BalanceCard rows={monthly} />
           <EcoCharts rows={monthly} />
         </div>
+
+        {children}
       </div>
     </div>
   );
