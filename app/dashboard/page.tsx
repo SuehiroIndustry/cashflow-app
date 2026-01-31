@@ -43,7 +43,6 @@ function monthStartISO(d = new Date()): string {
 export default async function DashboardPage({ searchParams }: Props) {
   const rawAccounts = await getAccounts();
 
-  // ✅ 念のためここでも number 正規化（bigint/string地雷の二重防御）
   const accounts: AccountRow[] = (rawAccounts ?? []).map((a: any) => ({
     id: Number(a.id),
     name: String(a.name ?? ""),
@@ -92,7 +91,6 @@ export default async function DashboardPage({ searchParams }: Props) {
     );
   }
 
-  // ✅ URLの cashAccountId を唯一の基準にする（なければ先頭）
   const requestedId = toInt(searchParams?.cashAccountId);
 
   const selectedAccountId =
@@ -115,41 +113,30 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   const monthForOverview = latest?.month ?? monthStartISO();
 
-  // getOverview は「今月のin/out」算出用
-  const overviewFromAction = await getOverview({
+  // getOverview は「今月のin/out」算出用…だが今は信用しない（0で上書きされるため）
+  // いったん呼ぶだけにして、値は使わない（将来直したら使う）
+  await getOverview({
     cashAccountId: selectedAccountId,
     month: monthForOverview,
   });
 
-  // 月次があればそれを正にする（ズレ防止）
+  // ✅ monthly を正にする（SSOT）
   const thisMonthIncome = latest?.income ?? 0;
   const thisMonthExpense = latest?.expense ?? 0;
   const monthNet = thisMonthIncome - thisMonthExpense;
 
-  // ✅ ここが本丸：currentBalance の正を統一する
-  // monthly があるなら latest.balance を採用
-  // monthly が無い場合のみ cash_accounts.current_balance をフォールバック
+  // ✅ currentBalance も monthly があればそちらを採用
   const currentBalanceResolved =
     typeof (latest as any)?.balance === "number"
       ? (latest as any).balance
       : currentAccount.current_balance ?? 0;
 
   const overviewPayload: OverviewPayload = {
-    ...(overviewFromAction ?? {}),
     accountName: currentAccount.name || "-",
     currentBalance: currentBalanceResolved,
-    thisMonthIncome:
-      typeof overviewFromAction?.thisMonthIncome === "number"
-        ? overviewFromAction.thisMonthIncome
-        : thisMonthIncome,
-    thisMonthExpense:
-      typeof overviewFromAction?.thisMonthExpense === "number"
-        ? overviewFromAction.thisMonthExpense
-        : thisMonthExpense,
-    net:
-      typeof overviewFromAction?.net === "number"
-        ? overviewFromAction.net
-        : monthNet,
+    thisMonthIncome,
+    thisMonthExpense,
+    net: monthNet,
   };
 
   const monthLabel = latest?.month ? String(latest.month).slice(0, 7) : null;
