@@ -119,7 +119,7 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   const monthForOverview = latest?.month ?? monthStartISO();
 
-  // getOverview は「今月のin/out」算出用（ただし口座名/残高は必ずcash_accountsを正にする）
+  // ✅ Overview算出（ここを正にする）
   const overviewFromAction = await getOverview({
     cashAccountId: selectedAccountId,
     month: monthForOverview,
@@ -130,10 +130,20 @@ export default async function DashboardPage({ searchParams }: Props) {
   const thisMonthExpense = latest?.expense ?? 0;
   const monthNet = thisMonthIncome - thisMonthExpense;
 
+  // ✅ currentBalance は getOverview を最優先（page側で 0 上書きしない）
+  const currentBalance =
+    typeof overviewFromAction?.currentBalance === "number"
+      ? overviewFromAction.currentBalance
+      : Number(currentAccount.current_balance ?? 0);
+
   const overviewPayload: OverviewPayload = {
     ...(overviewFromAction ?? {}),
+    // ✅ 口座名は accounts を正にしてOK（UI表示用）
     accountName: currentAccount.name || "-",
-    currentBalance: currentAccount.current_balance ?? 0,
+    // ✅ ここが本丸：accounts由来で上書きしない
+    currentBalance,
+
+    // ✅ in/out は getOverview が number を返したらそれを採用、なければ月次を採用
     thisMonthIncome:
       typeof overviewFromAction?.thisMonthIncome === "number"
         ? overviewFromAction.thisMonthIncome
@@ -153,7 +163,8 @@ export default async function DashboardPage({ searchParams }: Props) {
   const cashStatus: CashStatus = {
     selectedAccountId,
     selectedAccountName: currentAccount.name ?? null,
-    currentBalance: currentAccount.current_balance ?? null,
+    // ✅ アラートも同じ currentBalance を使う（これで 0 固定バグ消える）
+    currentBalance,
     monthLabel,
     monthIncome: latest?.income ?? null,
     monthExpense: latest?.expense ?? null,
@@ -173,7 +184,6 @@ export default async function DashboardPage({ searchParams }: Props) {
     });
   }
 
-  // ✅ ここで key を効かせる（selectedAccountId 決定後）
   return (
     <DashboardClient
       key={`dash-${selectedAccountId}`}
