@@ -17,7 +17,7 @@ type Props = {
   monthly: MonthlyBalanceRow[];
   cashStatus: CashStatus;
   alertCards: AlertCard[];
-  children: React.ReactNode;
+  children?: React.ReactNode; // ✅ optional に変更
 };
 
 function ImportLinks() {
@@ -44,7 +44,6 @@ function ImportLinks() {
 }
 
 export default function DashboardClient({
-  // page.tsx から渡されるもの（今はこのコンポーネント内では未使用でもOK）
   accounts,
   selectedAccountId,
   monthly,
@@ -52,7 +51,7 @@ export default function DashboardClient({
   alertCards,
   children,
 }: Props) {
-  // 未使用警告が気になる場合の保険（ビルドでは落ちないけど、気持ち悪ければ）
+  // 未使用警告が気になる場合の保険（ビルドでは落ちない）
   void accounts;
   void selectedAccountId;
   void monthly;
@@ -81,13 +80,13 @@ export default function DashboardClient({
         </div>
       ) : null}
 
-      {/* ✅ 追加：楽天CSVアップロードへの導線 */}
+      {/* ✅ 楽天CSVアップロードへの導線 */}
       <div className="mb-4">
         <ImportLinks />
       </div>
 
-      {/* ダッシュボード本体（page.tsx から渡される children） */}
-      {children}
+      {/* ダッシュボード本体（子があれば表示） */}
+      {children ?? null}
     </div>
   );
 }
