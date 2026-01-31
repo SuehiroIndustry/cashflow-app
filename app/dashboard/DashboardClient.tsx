@@ -25,6 +25,42 @@ type Props = {
   children?: React.ReactNode;
 };
 
+/**
+ * AccountRow は環境/実装で「残高のプロパティ名」がブレやすい。
+ * なので「存在するなら拾う」方式で安全に取り出す。
+ */
+function pickAccountBalance(account: AccountRow | undefined): number {
+  if (!account) return 0;
+
+  const a = account as unknown as Record<string, unknown>;
+
+  const candidates = [
+    "balance",
+    "current_balance",
+    "currentBalance",
+    "amount",
+    "currentAmount",
+    "last_balance",
+    "lastBalance",
+  ];
+
+  for (const key of candidates) {
+    const v = a[key];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+
+  // 文字列で来るケースも一応拾う（"12345" とか）
+  for (const key of candidates) {
+    const v = a[key];
+    if (typeof v === "string" && v.trim() !== "") {
+      const n = Number(v.replace(/,/g, ""));
+      if (Number.isFinite(n)) return n;
+    }
+  }
+
+  return 0;
+}
+
 export default function DashboardClient({
   accounts,
   selectedAccountId,
@@ -52,17 +88,20 @@ export default function DashboardClient({
   const overviewPayload: OverviewPayload | null = useMemo(() => {
     if (!selectedAccountId) return null;
 
-    const account = accounts.find(a => a.id === selectedAccountId);
+    const account = accounts.find((a) => a.id === selectedAccountId);
     const latestMonth = monthly?.[monthly.length - 1];
+
+    const currentBalance = pickAccountBalance(account);
+
+    const thisMonthIncome = latestMonth?.income ?? 0;
+    const thisMonthExpense = latestMonth?.expense ?? 0;
 
     return {
       accountName: account?.name ?? "-",
-      currentBalance: account?.balance ?? 0,
-      thisMonthIncome: latestMonth?.income ?? 0,
-      thisMonthExpense: latestMonth?.expense ?? 0,
-      net:
-        (latestMonth?.income ?? 0) -
-        (latestMonth?.expense ?? 0),
+      currentBalance,
+      thisMonthIncome,
+      thisMonthExpense,
+      net: thisMonthIncome - thisMonthExpense,
     };
   }, [accounts, selectedAccountId, monthly]);
 
@@ -93,7 +132,7 @@ export default function DashboardClient({
           </div>
         </div>
 
-        {/* ===== データ取り込み ===== */}
+        {/* ===== データ取り込み（リンク集） ===== */}
         <div className="rounded-lg border border-white/10 bg-white/5 p-4">
           <div className="font-semibold">データ取り込み</div>
 
@@ -106,9 +145,7 @@ export default function DashboardClient({
                 ▶ 楽天銀行 明細CSVアップロード
               </Link>
             </li>
-            <li className="text-white/60">
-              ※ 週1回CSVを手動アップロードする運用
-            </li>
+            <li className="text-white/60">※ 週1回CSVを手動アップロードする運用</li>
           </ul>
         </div>
 
