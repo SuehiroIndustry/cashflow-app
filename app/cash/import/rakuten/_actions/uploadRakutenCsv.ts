@@ -1,7 +1,7 @@
 // app/cash/import/rakuten/_actions/uploadRakutenCsv.ts
 "use server";
 
-export async function uploadRakutenCsv(formData: FormData) {
+export async function uploadRakutenCsv(formData: FormData): Promise<void> {
   const file = formData.get("file");
 
   if (!(file instanceof File)) {
@@ -13,6 +13,5 @@ export async function uploadRakutenCsv(formData: FormData) {
   console.log("size:", file.size);
   console.log("type:", file.type);
 
-  // 今日はここまででOK
-  return { success: true };
+  // ✅ 戻り値は返さない（void）
 }
