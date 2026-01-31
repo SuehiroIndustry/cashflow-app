@@ -1,102 +1,80 @@
 // app/dashboard/page.tsx
 import DashboardClient from "./DashboardClient";
 
-import type { AlertCard, CashStatus } from "./_types";
-import type { AccountRow, MonthlyBalanceRow } from "./_types";
-
 import { getAccounts } from "./_actions/getAccounts";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
+import type { AccountRow, MonthlyBalanceRow, CashStatus, AlertCard } from "./_types";
+
 type PageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  searchParams?: { [key: string]: string | string[] | undefined };
 };
 
-function toNumberOrNull(v: string | string[] | undefined): number | null {
-  const s = Array.isArray(v) ? v[0] : v;
-  if (!s) return null;
-  const n = Number(s);
+function toNumber(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
 export default async function DashboardPage({ searchParams }: PageProps) {
-  const sp = (await searchParams) ?? {};
-  // URL例: /dashboard?accountId=123
-  // null のときは「全口座」
-  const selectedAccountId = toNumberOrNull(sp.accountId);
-
   // 1) 口座一覧
   const accounts: AccountRow[] = await getAccounts();
 
-  // 2) 月次（全口座 or 選択口座）
-  const monthsToShow = 12;
-  const monthly: MonthlyBalanceRow[] = await getMonthlyBalance({
-    cashAccountId: selectedAccountId,
-    months: monthsToShow,
-  });
+  // 2) 選択口座ID（URLクエリ優先、なければ先頭、なければ null）
+  const qs = searchParams?.cashAccountId;
+  const cashAccountIdFromQS = Array.isArray(qs) ? toNumber(qs[0]) : toNumber(qs);
+  const fallbackId = accounts.length ? accounts[0].id : null;
 
-  const selectedAccount =
+  const selectedAccountId: number | null = cashAccountIdFromQS ?? fallbackId;
+
+  const selectedAccount: AccountRow | null =
     selectedAccountId != null
       ? accounts.find((a) => a.id === selectedAccountId) ?? null
       : null;
 
-  // 3) 現在残高
-  const currentBalance =
+  // 3) 月次（選択口座がある時だけ）
+  const monthly: MonthlyBalanceRow[] =
     selectedAccountId != null
-      ? selectedAccount?.current_balance ?? null
-      : accounts.length
-        ? accounts.reduce((sum, a) => sum + (a.current_balance ?? 0), 0)
-        : null;
+      ? await getMonthlyBalance({ cashAccountId: selectedAccountId, months: 12 })
+      : [];
 
-  // 4) 今月（latest）
-  const latest = monthly.length ? monthly[monthly.length - 1] : null;
+  const latestMonth = monthly.length ? monthly[monthly.length - 1] : null;
 
+  // 4) CashStatus（_types.ts に合わせる）
   const cashStatus: CashStatus = {
     selectedAccountId,
-    selectedAccountName: selectedAccountId != null ? selectedAccount?.name ?? null : "全口座",
-    currentBalance,
+    selectedAccountName: selectedAccount?.name ?? null,
+    currentBalance: selectedAccount?.current_balance ?? null,
 
-    monthLabel: latest?.month ?? null,
-    monthIncome: latest?.income ?? null,
-    monthExpense: latest?.expense ?? null,
+    monthLabel: latestMonth?.month ?? null,
+    monthIncome: latestMonth?.income ?? null,
+    monthExpense: latestMonth?.expense ?? null,
     monthNet:
-      latest != null
-        ? (latest.income ?? 0) - (latest.expense ?? 0)
+      latestMonth != null
+        ? (latestMonth.income ?? 0) - (latestMonth.expense ?? 0)
         : null,
 
     updatedAtISO: new Date().toISOString(),
   };
 
-  // 5) アラート（ここに level/title/message を寄せる）
+  // 5) アラート（AlertCard 型に合わせる）
   const alertCards: AlertCard[] = [];
+  const bal = cashStatus.currentBalance ?? 0;
 
-  if (typeof currentBalance === "number") {
-    if (currentBalance <= 0) {
-      alertCards.push({
-        severity: "critical",
-        title: "残高が危険水域です",
-        description:
-          "現在残高が 0 円以下です。支払い予定があるなら、資金ショートが現実的です。",
-        // 今はシミュレーションへ飛ばさない方針なのでリンクは出さない
-        // actionLabel/href は無し
-      });
-    } else if (currentBalance < 100000) {
-      alertCards.push({
-        severity: "warning",
-        title: "残高が少なめです",
-        description:
-          "残高が 10万円未満です。近い支払い予定と入金予定を確認しておくと安全です。",
-      });
-    }
+  if (selectedAccountId == null) {
+    alertCards.push({
+      severity: "warning",
+      title: "口座が未選択です",
+      description: "口座を選択してください。",
+    });
+  } else if (bal <= 0) {
+    alertCards.push({
+      severity: "critical",
+      title: "残高が危険水域です",
+      description:
+        "現在残高が 0 円以下です。支払い予定があるなら、資金ショートが現実的です。",
+    });
   }
-
-  // 楽天CSVアップロードの導線（DashboardClient側のヘッダにもリンク入れてるが、ここにも出したいならアラートで出せる）
-  alertCards.push({
-    severity: "info",
-    title: "楽天銀行の明細CSV",
-    description: "週1回の運用：楽天銀行CSVをアップロードして明細を取り込みます。",
-    actionLabel: "アップロードへ",
-    href: "/cash/import/rakuten",
-  });
 
   return (
     <DashboardClient
