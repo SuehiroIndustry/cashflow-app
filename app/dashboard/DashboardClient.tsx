@@ -31,17 +31,12 @@ function formatJPY(n: number | null | undefined) {
 }
 
 function severityStyle(sev: AlertCard["severity"]) {
-  if (sev === "critical") {
-    return "border-red-800 bg-red-950 text-red-100";
-  }
-  if (sev === "warning") {
-    return "border-yellow-800 bg-yellow-950 text-yellow-100";
-  }
+  if (sev === "critical") return "border-red-800 bg-red-950 text-red-100";
+  if (sev === "warning") return "border-yellow-800 bg-yellow-950 text-yellow-100";
   return "border-neutral-700 bg-neutral-900 text-neutral-100";
 }
 
 function statusHeadline(cs: CashStatus): string {
-  // 最低限の判断メッセージ（型にある情報だけで組み立て）
   const bal = cs.currentBalance;
   const net = cs.monthNet;
 
@@ -55,12 +50,7 @@ function statusHeadline(cs: CashStatus): string {
 function statusBody(cs: CashStatus): string {
   const parts: string[] = [];
 
-  if (cs.selectedAccountName) {
-    parts.push(`口座：${cs.selectedAccountName}`);
-  } else {
-    parts.push("口座：—");
-  }
-
+  parts.push(`口座：${cs.selectedAccountName ?? "—"}`);
   parts.push(`現在残高：${formatJPY(cs.currentBalance)}`);
 
   if (cs.monthLabel) {
@@ -92,7 +82,6 @@ export default function DashboardClient({
   }, [accounts, selectedAccountId]);
 
   const overviewPayload: OverviewPayload | null = useMemo(() => {
-    // OverviewCard.tsx 側が null/undefined を許容して落ちない設計なので、ここも安全に
     const latestMonth =
       monthly && monthly.length > 0 ? monthly[monthly.length - 1] : null;
 
@@ -169,39 +158,37 @@ export default function DashboardClient({
         {/* ===== アラート ===== */}
         {alertCards?.length > 0 ? (
           <div className="space-y-3">
-            {alertCards.map((a, idx) => {
-              const clickable = !!(a.href && a.actionLabel);
-              return (
-                <div
-                  key={`${a.severity}-${idx}`}
-                  className={`rounded-lg border p-4 ${severityStyle(a.severity)}`}
-                >
-                  <div className="font-semibold">{a.title}</div>
-                  <div className="text-sm mt-1 text-white/90">
-                    {a.description}
-                  </div>
+            {alertCards.map((a, idx) => (
+              <div
+                key={`${a.severity}-${idx}`}
+                className={`rounded-lg border p-4 ${severityStyle(a.severity)}`}
+              >
+                <div className="font-semibold">{a.title}</div>
+                <div className="text-sm mt-1 text-white/90">{a.description}</div>
 
-                  {/* ✅ あなたの要望：シミュレーションへ飛ばさない（警告だけ） */}
-                  {clickable ? (
-                    <div className="mt-3">
-                      <Link
-                        href={a.href!}
-                        className="inline-flex h-9 items-center justify-center rounded-md border border-white/20 bg-white/5 px-3 text-sm text-white hover:bg-white/10"
-                      >
-                        {a.actionLabel}
-                      </Link>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+                {/* ※「シミュレーションへ飛ばさない」運用なら、ここは出さない（今は残してあるだけ） */}
+                {a.href && a.actionLabel ? (
+                  <div className="mt-3">
+                    <Link
+                      href={a.href}
+                      className="inline-flex h-9 items-center justify-center rounded-md border border-white/20 bg-white/5 px-3 text-sm text-white hover:bg-white/10"
+                    >
+                      {a.actionLabel}
+                    </Link>
+                  </div>
+                ) : null}
+              </div>
+            ))}
           </div>
         ) : null}
 
         {/* ===== Dashboard 本体 ===== */}
         <div className="grid gap-4 md:grid-cols-3">
           <OverviewCard payload={overviewPayload} />
-          <BalanceCard />
+
+          {/* ✅ ここが修正点：BalanceCard は rows 必須 */}
+          <BalanceCard rows={monthly} />
+
           <EcoCharts />
         </div>
 
