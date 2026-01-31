@@ -17,29 +17,21 @@ import type {
 } from "./_types";
 
 type Props = {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: {
+    cashAccountId?: string | string[];
+  };
 };
 
-function firstString(v: unknown): string | null {
-  if (typeof v === "string") return v;
-  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
-  return null;
-}
-
 function toInt(v: unknown): number | null {
-  const s = firstString(v);
-  if (s == null) return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
-
-function toNumber(v: unknown, fallback = 0): number {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "") {
+  if (typeof v === "string") {
     const n = Number(v);
-    if (Number.isFinite(n)) return n;
+    return Number.isFinite(n) ? n : null;
   }
-  return fallback;
+  if (Array.isArray(v) && typeof v[0] === "string") {
+    const n = Number(v[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
 }
 
 function monthStartISO(d = new Date()): string {
@@ -51,14 +43,13 @@ function monthStartISO(d = new Date()): string {
 export default async function DashboardPage({ searchParams }: Props) {
   const rawAccounts = await getAccounts();
 
-  // ✅ numeric が string でも必ず number にする
+  // ✅ 念のためここでも number 正規化（bigint/string地雷の二重防御）
   const accounts: AccountRow[] = (rawAccounts ?? []).map((a: any) => ({
     id: Number(a.id),
     name: String(a.name ?? ""),
-    current_balance: toNumber(a.current_balance, 0),
+    current_balance: Number(a.current_balance ?? 0),
   }));
 
-  // 口座が無いなら落とさない
   if (!accounts.length) {
     const cashStatus: CashStatus = {
       selectedAccountId: null,
@@ -91,7 +82,6 @@ export default async function DashboardPage({ searchParams }: Props) {
 
     return (
       <DashboardClient
-        key="no-accounts"
         accounts={accounts}
         selectedAccountId={null}
         monthly={monthly}
@@ -102,10 +92,9 @@ export default async function DashboardPage({ searchParams }: Props) {
     );
   }
 
-  // ✅ searchParams の型揺れ（string|string[]）を確実に拾う
+  // ✅ URLの cashAccountId を唯一の基準にする（なければ先頭）
   const requestedId = toInt(searchParams?.cashAccountId);
 
-  // URL の cashAccountId を唯一の基準にする（なければ先頭）
   const selectedAccountId =
     requestedId != null && accounts.some((a) => a.id === requestedId)
       ? requestedId
@@ -115,48 +104,44 @@ export default async function DashboardPage({ searchParams }: Props) {
     accounts.find((a) => a.id === selectedAccountId) ?? accounts[0];
 
   // 月次（12ヶ月）
-  const rawMonthly = await getMonthlyBalance({
+  const monthlyDesc: MonthlyBalanceRow[] = await getMonthlyBalance({
     cashAccountId: selectedAccountId,
     months: 12,
   });
 
-  // ✅ monthly も numeric/string 混在を正規化
-  const monthlyDesc: MonthlyBalanceRow[] = (rawMonthly ?? []).map((r: any) => ({
-    cash_account_id: Number(r.cash_account_id ?? selectedAccountId),
-    month: String(r.month ?? ""),
-    income: toNumber(r.income, 0),
-    expense: toNumber(r.expense, 0),
-    balance: toNumber(r.balance, 0),
-  }));
-
-  // desc → asc
-  const monthlyAsc = [...monthlyDesc].reverse();
-  const latest = monthlyAsc.length ? monthlyAsc[monthlyAsc.length - 1] : null;
+  // UI用に昇順へ
+  const monthly = [...monthlyDesc].reverse();
+  const latest = monthly.length ? monthly[monthly.length - 1] : null;
 
   const monthForOverview = latest?.month ?? monthStartISO();
 
-  // getOverview（month必須）
+  // getOverview は「今月のin/out」算出用（ただし口座名/残高は必ずcash_accountsを正にする）
   const overviewFromAction = await getOverview({
     cashAccountId: selectedAccountId,
     month: monthForOverview,
   });
 
-  // ✅ “正”は月次
+  // 月次があればそれを正にする（ズレ防止）
   const thisMonthIncome = latest?.income ?? 0;
   const thisMonthExpense = latest?.expense ?? 0;
   const monthNet = thisMonthIncome - thisMonthExpense;
 
-  // ✅ Overview は「選択口座の口座名/残高」を絶対正として上書き
   const overviewPayload: OverviewPayload = {
     ...(overviewFromAction ?? {}),
-    cashAccountId: selectedAccountId,
-
-    accountName: currentAccount.name ?? "-",
-    currentBalance: toNumber(currentAccount.current_balance, 0),
-
-    thisMonthIncome,
-    thisMonthExpense,
-    net: monthNet,
+    accountName: currentAccount.name || "-",
+    currentBalance: currentAccount.current_balance ?? 0,
+    thisMonthIncome:
+      typeof overviewFromAction?.thisMonthIncome === "number"
+        ? overviewFromAction.thisMonthIncome
+        : thisMonthIncome,
+    thisMonthExpense:
+      typeof overviewFromAction?.thisMonthExpense === "number"
+        ? overviewFromAction.thisMonthExpense
+        : thisMonthExpense,
+    net:
+      typeof overviewFromAction?.net === "number"
+        ? overviewFromAction.net
+        : monthNet,
   };
 
   const monthLabel = latest?.month ? String(latest.month).slice(0, 7) : null;
@@ -164,7 +149,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const cashStatus: CashStatus = {
     selectedAccountId,
     selectedAccountName: currentAccount.name ?? null,
-    currentBalance: toNumber(currentAccount.current_balance, 0),
+    currentBalance: currentAccount.current_balance ?? null,
     monthLabel,
     monthIncome: latest?.income ?? null,
     monthExpense: latest?.expense ?? null,
@@ -186,10 +171,9 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   return (
     <DashboardClient
-      key={String(selectedAccountId)}
       accounts={accounts}
       selectedAccountId={selectedAccountId}
-      monthly={monthlyAsc}
+      monthly={monthly}
       cashStatus={cashStatus}
       alertCards={alertCards}
       overviewPayload={overviewPayload}
