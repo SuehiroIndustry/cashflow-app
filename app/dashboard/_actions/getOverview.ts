@@ -15,16 +15,13 @@ function addMonths(d: Date, n: number) {
   return x;
 }
 
-function normalizeKind(v: unknown): string {
-  return String(v ?? "").trim().toLowerCase();
+function isIncome(v: unknown) {
+  const s = String(v ?? "");
+  return s === "in" || s === "income" || s === "収入";
 }
-
-function isIncome(kind: string) {
-  return kind === "in" || kind === "income" || kind === "収入";
-}
-
-function isExpense(kind: string) {
-  return kind === "out" || kind === "expense" || kind === "支出";
+function isExpense(v: unknown) {
+  const s = String(v ?? "");
+  return s === "out" || s === "expense" || s === "支出";
 }
 
 export async function getOverview(input: Input): Promise<OverviewPayload> {
@@ -40,7 +37,7 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   const from = monthStart.toISOString().slice(0, 10);
   const toExclusive = nextMonth.toISOString().slice(0, 10);
 
-  // 現在残高（口座 or 全口座）
+  // 口座名・残高
   let accountName = "全口座";
   let currentBalance = 0;
 
@@ -49,7 +46,6 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
       .from("cash_accounts")
       .select("current_balance");
     if (error) throw error;
-
     currentBalance = (data ?? []).reduce(
       (sum: number, r: any) => sum + Number(r.current_balance ?? 0),
       0
@@ -66,11 +62,10 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     currentBalance = Number(data?.current_balance ?? 0);
   }
 
-  // ✅ 今月の in/out
-  // 重要：存在する列だけ select する（type はスクショで存在）
+  // 今月の in/out（type/section どっちで入ってても拾う）
   let q = supabase
     .from("cash_flows")
-    .select("amount, type")
+    .select("type, section, amount")
     .gte("date", from)
     .lt("date", toExclusive);
 
@@ -83,11 +78,12 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   let thisMonthExpense = 0;
 
   for (const r of flows ?? []) {
-    const kind = normalizeKind((r as any).type); // ← type だけを見る
+    const t = (r as any).type;
+    const s = (r as any).section;
     const amount = Number((r as any).amount ?? 0);
 
-    if (isIncome(kind)) thisMonthIncome += amount;
-    if (isExpense(kind)) thisMonthExpense += amount;
+    if (isIncome(s) || isIncome(t)) thisMonthIncome += amount;
+    if (isExpense(s) || isExpense(t)) thisMonthExpense += amount;
   }
 
   const net = thisMonthIncome - thisMonthExpense;
