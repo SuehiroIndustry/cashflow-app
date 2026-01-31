@@ -25,14 +25,13 @@ type Props = {
   children?: React.ReactNode;
 };
 
-// ✅ ここだけ、君の実ルートに合わせて必要なら変えて
-const SIMULATION_PATH = "/simulation"; // もし /cash/simulation 等ならここを変更
+// ✅ 必要なら君の実ルートに合わせて変更
+const SIMULATION_PATH = "/simulation";
 const RAKUTEN_IMPORT_PATH = "/cash/import/rakuten";
 
 function formatJST(iso: string) {
   try {
-    const d = new Date(iso);
-    return d.toLocaleString("ja-JP");
+    return new Date(iso).toLocaleString("ja-JP");
   } catch {
     return iso;
   }
@@ -48,6 +47,15 @@ export default function DashboardClient({
 }: Props) {
   const router = useRouter();
 
+  const selectedAccount = useMemo(() => {
+    if (selectedAccountId == null) return null;
+    return accounts.find((a) => a.id === selectedAccountId) ?? null;
+  }, [accounts, selectedAccountId]);
+
+  const selectedIdMissing = useMemo(() => {
+    return selectedAccountId != null && !selectedAccount;
+  }, [selectedAccountId, selectedAccount]);
+
   const onChangeAccount = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const v = e.target.value;
@@ -58,41 +66,21 @@ export default function DashboardClient({
     [router]
   );
 
-  // ✅ “楽天” を含む口座を探す（なければ null）
-  const rakutenAccountId = useMemo(() => {
-    const hit = accounts.find((a) => a.name?.includes("楽天"));
-    return hit?.id ?? null;
-  }, [accounts]);
-
-  const goRakutenAccount = useCallback(() => {
-    if (rakutenAccountId == null) {
-      // 口座一覧に楽天がいない＝ getAccounts() 側の問題
-      alert("口座一覧に「楽天」を含む口座が見つからない。getAccounts() の取得条件を確認しよう。");
-      return;
-    }
-    router.push(`/dashboard?cashAccountId=${rakutenAccountId}`);
-  }, [rakutenAccountId, router]);
-
-  // OverviewCard 用 payload（君が貼ってくれた OverviewCard.tsx に合わせる）
+  // OverviewCard 用 payload（君の OverviewCard.tsx に合わせる）
   const overviewPayload: OverviewPayload | null = useMemo(() => {
-    const account =
-      selectedAccountId != null
-        ? accounts.find((a) => a.id === selectedAccountId) ?? null
-        : null;
-
     const latest = monthly.length ? monthly[monthly.length - 1] : null;
     const income = latest?.income ?? 0;
     const expense = latest?.expense ?? 0;
 
     return {
       cashAccountId: selectedAccountId ?? undefined,
-      accountName: account?.name ?? "全口座",
-      currentBalance: account?.current_balance ?? 0,
+      accountName: selectedAccount?.name ?? (selectedAccountId != null ? `不明(ID=${selectedAccountId})` : "全口座"),
+      currentBalance: selectedAccount?.current_balance ?? 0,
       thisMonthIncome: income,
       thisMonthExpense: expense,
       net: income - expense,
     };
-  }, [accounts, selectedAccountId, monthly]);
+  }, [monthly, selectedAccount, selectedAccountId]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -104,7 +92,6 @@ export default function DashboardClient({
         </div>
 
         <div className="flex items-center gap-3">
-          {/* ✅ Simulation へ */}
           <button
             type="button"
             className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
@@ -113,16 +100,6 @@ export default function DashboardClient({
             Simulation
           </button>
 
-          {/* ✅ 楽天銀行の口座へ一発切替 */}
-          <button
-            type="button"
-            className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
-            onClick={goRakutenAccount}
-          >
-            楽天銀行へ
-          </button>
-
-          {/* ✅ 楽天CSVインポート */}
           <button
             type="button"
             className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
@@ -143,6 +120,13 @@ export default function DashboardClient({
             onChange={onChangeAccount}
             className="bg-black text-white border border-white/20 rounded-md px-2 py-1 text-sm"
           >
+            {/* ✅ URLで指定されたIDが accounts に無い場合、先頭に “不明ID” を出して原因を可視化 */}
+            {selectedIdMissing && selectedAccountId != null && (
+              <option value={selectedAccountId}>
+                {`不明な口座 (ID=${selectedAccountId})`}
+              </option>
+            )}
+
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
@@ -150,13 +134,25 @@ export default function DashboardClient({
             ))}
           </select>
 
-          {/* 口座が無い時のヒント */}
           {accounts.length === 0 && (
             <div className="text-sm text-red-300">
-              口座が0件。getAccounts() の取得条件 or DBを確認。
+              口座が0件。getAccounts() / RLS / データを確認。
             </div>
           )}
         </div>
+
+        {/* ✅ ここが今回の本質。URL指定IDが見つからないなら “取得が落ちてる” */}
+        {selectedIdMissing && (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm">
+            <div className="font-semibold text-red-200">
+              指定した口座IDが「口座一覧」に存在しません
+            </div>
+            <div className="mt-1 opacity-90">
+              URLの cashAccountId={selectedAccountId} は来ていますが、accounts にそのIDが無いので表示できません。
+              これはUIではなく、口座取得（getAccounts）かRLS、またはDBに楽天口座が無いのが原因です。
+            </div>
+          </div>
+        )}
 
         {/* Alerts */}
         {alertCards.length > 0 && (
