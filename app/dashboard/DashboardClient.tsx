@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
@@ -20,180 +19,125 @@ type Props = {
   accounts: AccountRow[];
   selectedAccountId: number | null;
   monthly: MonthlyBalanceRow[];
-  cashStatus: CashStatus;
+  cashStatus: CashStatus | null;
   alertCards: AlertCard[];
   children?: React.ReactNode;
 };
 
-function formatJPY(n: number | null | undefined) {
-  if (typeof n !== "number" || !Number.isFinite(n)) return "-";
-  return new Intl.NumberFormat("ja-JP").format(Math.round(n)) + " 円";
-}
-
-function severityStyle(sev: AlertCard["severity"]) {
-  if (sev === "critical") return "border-red-800 bg-red-950 text-red-100";
-  if (sev === "warning") return "border-yellow-800 bg-yellow-950 text-yellow-100";
-  return "border-neutral-700 bg-neutral-900 text-neutral-100";
-}
-
-function statusHeadline(cs: CashStatus): string {
-  const bal = cs.currentBalance;
-  const net = cs.monthNet;
-
-  if (typeof bal === "number" && bal <= 300_000) return "残高が危険水域です";
-  if (typeof net === "number" && net < 0) return "今月の収支がマイナスです";
-
-  if (cs.selectedAccountName) return `${cs.selectedAccountName} の状況`;
-  return "状況を確認中";
-}
-
-function statusBody(cs: CashStatus): string {
-  const parts: string[] = [];
-
-  parts.push(`口座：${cs.selectedAccountName ?? "—"}`);
-  parts.push(`現在残高：${formatJPY(cs.currentBalance)}`);
-
-  if (cs.monthLabel) {
-    parts.push(
-      `${cs.monthLabel}：収入 ${formatJPY(cs.monthIncome)} / 支出 ${formatJPY(
-        cs.monthExpense
-      )} / 差額 ${formatJPY(cs.monthNet)}`
-    );
-  } else {
-    parts.push("月次：—");
-  }
-
-  return parts.join("　|　");
-}
-
-export default function DashboardClient({
-  accounts,
-  selectedAccountId,
-  monthly,
-  cashStatus,
-  alertCards,
-  children,
-}: Props) {
-  const router = useRouter();
+export default function DashboardClient(props: Props) {
+  const { accounts, selectedAccountId, monthly, cashStatus, alertCards, children } = props;
 
   const selectedAccount = useMemo(() => {
     if (!selectedAccountId) return null;
     return accounts.find((a) => a.id === selectedAccountId) ?? null;
   }, [accounts, selectedAccountId]);
 
-  const overviewPayload: OverviewPayload | null = useMemo(() => {
-    const latestMonth =
-      monthly && monthly.length > 0 ? monthly[monthly.length - 1] : null;
+  const latestMonth = useMemo(() => {
+    if (!monthly.length) return null;
+    return monthly[monthly.length - 1];
+  }, [monthly]);
+
+  const overviewPayload: OverviewPayload = useMemo(() => {
+    const accountName =
+      selectedAccount?.name ??
+      cashStatus?.selectedAccountName ??
+      (selectedAccountId ? "選択中口座" : "全口座");
+
+    const currentBalance =
+      typeof cashStatus?.currentBalance === "number"
+        ? cashStatus.currentBalance
+        : typeof selectedAccount?.current_balance === "number"
+          ? selectedAccount.current_balance
+          : 0;
+
+    const thisMonthIncome =
+      typeof cashStatus?.monthIncome === "number"
+        ? cashStatus.monthIncome
+        : typeof latestMonth?.income === "number"
+          ? latestMonth.income
+          : 0;
+
+    const thisMonthExpense =
+      typeof cashStatus?.monthExpense === "number"
+        ? cashStatus.monthExpense
+        : typeof latestMonth?.expense === "number"
+          ? latestMonth.expense
+          : 0;
+
+    const net =
+      typeof cashStatus?.monthNet === "number"
+        ? cashStatus.monthNet
+        : thisMonthIncome - thisMonthExpense;
 
     return {
       cashAccountId: selectedAccountId ?? undefined,
-      accountName: selectedAccount?.name ?? "—",
-      currentBalance:
-        typeof selectedAccount?.current_balance === "number"
-          ? selectedAccount.current_balance
-          : 0,
-      thisMonthIncome: latestMonth?.income ?? 0,
-      thisMonthExpense: latestMonth?.expense ?? 0,
-      net: (latestMonth?.income ?? 0) - (latestMonth?.expense ?? 0),
+      accountName,
+      currentBalance,
+      thisMonthIncome,
+      thisMonthExpense,
+      net,
     };
-  }, [monthly, selectedAccount, selectedAccountId]);
-
-  const onLogout = useCallback(async () => {
-    try {
-      await fetch("/auth/signout", { method: "POST" });
-    } catch {
-      // 失敗しても詰まらせない
-    }
-    router.refresh();
-    router.push("/login");
-  }, [router]);
+  }, [selectedAccount, selectedAccountId, cashStatus, latestMonth]);
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* ===== Header ===== */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-        <div className="text-lg font-semibold">Cashflow Dashboard</div>
-
-        <button
-          type="button"
-          onClick={onLogout}
-          className="rounded-md border border-white/20 bg-white/5 px-3 py-1.5 text-sm hover:bg-white/10"
-        >
-          Logout
-        </button>
-      </div>
-
-      <div className="px-6 py-6 space-y-6">
-        {/* ===== ステータス（CashStatusから表示） ===== */}
-        <div className="rounded-lg border border-white/10 bg-white text-black p-4">
-          <div className="font-semibold">{statusHeadline(cashStatus)}</div>
-          <div className="text-sm mt-1">{statusBody(cashStatus)}</div>
-          <div className="text-xs mt-2 text-black/60">
-            updated: {cashStatus.updatedAtISO}
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xl font-semibold">Dashboard</div>
+          <div className="text-sm opacity-70">
+            更新: {cashStatus?.updatedAtISO ? new Date(cashStatus.updatedAtISO).toLocaleString("ja-JP") : "-"}
           </div>
         </div>
 
-        {/* ===== データ取り込み（リンク集） ===== */}
-        <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-          <div className="font-semibold">データ取り込み</div>
-
-          <ul className="mt-2 text-sm space-y-2">
-            <li className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-white">楽天銀行 明細CSV</div>
-                <div className="text-white/60 text-xs">
-                  週1回、楽天銀行からCSVを手動ダウンロードしてアップロード
-                </div>
-              </div>
-              <Link
-                href="/cash/import/rakuten"
-                className="inline-flex h-9 items-center justify-center rounded-md border border-white/20 bg-white/5 px-3 text-sm text-white hover:bg-white/10"
-              >
-                アップロードへ
-              </Link>
-            </li>
-          </ul>
+        {/* ✅ 追加したいリンク：楽天CSVアップロード */}
+        <div className="flex gap-2">
+          <Link
+            href="/cash/import/rakuten"
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+          >
+            楽天CSVアップロード
+          </Link>
         </div>
+      </div>
 
-        {/* ===== アラート ===== */}
-        {alertCards?.length > 0 ? (
-          <div className="space-y-3">
-            {alertCards.map((a, idx) => (
-              <div
-                key={`${a.severity}-${idx}`}
-                className={`rounded-lg border p-4 ${severityStyle(a.severity)}`}
-              >
-                <div className="font-semibold">{a.title}</div>
-                <div className="text-sm mt-1 text-white/90">{a.description}</div>
+      {/* Alerts */}
+      {alertCards?.length ? (
+        <div className="space-y-2">
+          {alertCards.map((a, idx) => (
+            <div
+              key={`${a.title}-${idx}`}
+              className="rounded-xl border p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold">{a.title}</div>
+                  <div className="text-sm opacity-80 mt-1">{a.description}</div>
+                </div>
 
-                {/* ※「シミュレーションへ飛ばさない」運用なら、ここは出さない（今は残してあるだけ） */}
                 {a.href && a.actionLabel ? (
-                  <div className="mt-3">
-                    <Link
-                      href={a.href}
-                      className="inline-flex h-9 items-center justify-center rounded-md border border-white/20 bg-white/5 px-3 text-sm text-white hover:bg-white/10"
-                    >
-                      {a.actionLabel}
-                    </Link>
-                  </div>
+                  <Link
+                    href={a.href}
+                    className="shrink-0 rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+                  >
+                    {a.actionLabel}
+                  </Link>
                 ) : null}
               </div>
-            ))}
-          </div>
-        ) : null}
-
-        {/* ===== Dashboard 本体 ===== */}
-        <div className="grid gap-4 md:grid-cols-3">
-  <OverviewCard payload={overviewPayload} />
-  <BalanceCard rows={monthly} />
-  <EcoCharts rows={monthly} />
-</div>
-          - <EcoCharts />
-+ <EcoCharts rows={monthly} />
+            </div>
+          ))}
         </div>
+      ) : null}
 
-        {children}
+      {/* Main cards */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <OverviewCard payload={overviewPayload} />
+        <BalanceCard rows={monthly} />
+        <EcoCharts rows={monthly} />
       </div>
+
+      {/* extra */}
+      {children ? <div>{children}</div> : null}
     </div>
   );
 }
