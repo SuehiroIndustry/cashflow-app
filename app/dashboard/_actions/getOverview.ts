@@ -49,6 +49,7 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
       .from("cash_accounts")
       .select("current_balance");
     if (error) throw error;
+
     currentBalance = (data ?? []).reduce(
       (sum: number, r: any) => sum + Number(r.current_balance ?? 0),
       0
@@ -65,11 +66,11 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     currentBalance = Number(data?.current_balance ?? 0);
   }
 
-  // ✅ 今月の in/out（section / type 両対応）
-  // ※ cash_flows の実体が type カラムでも動く
+  // ✅ 今月の in/out
+  // 重要：存在する列だけ select する（type はスクショで存在）
   let q = supabase
     .from("cash_flows")
-    .select("amount, section, type, kind")
+    .select("amount, type")
     .gte("date", from)
     .lt("date", toExclusive);
 
@@ -82,17 +83,11 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   let thisMonthExpense = 0;
 
   for (const r of flows ?? []) {
-    const rawKind =
-      (r as any).section ?? (r as any).type ?? (r as any).kind ?? "";
-    const kind = normalizeKind(rawKind);
-
-    // 日本語は lowerCase で壊れるので原文も見る
-    const kindRaw = String(rawKind ?? "").trim();
-
+    const kind = normalizeKind((r as any).type); // ← type だけを見る
     const amount = Number((r as any).amount ?? 0);
 
-    if (isIncome(kind) || isIncome(kindRaw)) thisMonthIncome += amount;
-    if (isExpense(kind) || isExpense(kindRaw)) thisMonthExpense += amount;
+    if (isIncome(kind)) thisMonthIncome += amount;
+    if (isExpense(kind)) thisMonthExpense += amount;
   }
 
   const net = thisMonthIncome - thisMonthExpense;
