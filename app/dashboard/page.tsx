@@ -1,5 +1,6 @@
 // app/dashboard/page.tsx
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
@@ -16,14 +17,19 @@ import type {
 } from "./_types";
 
 type Props = {
-  searchParams?: {
-    cashAccountId?: string;
-  };
+  searchParams?: Record<string, string | string[] | undefined>;
 };
 
+function firstString(v: unknown): string | null {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && typeof v[0] === "string") return v[0];
+  return null;
+}
+
 function toInt(v: unknown): number | null {
-  if (typeof v !== "string") return null;
-  const n = Number(v);
+  const s = firstString(v);
+  if (s == null) return null;
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -45,7 +51,7 @@ function monthStartISO(d = new Date()): string {
 export default async function DashboardPage({ searchParams }: Props) {
   const rawAccounts = await getAccounts();
 
-  // ✅ numeric が string で返ってきても必ず number にする
+  // ✅ numeric が string でも必ず number にする
   const accounts: AccountRow[] = (rawAccounts ?? []).map((a: any) => ({
     id: Number(a.id),
     name: String(a.name ?? ""),
@@ -96,8 +102,10 @@ export default async function DashboardPage({ searchParams }: Props) {
     );
   }
 
-  // URL の cashAccountId を唯一の基準にする（なければ先頭）
+  // ✅ searchParams の型揺れ（string|string[]）を確実に拾う
   const requestedId = toInt(searchParams?.cashAccountId);
+
+  // URL の cashAccountId を唯一の基準にする（なければ先頭）
   const selectedAccountId =
     requestedId != null && accounts.some((a) => a.id === requestedId)
       ? requestedId
@@ -114,32 +122,31 @@ export default async function DashboardPage({ searchParams }: Props) {
 
   // ✅ monthly も numeric/string 混在を正規化
   const monthlyDesc: MonthlyBalanceRow[] = (rawMonthly ?? []).map((r: any) => ({
-    cash_account_id: r.cash_account_id ?? r.cashAccountId ?? selectedAccountId,
+    cash_account_id: Number(r.cash_account_id ?? selectedAccountId),
     month: String(r.month ?? ""),
     income: toNumber(r.income, 0),
     expense: toNumber(r.expense, 0),
     balance: toNumber(r.balance, 0),
   }));
 
-  // monthly は desc で返ってくる想定なので、UI 用に昇順へ
+  // desc → asc
   const monthlyAsc = [...monthlyDesc].reverse();
   const latest = monthlyAsc.length ? monthlyAsc[monthlyAsc.length - 1] : null;
 
-  // getOverview は month 必須
   const monthForOverview = latest?.month ?? monthStartISO();
 
+  // getOverview（month必須）
   const overviewFromAction = await getOverview({
     cashAccountId: selectedAccountId,
     month: monthForOverview,
   });
 
-  // ✅ “正”は月次（ズレ防止）
+  // ✅ “正”は月次
   const thisMonthIncome = latest?.income ?? 0;
   const thisMonthExpense = latest?.expense ?? 0;
   const monthNet = thisMonthIncome - thisMonthExpense;
 
   // ✅ Overview は「選択口座の口座名/残高」を絶対正として上書き
-  // ✅ ついでに number も正規化
   const overviewPayload: OverviewPayload = {
     ...(overviewFromAction ?? {}),
     cashAccountId: selectedAccountId,
@@ -147,7 +154,6 @@ export default async function DashboardPage({ searchParams }: Props) {
     accountName: currentAccount.name ?? "-",
     currentBalance: toNumber(currentAccount.current_balance, 0),
 
-    // ここは「月次」を正にする（楽天メール→月次直書き運用と整合）
     thisMonthIncome,
     thisMonthExpense,
     net: monthNet,
