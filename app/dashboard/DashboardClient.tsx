@@ -25,7 +25,7 @@ type Props = {
   children?: React.ReactNode;
 };
 
-// ✅ 必要なら君の実ルートに合わせて変更
+// ルートは実プロジェクトに合わせてOK
 const SIMULATION_PATH = "/simulation";
 const RAKUTEN_IMPORT_PATH = "/cash/import/rakuten";
 
@@ -56,17 +56,24 @@ export default function DashboardClient({
     return selectedAccountId != null && !selectedAccount;
   }, [selectedAccountId, selectedAccount]);
 
+  /**
+   * ✅ ここが今回の肝
+   * - select の value は「文字列」で統一
+   * - option の value も「文字列」で統一
+   */
+  const selectedAccountIdStr = selectedAccountId == null ? "" : String(selectedAccountId);
+
   const onChangeAccount = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const v = e.target.value;
-      const id = v ? Number(v) : NaN;
+      const v = e.target.value; // 文字列
+      const id = Number(v);
       if (!Number.isFinite(id)) return;
       router.push(`/dashboard?cashAccountId=${id}`);
     },
     [router]
   );
 
-  // OverviewCard 用 payload（君の OverviewCard.tsx に合わせる）
+  // OverviewCard 用 payload（君の OverviewCard.tsx の Props に合わせる）
   const overviewPayload: OverviewPayload | null = useMemo(() => {
     const latest = monthly.length ? monthly[monthly.length - 1] : null;
     const income = latest?.income ?? 0;
@@ -74,7 +81,9 @@ export default function DashboardClient({
 
     return {
       cashAccountId: selectedAccountId ?? undefined,
-      accountName: selectedAccount?.name ?? (selectedAccountId != null ? `不明(ID=${selectedAccountId})` : "全口座"),
+      accountName:
+        selectedAccount?.name ??
+        (selectedAccountId != null ? `不明(ID=${selectedAccountId})` : "全口座"),
       currentBalance: selectedAccount?.current_balance ?? 0,
       thisMonthIncome: income,
       thisMonthExpense: expense,
@@ -116,19 +125,19 @@ export default function DashboardClient({
           <div className="text-sm opacity-80">口座:</div>
 
           <select
-            value={selectedAccountId ?? ""}
+            value={selectedAccountIdStr} // ✅ string
             onChange={onChangeAccount}
             className="bg-black text-white border border-white/20 rounded-md px-2 py-1 text-sm"
           >
-            {/* ✅ URLで指定されたIDが accounts に無い場合、先頭に “不明ID” を出して原因を可視化 */}
+            {/* ✅ URLで指定されたIDが accounts に無い場合は、先頭に「不明ID」を出して可視化 */}
             {selectedIdMissing && selectedAccountId != null && (
-              <option value={selectedAccountId}>
+              <option value={String(selectedAccountId)}>
                 {`不明な口座 (ID=${selectedAccountId})`}
               </option>
             )}
 
             {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
+              <option key={a.id} value={String(a.id)}>
                 {a.name}
               </option>
             ))}
@@ -141,15 +150,14 @@ export default function DashboardClient({
           )}
         </div>
 
-        {/* ✅ ここが今回の本質。URL指定IDが見つからないなら “取得が落ちてる” */}
         {selectedIdMissing && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm">
             <div className="font-semibold text-red-200">
               指定した口座IDが「口座一覧」に存在しません
             </div>
             <div className="mt-1 opacity-90">
-              URLの cashAccountId={selectedAccountId} は来ていますが、accounts にそのIDが無いので表示できません。
-              これはUIではなく、口座取得（getAccounts）かRLS、またはDBに楽天口座が無いのが原因です。
+              URLの cashAccountId={selectedAccountId} は来ていますが、accounts にそのIDが無いので表示名を出せません。
+              これはUIではなく、口座取得（getAccounts）かRLS、またはDBに口座が無いのが原因です。
             </div>
           </div>
         )}
