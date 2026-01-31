@@ -8,7 +8,13 @@ import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-import type { AccountRow, MonthlyBalanceRow, CashStatus, AlertCard, OverviewPayload } from "./_types";
+import type {
+  AccountRow,
+  MonthlyBalanceRow,
+  CashStatus,
+  AlertCard,
+  OverviewPayload,
+} from "./_types";
 
 type Props = {
   accounts: AccountRow[];
@@ -25,17 +31,16 @@ export default function DashboardClient(props: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  // ✅ 内部選択状態（即時UI反映用）
-  //    propsが変わったら追従させる（ここがないと「URL変わったのに画面が固まる」系が起きる）
-  const [localSelectedId, setLocalSelectedId] = useState<string>(() => {
-    return selectedAccountId != null ? String(selectedAccountId) : "";
-  });
+  // ✅ セレクトは string で統一（React地雷回避）
+  const [localSelectedId, setLocalSelectedId] = useState<string>(() =>
+    selectedAccountId != null ? String(selectedAccountId) : ""
+  );
 
+  // ✅ props が変わったら追従（これがないと「URLは変わったのに表示が固まる」）
   useEffect(() => {
     setLocalSelectedId(selectedAccountId != null ? String(selectedAccountId) : "");
   }, [selectedAccountId]);
 
-  // 表示名（「表示中: 〜」）
   const selectedLabel = useMemo(() => {
     const idNum = Number(localSelectedId);
     const a = accounts.find((x) => x.id === idNum);
@@ -43,36 +48,76 @@ export default function DashboardClient(props: Props) {
   }, [accounts, localSelectedId]);
 
   function handleAccountChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const nextIdStr = e.target.value; // ✅ 次のID（これが正）
-    setLocalSelectedId(nextIdStr);     // ✅ まずUIを即時更新
+    const nextIdStr = e.target.value;
+    setLocalSelectedId(nextIdStr);
 
     startTransition(() => {
       router.push(`/dashboard?cashAccountId=${encodeURIComponent(nextIdStr)}`);
-      // router.refresh(); は基本不要。もし環境依存で固まるなら最後の手段で足す。
+      // ✅ これが本丸：searchParams 切替でも必ず Server 側を再取得させる
+      router.refresh();
     });
   }
 
+  const selectedAccountIdForLinks =
+    localSelectedId && String(localSelectedId).trim() !== "" ? localSelectedId : "";
+
   return (
     <div className="w-full">
-      {/* 口座セレクタ */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="text-sm opacity-80">口座:</div>
+      {/* 上部アクション（元に戻す） */}
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="text-sm opacity-80">口座:</div>
+          <select
+            className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white"
+            value={localSelectedId}
+            onChange={handleAccountChange}
+            disabled={isPending || accounts.length === 0}
+          >
+            {accounts.map((a) => (
+              <option key={String(a.id)} value={String(a.id)}>
+                {a.name}
+              </option>
+            ))}
+          </select>
 
-        <select
-          className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white"
-          value={localSelectedId}              // ✅ controlled（必ずstring）
-          onChange={handleAccountChange}       // ✅ nextIdでpush
-          disabled={isPending || accounts.length === 0}
-        >
-          {accounts.map((a) => (
-            <option key={String(a.id)} value={String(a.id)}>
-              {a.name}
-            </option>
-          ))}
-        </select>
+          <div className="text-xs opacity-70">
+            表示中: {isPending ? "切替中..." : selectedLabel}
+          </div>
+        </div>
 
-        <div className="text-xs opacity-70">
-          表示中: {isPending ? "切替中..." : selectedLabel}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              startTransition(() => {
+                router.push(
+                  selectedAccountIdForLinks
+                    ? `/simulation?cashAccountId=${encodeURIComponent(selectedAccountIdForLinks)}`
+                    : "/simulation"
+                );
+              })
+            }
+            className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white hover:bg-white/10"
+          >
+            Simulation
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              startTransition(() => {
+                // ★ここは元コードの遷移先に合わせて差し替えてOK
+                router.push(
+                  selectedAccountIdForLinks
+                    ? `/import?cashAccountId=${encodeURIComponent(selectedAccountIdForLinks)}`
+                    : "/import"
+                );
+              })
+            }
+            className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white hover:bg-white/10"
+          >
+            楽天銀行・明細インポート
+          </button>
         </div>
       </div>
 
@@ -100,8 +145,8 @@ export default function DashboardClient(props: Props) {
         </div>
       )}
 
-      {/* 本体（既存の構成を維持） */}
-      <div className="grid gap-4 md:grid-cols-3">
+      {/* ✅ 口座切替で「中身も確実に差し替わる」ための remount キー（Client側） */}
+      <div className="grid gap-4 md:grid-cols-3" key={`grid-${selectedAccountId ?? "none"}`}>
         <OverviewCard payload={overviewPayload} />
         <BalanceCard rows={monthly} />
         <EcoCharts rows={monthly} />

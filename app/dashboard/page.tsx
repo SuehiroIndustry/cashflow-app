@@ -80,15 +80,16 @@ export default async function DashboardPage({ searchParams }: Props) {
     const monthly: MonthlyBalanceRow[] = [];
 
     return (
-      <DashboardClient
-        accounts={accounts}
-        selectedAccountId={null}
-        monthly={monthly}
-        cashStatus={cashStatus}
-        alertCards={alertCards}
-        overviewPayload={overviewPayload}
-      />
-    );
+  <DashboardClient
+    key={`dash-${selectedAccountId}`}   // ✅ これ
+    accounts={accounts}
+    selectedAccountId={selectedAccountId}
+    monthly={monthly}
+    cashStatus={cashStatus}
+    alertCards={alertCards}
+    overviewPayload={overviewPayload}
+  />
+);
   }
 
   const requestedId = toInt(searchParams?.cashAccountId);
