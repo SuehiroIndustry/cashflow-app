@@ -1,143 +1,151 @@
+// app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useMemo } from "react";
-import Link from "next/link";
+import React, { useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-import type {
-  AccountRow,
-  MonthlyBalanceRow,
-  CashStatus,
-  AlertCard,
-  OverviewPayload,
-} from "./_types";
+import type { AccountRow, MonthlyBalanceRow, CashStatus, AlertCard, OverviewPayload } from "./_types";
 
 type Props = {
   accounts: AccountRow[];
   selectedAccountId: number | null;
   monthly: MonthlyBalanceRow[];
-  cashStatus: CashStatus | null;
+  cashStatus: CashStatus;
   alertCards: AlertCard[];
   children?: React.ReactNode;
 };
 
-export default function DashboardClient(props: Props) {
-  const { accounts, selectedAccountId, monthly, cashStatus, alertCards, children } = props;
+function formatJST(iso: string) {
+  // 雑に見やすく（ISO → 表示）
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString("ja-JP");
+  } catch {
+    return iso;
+  }
+}
 
-  const selectedAccount = useMemo(() => {
-    if (!selectedAccountId) return null;
-    return accounts.find((a) => a.id === selectedAccountId) ?? null;
-  }, [accounts, selectedAccountId]);
+export default function DashboardClient({
+  accounts,
+  selectedAccountId,
+  monthly,
+  cashStatus,
+  alertCards,
+  children,
+}: Props) {
+  const router = useRouter();
 
-  const latestMonth = useMemo(() => {
-    if (!monthly.length) return null;
-    return monthly[monthly.length - 1];
-  }, [monthly]);
+  const onChangeAccount = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const v = e.target.value;
+      const id = v ? Number(v) : NaN;
+      if (!Number.isFinite(id)) return;
+      router.push(`/dashboard?cashAccountId=${id}`);
+    },
+    [router]
+  );
 
-  const overviewPayload: OverviewPayload = useMemo(() => {
-    const accountName =
-      selectedAccount?.name ??
-      cashStatus?.selectedAccountName ??
-      (selectedAccountId ? "選択中口座" : "全口座");
+  // OverviewCard 用 payload を、君の OverviewCard.tsx の型に合わせて作る
+  const overviewPayload: OverviewPayload | null = useMemo(() => {
+    const account =
+      selectedAccountId != null
+        ? accounts.find((a) => a.id === selectedAccountId) ?? null
+        : null;
 
-    const currentBalance =
-      typeof cashStatus?.currentBalance === "number"
-        ? cashStatus.currentBalance
-        : typeof selectedAccount?.current_balance === "number"
-          ? selectedAccount.current_balance
-          : 0;
+    const latest = monthly.length ? monthly[monthly.length - 1] : null;
 
-    const thisMonthIncome =
-      typeof cashStatus?.monthIncome === "number"
-        ? cashStatus.monthIncome
-        : typeof latestMonth?.income === "number"
-          ? latestMonth.income
-          : 0;
-
-    const thisMonthExpense =
-      typeof cashStatus?.monthExpense === "number"
-        ? cashStatus.monthExpense
-        : typeof latestMonth?.expense === "number"
-          ? latestMonth.expense
-          : 0;
-
-    const net =
-      typeof cashStatus?.monthNet === "number"
-        ? cashStatus.monthNet
-        : thisMonthIncome - thisMonthExpense;
+    const income = latest?.income ?? 0;
+    const expense = latest?.expense ?? 0;
 
     return {
       cashAccountId: selectedAccountId ?? undefined,
-      accountName,
-      currentBalance,
-      thisMonthIncome,
-      thisMonthExpense,
-      net,
+      accountName: account?.name ?? "全口座",
+      currentBalance: account?.current_balance ?? 0,
+      thisMonthIncome: income,
+      thisMonthExpense: expense,
+      net: income - expense,
     };
-  }, [selectedAccount, selectedAccountId, cashStatus, latestMonth]);
+  }, [accounts, selectedAccountId, monthly]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+    <div className="min-h-screen bg-black text-white">
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div>
-          <div className="text-xl font-semibold">Dashboard</div>
-          <div className="text-sm opacity-70">
-            更新: {cashStatus?.updatedAtISO ? new Date(cashStatus.updatedAtISO).toLocaleString("ja-JP") : "-"}
+          <div className="text-xl font-semibold">Cashflow Dashboard</div>
+          <div className="text-xs opacity-70">
+            更新: {formatJST(cashStatus.updatedAtISO)}
           </div>
         </div>
 
-        {/* ✅ 追加したいリンク：楽天CSVアップロード */}
-        <div className="flex gap-2">
-          <Link
-            href="/cash/import/rakuten"
-            className="rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+        <div className="flex items-center gap-3">
+          {/* 右上：楽天CSVアップロード → 文言変更 */}
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
+            onClick={() => router.push("/cash/import/rakuten")}
           >
-            楽天CSVアップロード
-          </Link>
+            楽天銀行・明細インポート
+          </button>
         </div>
       </div>
 
-      {/* Alerts */}
-      {alertCards?.length ? (
-        <div className="space-y-2">
-          {alertCards.map((a, idx) => (
-            <div
-              key={`${a.title}-${idx}`}
-              className="rounded-xl border p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-semibold">{a.title}</div>
-                  <div className="text-sm opacity-80 mt-1">{a.description}</div>
-                </div>
+      <div className="px-6 py-6 space-y-4">
+        {/* Account selector (必要なら使う。邪魔なら後で消せる) */}
+        <div className="flex items-center gap-3">
+          <div className="text-sm opacity-80">口座:</div>
+          <select
+            value={selectedAccountId ?? ""}
+            onChange={onChangeAccount}
+            className="bg-black text-white border border-white/20 rounded-md px-2 py-1 text-sm"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-                {a.href && a.actionLabel ? (
-                  <Link
-                    href={a.href}
-                    className="shrink-0 rounded-lg border px-3 py-2 text-sm hover:bg-black/5"
+        {/* ✅ 上のデカい「楽天銀行の明細CSV」箱は削除：ここには置かない */}
+
+        {/* Alerts */}
+        {alertCards.length > 0 && (
+          <div className="space-y-2">
+            {alertCards.map((a, idx) => (
+              <div
+                key={idx}
+                className="rounded-lg border border-white/10 bg-white text-black p-4"
+              >
+                <div className="font-semibold">{a.title}</div>
+                <div className="text-sm mt-1">{a.description}</div>
+                {a.href && a.actionLabel && (
+                  <button
+                    type="button"
+                    className="mt-3 text-sm underline"
+                    onClick={() => router.push(a.href!)}
                   >
                     {a.actionLabel}
-                  </Link>
-                ) : null}
+                  </button>
+                )}
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        )}
+
+        {/* Main cards */}
+        <div className="grid gap-4 md:grid-cols-3">
+          <OverviewCard payload={overviewPayload} />
+          <BalanceCard rows={monthly} />
+          <EcoCharts rows={monthly} />
         </div>
-      ) : null}
 
-      {/* Main cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <OverviewCard payload={overviewPayload} />
-        <BalanceCard rows={monthly} />
-        <EcoCharts rows={monthly} />
+        {children}
       </div>
-
-      {/* extra */}
-      {children ? <div>{children}</div> : null}
     </div>
   );
 }
