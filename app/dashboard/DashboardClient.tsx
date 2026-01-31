@@ -1,34 +1,33 @@
 // app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import React, { useCallback, useMemo, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-import type { AccountRow, MonthlyBalanceRow, CashStatus, AlertCard, OverviewPayload } from "./_types";
+import type {
+  AccountRow,
+  MonthlyBalanceRow,
+  CashStatus,
+  AlertCard,
+  OverviewPayload,
+} from "./_types";
 
 type Props = {
   accounts: AccountRow[];
   selectedAccountId: number | null;
   monthly: MonthlyBalanceRow[];
-  cashStatus: CashStatus;
+  cashStatus: CashStatus | null;
   alertCards: AlertCard[];
   overviewPayload: OverviewPayload | null | undefined;
-  children?: React.ReactNode;
 };
 
-function formatUpdated(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString("ja-JP");
-  } catch {
-    return iso;
-  }
+function fmtYen(v: number | null | undefined): string {
+  const n = typeof v === "number" && Number.isFinite(v) ? v : 0;
+  return n.toLocaleString("ja-JP") + " 円";
 }
 
 export default function DashboardClient({
@@ -38,145 +37,117 @@ export default function DashboardClient({
   cashStatus,
   alertCards,
   overviewPayload,
-  children,
 }: Props) {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const [isPending, startTransition] = useTransition();
 
-  const [localSelectedId, setLocalSelectedId] = useState<number | null>(selectedAccountId);
-
-  // props が更新されたら追従（key remount でも保険として）
-  useEffect(() => {
-    setLocalSelectedId(selectedAccountId);
-  }, [selectedAccountId]);
-
-  const currentAccountName = useMemo(() => {
-    const a = accounts.find((x) => x.id === (localSelectedId ?? -1));
-    return a?.name ?? "-";
-  }, [accounts, localSelectedId]);
+  const selected = useMemo(() => {
+    if (selectedAccountId == null) return null;
+    return accounts.find((a) => a.id === selectedAccountId) ?? null;
+  }, [accounts, selectedAccountId]);
 
   const onChangeAccount = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const nextId = Number(e.target.value);
-      if (!Number.isFinite(nextId)) return;
 
-      setLocalSelectedId(nextId);
-
-      // ✅ URL を唯一の真実にする
-      const sp = new URLSearchParams(searchParams?.toString());
-      sp.set("cashAccountId", String(nextId));
-
-      router.push(`/dashboard?${sp.toString()}`);
-      // ✅ server component 再フェッチを確実に
-      router.refresh();
+      startTransition(() => {
+        router.push(`/dashboard?cashAccountId=${nextId}`);
+        // ✅ これが無いと「URLだけ変わって中身が古い」事故が起きやすい
+        router.refresh();
+      });
     },
-    [router, searchParams]
+    [router]
   );
-
-  const banner = useMemo(() => {
-    const bal = cashStatus?.currentBalance ?? 0;
-    if (bal <= 0) {
-      return {
-        title: "残高が危険水域です",
-        message: "現在残高が 0 円以下です。支払い予定があるなら、資金ショートが現実的です。",
-      };
-    }
-    return {
-      title: "状況を確認中",
-      message: "直近の推移を確認してください。",
-    };
-  }, [cashStatus]);
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="max-w-6xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-2xl font-semibold">Cashflow Dashboard</div>
-            <div className="text-xs opacity-70 mt-1">更新: {formatUpdated(cashStatus.updatedAtISO)}</div>
+            <h1 className="text-2xl font-semibold">Cashflow Dashboard</h1>
+            <div className="text-xs text-white/60 mt-1">
+              更新:{" "}
+              {cashStatus?.updatedAtISO
+                ? new Date(cashStatus.updatedAtISO).toLocaleString("ja-JP")
+                : "-"}
+              {isPending ? "（更新中…）" : ""}
+            </div>
           </div>
 
-          {/* Right actions */}
           <div className="flex items-center gap-2">
-            <Link
-              href={`/simulation?cashAccountId=${localSelectedId ?? ""}`}
-              className="rounded-md border border-white/20 bg-black px-3 py-2 text-sm hover:bg-white/10"
+            <button
+              type="button"
+              className="rounded-md border border-white/20 bg-white/5 hover:bg-white/10 px-3 py-2 text-sm"
+              onClick={() => router.push(`/simulation?cashAccountId=${selectedAccountId ?? ""}`)}
             >
               Simulation
-            </Link>
+            </button>
 
-            {/* ✅ 「楽天銀行へ」ボタンは削除。これだけ残す */}
-            <Link
-              href={`/cash/import/rakuten?cashAccountId=${localSelectedId ?? ""}`}
-              className="rounded-md border border-white/20 bg-black px-3 py-2 text-sm hover:bg-white/10"
+            <button
+              type="button"
+              className="rounded-md border border-white/20 bg-white/5 hover:bg-white/10 px-3 py-2 text-sm"
+              onClick={() => router.push(`/cash/import/rakuten`)}
             >
               楽天銀行・明細インポート
-            </Link>
+            </button>
           </div>
         </div>
 
-        {/* Account selector */}
+        {/* Controls */}
         <div className="mt-6 flex items-center gap-3">
-          <div className="text-sm opacity-80">口座:</div>
+          <div className="text-sm text-white/70">口座:</div>
           <select
-            value={localSelectedId ?? ""}
-            onChange={onChangeAccount}
             className="rounded-md border border-white/20 bg-black px-3 py-2 text-sm text-white"
+            value={selectedAccountId ?? ""}
+            onChange={onChangeAccount}
           >
             {accounts.map((a) => (
-              <option key={a.id} value={a.id} className="bg-black text-white">
+              <option key={a.id} value={a.id}>
                 {a.name}
               </option>
             ))}
           </select>
 
-          <div className="text-xs opacity-70">表示中: {currentAccountName}</div>
-        </div>
-
-        {/* Banner */}
-        <div className="mt-6 rounded-lg border border-white/10 bg-white text-black p-4">
-          <div className="font-semibold">{banner.title}</div>
-          <div className="text-sm mt-1">{banner.message}</div>
-        </div>
-
-        {/* Alert cards (optional) */}
-        {!!alertCards?.length && (
-          <div className="mt-4 space-y-2">
-            {alertCards.map((c, idx) => (
-              <div
-                key={`${c.title}-${idx}`}
-                className="rounded-lg border border-white/10 bg-white/5 p-4"
-              >
-                <div className="font-semibold">{c.title}</div>
-                <div className="text-sm opacity-80 mt-1">{c.description}</div>
-                {c.href && (
-                  <div className="mt-3">
-                    <Link
-                      href={c.href}
-                      className="inline-flex rounded-md border border-white/20 bg-black px-3 py-2 text-sm hover:bg-white/10"
-                    >
-                      {c.actionLabel ?? "開く"}
-                    </Link>
-                  </div>
-                )}
-              </div>
-            ))}
+          <div className="text-sm text-white/50">
+            表示中: {selected?.name ?? "-"}
           </div>
-        )}
+        </div>
 
-        {/* Main cards */}
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
-          {/* ✅ OverviewCard は payload 必須（あなたの実装に一致） */}
+        {/* Top Alert (single strong banner) */}
+        {alertCards?.length ? (
+          <div className="mt-6 rounded-lg bg-white text-black p-4">
+            <div className="font-semibold">{alertCards[0].title}</div>
+            <div className="text-sm mt-1">{alertCards[0].description}</div>
+
+            {alertCards[0].href && alertCards[0].actionLabel ? (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  className="rounded-md border border-black/20 bg-black text-white hover:bg-black/80 px-3 py-2 text-sm"
+                  onClick={() => router.push(alertCards[0].href!)}
+                >
+                  {alertCards[0].actionLabel}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Content */}
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
           <OverviewCard payload={overviewPayload} />
 
-          {/* ✅ BalanceCard / EcoCharts は rows 必須（あなたのエラーに一致） */}
+          {/* BalanceCard / EcoCharts は rows 必須 */}
           <BalanceCard rows={monthly} />
           <EcoCharts rows={monthly} />
         </div>
 
-        {/* Slot */}
-        {children ? <div className="mt-6">{children}</div> : null}
+        {/* Debug info (optional) */}
+        <div className="mt-6 text-xs text-white/40">
+          selectedAccountId: {selectedAccountId ?? "null"} / current_balance:{" "}
+          {fmtYen(selected?.current_balance)}
+        </div>
       </div>
     </div>
   );
