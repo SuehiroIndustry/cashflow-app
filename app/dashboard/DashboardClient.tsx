@@ -26,17 +26,24 @@ type Props = {
 };
 
 export default function DashboardClient(props: Props) {
-  const { accounts, selectedAccountId, monthly, cashStatus, alertCards, overviewPayload } = props;
+  const {
+    accounts,
+    selectedAccountId,
+    monthly,
+    cashStatus,
+    alertCards,
+    overviewPayload,
+  } = props;
 
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  // ✅ セレクトは string で統一（React地雷回避）
+  // select は string で統一
   const [localSelectedId, setLocalSelectedId] = useState<string>(() =>
     selectedAccountId != null ? String(selectedAccountId) : ""
   );
 
-  // ✅ props が変わったら追従（これがないと「URLは変わったのに表示が固まる」）
+  // props 追従
   useEffect(() => {
     setLocalSelectedId(selectedAccountId != null ? String(selectedAccountId) : "");
   }, [selectedAccountId]);
@@ -51,11 +58,9 @@ export default function DashboardClient(props: Props) {
     const nextIdStr = e.target.value;
     setLocalSelectedId(nextIdStr);
 
-    startTransition(() => {
-      router.push(`/dashboard?cashAccountId=${encodeURIComponent(nextIdStr)}`);
-      // ✅ これが本丸：searchParams 切替でも必ず Server 側を再取得させる
-      router.refresh();
-    });
+    // ✅ “確実に” サーバー側を再実行させる（これが一番強い）
+    // router.refresh の効きが怪しい環境でも必ず切り替わる
+    window.location.assign(`/dashboard?cashAccountId=${encodeURIComponent(nextIdStr)}`);
   }
 
   const selectedAccountIdForLinks =
@@ -63,10 +68,11 @@ export default function DashboardClient(props: Props) {
 
   return (
     <div className="w-full">
-      {/* 上部アクション（元に戻す） */}
+      {/* 上部 */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="text-sm opacity-80">口座:</div>
+
           <select
             className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white"
             value={localSelectedId}
@@ -106,7 +112,6 @@ export default function DashboardClient(props: Props) {
             type="button"
             onClick={() =>
               startTransition(() => {
-                // ★ここは元コードの遷移先に合わせて差し替えてOK
                 router.push(
                   selectedAccountIdForLinks
                     ? `/import?cashAccountId=${encodeURIComponent(selectedAccountIdForLinks)}`
@@ -127,10 +132,10 @@ export default function DashboardClient(props: Props) {
           {alertCards.map((a, i) => (
             <div
               key={`${a.title}-${i}`}
-              className="rounded border border-white/10 bg-white text-black p-4"
+              className="rounded border border-white/10 bg-white p-4 text-black"
             >
               <div className="font-semibold">{a.title}</div>
-              {a.description && <div className="text-sm mt-1">{a.description}</div>}
+              {a.description && <div className="mt-1 text-sm">{a.description}</div>}
               {a.href && a.actionLabel && (
                 <button
                   type="button"
@@ -145,7 +150,7 @@ export default function DashboardClient(props: Props) {
         </div>
       )}
 
-      {/* ✅ 口座切替で「中身も確実に差し替わる」ための remount キー（Client側） */}
+      {/* 中身 */}
       <div className="grid gap-4 md:grid-cols-3" key={`grid-${selectedAccountId ?? "none"}`}>
         <OverviewCard payload={overviewPayload} />
         <BalanceCard rows={monthly} />

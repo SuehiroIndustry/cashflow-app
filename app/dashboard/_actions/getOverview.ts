@@ -15,11 +15,16 @@ function addMonths(d: Date, n: number) {
   return x;
 }
 
-function isIncome(section: string) {
-  return section === "in" || section === "income" || section === "収入";
+function normalizeKind(v: unknown): string {
+  return String(v ?? "").trim().toLowerCase();
 }
-function isExpense(section: string) {
-  return section === "out" || section === "expense" || section === "支出";
+
+function isIncome(kind: string) {
+  return kind === "in" || kind === "income" || kind === "収入";
+}
+
+function isExpense(kind: string) {
+  return kind === "out" || kind === "expense" || kind === "支出";
 }
 
 export async function getOverview(input: Input): Promise<OverviewPayload> {
@@ -40,9 +45,14 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   let currentBalance = 0;
 
   if (cashAccountId === 0) {
-    const { data, error } = await supabase.from("cash_accounts").select("current_balance");
+    const { data, error } = await supabase
+      .from("cash_accounts")
+      .select("current_balance");
     if (error) throw error;
-    currentBalance = (data ?? []).reduce((sum: number, r: any) => sum + Number(r.current_balance ?? 0), 0);
+    currentBalance = (data ?? []).reduce(
+      (sum: number, r: any) => sum + Number(r.current_balance ?? 0),
+      0
+    );
   } else {
     const { data, error } = await supabase
       .from("cash_accounts")
@@ -55,10 +65,11 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     currentBalance = Number(data?.current_balance ?? 0);
   }
 
-  // 今月の in/out（揺れ耐性あり）
+  // ✅ 今月の in/out（section / type 両対応）
+  // ※ cash_flows の実体が type カラムでも動く
   let q = supabase
     .from("cash_flows")
-    .select("section, amount")
+    .select("amount, section, type, kind")
     .gte("date", from)
     .lt("date", toExclusive);
 
@@ -71,10 +82,17 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   let thisMonthExpense = 0;
 
   for (const r of flows ?? []) {
-    const section = String((r as any).section ?? "");
+    const rawKind =
+      (r as any).section ?? (r as any).type ?? (r as any).kind ?? "";
+    const kind = normalizeKind(rawKind);
+
+    // 日本語は lowerCase で壊れるので原文も見る
+    const kindRaw = String(rawKind ?? "").trim();
+
     const amount = Number((r as any).amount ?? 0);
-    if (isIncome(section)) thisMonthIncome += amount;
-    if (isExpense(section)) thisMonthExpense += amount;
+
+    if (isIncome(kind) || isIncome(kindRaw)) thisMonthIncome += amount;
+    if (isExpense(kind) || isExpense(kindRaw)) thisMonthExpense += amount;
   }
 
   const net = thisMonthIncome - thisMonthExpense;
