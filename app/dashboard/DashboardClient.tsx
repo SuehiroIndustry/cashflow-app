@@ -8,7 +8,13 @@ import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
-import type { AccountRow, MonthlyBalanceRow, CashStatus, AlertCard, OverviewPayload } from "./_types";
+import type {
+  AccountRow,
+  MonthlyBalanceRow,
+  CashStatus,
+  AlertCard,
+  OverviewPayload,
+} from "./_types";
 
 type Props = {
   accounts: AccountRow[];
@@ -19,8 +25,11 @@ type Props = {
   children?: React.ReactNode;
 };
 
+// ✅ ここだけ、君の実ルートに合わせて必要なら変えて
+const SIMULATION_PATH = "/simulation"; // もし /cash/simulation 等ならここを変更
+const RAKUTEN_IMPORT_PATH = "/cash/import/rakuten";
+
 function formatJST(iso: string) {
-  // 雑に見やすく（ISO → 表示）
   try {
     const d = new Date(iso);
     return d.toLocaleString("ja-JP");
@@ -49,7 +58,22 @@ export default function DashboardClient({
     [router]
   );
 
-  // OverviewCard 用 payload を、君の OverviewCard.tsx の型に合わせて作る
+  // ✅ “楽天” を含む口座を探す（なければ null）
+  const rakutenAccountId = useMemo(() => {
+    const hit = accounts.find((a) => a.name?.includes("楽天"));
+    return hit?.id ?? null;
+  }, [accounts]);
+
+  const goRakutenAccount = useCallback(() => {
+    if (rakutenAccountId == null) {
+      // 口座一覧に楽天がいない＝ getAccounts() 側の問題
+      alert("口座一覧に「楽天」を含む口座が見つからない。getAccounts() の取得条件を確認しよう。");
+      return;
+    }
+    router.push(`/dashboard?cashAccountId=${rakutenAccountId}`);
+  }, [rakutenAccountId, router]);
+
+  // OverviewCard 用 payload（君が貼ってくれた OverviewCard.tsx に合わせる）
   const overviewPayload: OverviewPayload | null = useMemo(() => {
     const account =
       selectedAccountId != null
@@ -57,7 +81,6 @@ export default function DashboardClient({
         : null;
 
     const latest = monthly.length ? monthly[monthly.length - 1] : null;
-
     const income = latest?.income ?? 0;
     const expense = latest?.expense ?? 0;
 
@@ -77,17 +100,33 @@ export default function DashboardClient({
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div>
           <div className="text-xl font-semibold">Cashflow Dashboard</div>
-          <div className="text-xs opacity-70">
-            更新: {formatJST(cashStatus.updatedAtISO)}
-          </div>
+          <div className="text-xs opacity-70">更新: {formatJST(cashStatus.updatedAtISO)}</div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 右上：楽天CSVアップロード → 文言変更 */}
+          {/* ✅ Simulation へ */}
           <button
             type="button"
             className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
-            onClick={() => router.push("/cash/import/rakuten")}
+            onClick={() => router.push(SIMULATION_PATH)}
+          >
+            Simulation
+          </button>
+
+          {/* ✅ 楽天銀行の口座へ一発切替 */}
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
+            onClick={goRakutenAccount}
+          >
+            楽天銀行へ
+          </button>
+
+          {/* ✅ 楽天CSVインポート */}
+          <button
+            type="button"
+            className="px-3 py-2 rounded-md border border-white/20 bg-black text-white hover:bg-white/10"
+            onClick={() => router.push(RAKUTEN_IMPORT_PATH)}
           >
             楽天銀行・明細インポート
           </button>
@@ -95,9 +134,10 @@ export default function DashboardClient({
       </div>
 
       <div className="px-6 py-6 space-y-4">
-        {/* Account selector (必要なら使う。邪魔なら後で消せる) */}
+        {/* Account selector */}
         <div className="flex items-center gap-3">
           <div className="text-sm opacity-80">口座:</div>
+
           <select
             value={selectedAccountId ?? ""}
             onChange={onChangeAccount}
@@ -109,9 +149,14 @@ export default function DashboardClient({
               </option>
             ))}
           </select>
-        </div>
 
-        {/* ✅ 上のデカい「楽天銀行の明細CSV」箱は削除：ここには置かない */}
+          {/* 口座が無い時のヒント */}
+          {accounts.length === 0 && (
+            <div className="text-sm text-red-300">
+              口座が0件。getAccounts() の取得条件 or DBを確認。
+            </div>
+          )}
+        </div>
 
         {/* Alerts */}
         {alertCards.length > 0 && (
@@ -123,6 +168,7 @@ export default function DashboardClient({
               >
                 <div className="font-semibold">{a.title}</div>
                 <div className="text-sm mt-1">{a.description}</div>
+
                 {a.href && a.actionLabel && (
                   <button
                     type="button"
