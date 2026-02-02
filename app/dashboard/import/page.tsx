@@ -1,35 +1,32 @@
-// app/dashboard/import/page.tsx
+// app/dashboard/page.tsx
 export const dynamic = "force-dynamic";
 
-import ImportClient from "./ImportClient";
+import DashboardClient from "./DashboardClient";
 
-type Props = {
-  searchParams?: {
-    cashAccountId?: string;
-  };
-};
+import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
 
-function toInt(v: unknown): number | null {
-  if (typeof v !== "string") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+import { getCashStatus } from "./_actions/getCashStatus";
+import { getAlertCards } from "./_actions/getAlertCards";
 
-export default function Page({ searchParams }: Props) {
-  const cashAccountId = toInt(searchParams?.cashAccountId);
+import type { CashStatus, AlertCard } from "./_types";
+
+export default async function DashboardPage() {
+  // ✅ ここは「危険信号だけ」のためにサーバー側で取る（今まで通りの思想）
+  const [cashStatus, alertCards] = await Promise.all([
+    getCashStatus().catch(() => ({ status: "unknown" } as CashStatus)),
+    getAlertCards().catch(() => [] as AlertCard[]),
+  ]);
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <div className="mx-auto max-w-5xl p-6">
-        <h1 className="text-xl font-semibold">明細インポート</h1>
-        <p className="mt-2 text-sm text-zinc-300">
-          楽天銀行CSVをアップロードして取り込みます。
-        </p>
-
-        <div className="mt-6">
-          <ImportClient cashAccountId={cashAccountId} />
-        </div>
+    <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
+      {/* ✅ ダッシュボード本体（カード等）は page.tsx 側で固定表示 */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <OverviewCard />
+        <BalanceCard />
+        <EcoCharts />
       </div>
-    </div>
+    </DashboardClient>
   );
 }
