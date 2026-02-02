@@ -1,15 +1,18 @@
 // app/dashboard/import/page.tsx
 export const dynamic = "force-dynamic";
 
+import ImportClient from "./ImportClient";
+
 type Props = {
   searchParams?: {
-    cashAccountId?: string;
+    cashAccountId?: string | string[];
   };
 };
 
 function toInt(v: unknown): number | null {
-  if (typeof v !== "string") return null;
-  const n = Number(v);
+  const s = Array.isArray(v) ? v[0] : v;
+  if (typeof s !== "string") return null;
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -21,7 +24,7 @@ export default async function Page({ searchParams }: Props) {
       <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-200">
         <h1 className="text-lg font-semibold">楽天銀行・明細インポート</h1>
         <p className="mt-2 text-sm text-zinc-400">
-          ここはインポート画面です（いまは仮実装）。
+          CSV/TSV をアップロードして、内容を確認してから取り込みます。
         </p>
 
         <div className="mt-4 text-sm">
@@ -32,17 +35,7 @@ export default async function Page({ searchParams }: Props) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-200">
-        <div className="text-sm text-zinc-300">
-          次にやること（ここはUIだけ置いておく）
-        </div>
-
-        <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-zinc-400">
-          <li>楽天銀行メールの取り込み（Gmail → 解析 → cash_flows にINSERT）</li>
-          <li>CSV/TSV 手動アップロード対応（バックアップ用）</li>
-          <li>取引の重複検知（日時/金額/摘要のハッシュ等）</li>
-        </ul>
-      </div>
+      <ImportClient cashAccountId={cashAccountId} />
     </div>
   );
 }
