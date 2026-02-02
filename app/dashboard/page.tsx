@@ -3,26 +3,15 @@ export const dynamic = "force-dynamic";
 
 import DashboardClient from "./DashboardClient";
 
+import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
+
 import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
-import { getCashStatus } from "./_actions/getCashStatus";
-import { getAlertCards } from "./_actions/getAlertCards";
 
-import type {
-  AccountRow,
-  MonthlyBalanceRow,
-  CashStatus,
-  AlertCard,
-  OverviewPayload,
-} from "./_types";
-
-type DashboardPayload = {
-  cashStatus: CashStatus | null;
-  alertCards: AlertCard[];
-  overviewPayload: OverviewPayload | null;
-  monthly: MonthlyBalanceRow[];
-};
+import type { AccountRow, OverviewPayload, MonthlyBalanceRow } from "./_types";
 
 type Props = {
   searchParams?: {
@@ -43,49 +32,49 @@ function monthStartISO(d = new Date()): string {
 }
 
 export default async function Page({ searchParams }: Props) {
-  const cashAccountId = toInt(searchParams?.cashAccountId);
-
   const accounts = (await getAccounts()) as AccountRow[];
 
-  // 口座未選択：落ちない payload を渡す
+  // ✅ 楽天銀行しかない（= 口座が1つ）なら自動選択
+  const singleAccountId = accounts.length === 1 ? accounts[0].id : null;
+
+  // 複数口座がある未来に備えて query も残す（ただし今は単一想定）
+  const fromQuery = toInt(searchParams?.cashAccountId);
+  const cashAccountId = singleAccountId ?? fromQuery;
+
+  // 口座が確定できないケース（= 0件 or 複数で未選択）
   if (!cashAccountId) {
-    const payload: DashboardPayload = {
-      cashStatus: null,
-      alertCards: [],
-      overviewPayload: null,
-      monthly: [],
-    };
+    const overviewPayload: OverviewPayload | null = null;
+    const monthly: MonthlyBalanceRow[] = [];
 
     return (
-      <DashboardClient
-        accounts={accounts}
-        selectedAccountId={null}
-        payload={payload}
-      />
+      <DashboardClient accounts={accounts} selectedAccountId={null}>
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-200">
+          <div className="text-sm opacity-80">
+            まずは口座を用意してください。（現在、口座が見つかりません）
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <OverviewCard payload={overviewPayload} />
+            <BalanceCard rows={monthly} />
+            <EcoCharts rows={monthly} />
+          </div>
+        </div>
+      </DashboardClient>
     );
   }
 
-  // 口座選択あり：必要データ取得
-  const [overviewPayload, monthly, cashStatus, alertCards] = await Promise.all([
+  const [overviewPayload, monthly] = await Promise.all([
     getOverview({ cashAccountId, month: monthStartISO() }),
     getMonthlyBalance({ cashAccountId, months: 12 }),
-    getCashStatus({ cashAccountId }),
-    getAlertCards({ cashAccountId }),
   ]);
 
-  const payload: DashboardPayload = {
-    cashStatus: (cashStatus ?? null) as CashStatus | null,
-    alertCards: (alertCards ?? []) as AlertCard[],
-    overviewPayload: (overviewPayload ?? null) as OverviewPayload | null,
-    monthly: (monthly ?? []) as MonthlyBalanceRow[],
-  };
-
   return (
-    <DashboardClient
-      key={`dash-${cashAccountId}`}
-      accounts={accounts}
-      selectedAccountId={cashAccountId}
-      payload={payload}
-    />
+    <DashboardClient accounts={accounts} selectedAccountId={cashAccountId}>
+      <div className="grid gap-4 md:grid-cols-3">
+        <OverviewCard payload={overviewPayload} />
+        <BalanceCard rows={monthly} />
+        <EcoCharts rows={monthly} />
+      </div>
+    </DashboardClient>
   );
 }
