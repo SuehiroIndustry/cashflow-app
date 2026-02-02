@@ -2,7 +2,6 @@
 export const dynamic = "force-dynamic";
 
 import ImportClient from "./ImportClient";
-import { getAccounts } from "../_actions/getAccounts";
 
 type Props = {
   searchParams?: {
@@ -16,18 +15,7 @@ function toInt(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export default async function Page({ searchParams }: Props) {
-  const accounts = await getAccounts();
-
-  const fromQuery = toInt(searchParams?.cashAccountId);
-  const fallback = accounts?.[0]?.id ?? null;
-
-  const cashAccountId = fromQuery ?? fallback;
-
-  return (
-    <ImportClient
-      cashAccountId={cashAccountId}
-      accounts={accounts}
-    />
-  );
+export default function Page({ searchParams }: Props) {
+  const cashAccountId = toInt(searchParams?.cashAccountId) ?? 2; // 楽天しかない前提なら固定でOK
+  return <ImportClient cashAccountId={cashAccountId} />;
 }
