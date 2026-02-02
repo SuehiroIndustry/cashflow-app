@@ -1,28 +1,64 @@
 // app/dashboard/page.tsx
 export const dynamic = "force-dynamic";
 
+import { getAccounts } from "./_actions/getAccounts";
+import { getOverview } from "./_actions/getOverview";
+import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
+
 import DashboardClient from "./DashboardClient";
 
-import OverviewCard from "./_components/OverviewCard";
-import BalanceCard from "./_components/BalanceCard";
-import EcoCharts from "./_components/EcoCharts";
+import type {
+  AccountRow,
+  MonthlyBalanceRow,
+  CashStatus,
+  AlertCard,
+  OverviewPayload,
+} from "./_types";
 
-import { getCashStatus } from "./_actions/getCashStatus";
-import { getAlertCards } from "./_actions/getAlertCards";
+type Props = {
+  searchParams?: {
+    cashAccountId?: string;
+  };
+};
 
-export default async function Page() {
-  const [cashStatus, alertCards] = await Promise.all([
-    getCashStatus(),
-    getAlertCards(),
+function toInt(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function monthStartISO(d = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
+}
+
+export default async function Page({ searchParams }: Props) {
+  const cashAccountId = toInt(searchParams?.cashAccountId);
+
+  const [accounts, overviewPayload, monthly] = await Promise.all([
+    getAccounts(),
+    getOverview({ cashAccountId, month: monthStartISO() }),
+    getMonthlyBalance({ cashAccountId, months: 12 }),
   ]);
 
+  // ここは“最小実装”でOK（後でちゃんと作り込む）
+  const cashStatus: CashStatus = {
+    status: "ok",
+    headline: "",
+    subline: "",
+  };
+
+  const alertCards: AlertCard[] = [];
+
   return (
-    <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
-      <div className="grid gap-4 md:grid-cols-3">
-        <OverviewCard />
-        <BalanceCard />
-        <EcoCharts />
-      </div>
-    </DashboardClient>
+    <DashboardClient
+      accounts={accounts as AccountRow[]}
+      selectedAccountId={cashAccountId}
+      monthly={monthly as MonthlyBalanceRow[]}
+      cashStatus={cashStatus}
+      alertCards={alertCards}
+      overviewPayload={overviewPayload as OverviewPayload}
+    />
   );
 }
