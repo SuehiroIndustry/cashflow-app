@@ -16,7 +16,7 @@ function toInt(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export default async function Page({ searchParams }: Props) {
+export default function Page({ searchParams }: Props) {
   const cashAccountId = toInt(searchParams?.cashAccountId);
 
   return (
@@ -28,7 +28,7 @@ export default async function Page({ searchParams }: Props) {
         </p>
 
         <div className="mt-4 text-sm">
-          <div className="text-zinc-400">cashAccountId</div>
+          <div className="text-zinc-400">cashAccountId（server）</div>
           <div className="mt-1 font-mono text-zinc-100">
             {cashAccountId ?? "（未指定）"}
           </div>
