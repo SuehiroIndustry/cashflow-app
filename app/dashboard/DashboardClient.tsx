@@ -35,6 +35,13 @@ function toInt(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// ✅ getOverview が要求する month（YYYY-MM-01）を作る
+function monthStartISO(d = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
+}
+
 export default function DashboardClient({
   cashStatus,
   alertCards,
@@ -95,8 +102,11 @@ export default function DashboardClient({
 
     setLoadingData(true);
     try {
+      const month = monthStartISO();
+
       const [ov, mo] = await Promise.all([
-        getOverview({ cashAccountId }),
+        // ✅ month 必須なので渡す
+        getOverview({ cashAccountId, month }),
         getMonthlyBalance({ cashAccountId, months: 12 }),
       ]);
 
@@ -120,7 +130,7 @@ export default function DashboardClient({
     // router.push(`/dashboard?cashAccountId=${id ?? ""}`);
   };
 
-  // ✅ ここが今回の本題：インポートページへの正しいリンク
+  // ✅ インポートページへの正しいリンク
   const goImport = () => {
     if (!selectedAccountId) return;
     router.push(`/dashboard/import?cashAccountId=${selectedAccountId}`);
@@ -199,7 +209,7 @@ export default function DashboardClient({
 
       {/* Body */}
       <div className="px-6 pb-10 pt-6">
-        {/* ページ側から children を渡してる構成ならそれを優先 */}
+        {/* page.tsx 側から children を渡してる構成ならそれを優先 */}
         {children ? (
           children
         ) : (
