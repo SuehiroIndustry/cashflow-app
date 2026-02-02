@@ -1,31 +1,18 @@
 // app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import OverviewCard from "./_components/OverviewCard";
-import BalanceCard from "./_components/BalanceCard";
-import EcoCharts from "./_components/EcoCharts";
-
+import type { AccountRow, CashStatus, AlertCard } from "./_types";
 import { getAccounts } from "./_actions/getAccounts";
-import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
-import { getOverview } from "./_actions/getOverview";
-
-import type {
-  AccountRow,
-  MonthlyBalanceRow,
-  OverviewPayload,
-  CashStatus,
-  AlertCard,
-} from "./_types";
 
 type Props = {
   cashStatus: CashStatus;
   alertCards: AlertCard[];
-  children?: React.ReactNode;
+  children: React.ReactNode;
 
-  // page.tsx 側から渡してるなら使う（無くても動くようにしてある）
+  // page.tsx から渡すなら使う（なくても動く）
   initialCashAccountId?: number | null;
 };
 
@@ -35,13 +22,6 @@ function toInt(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// ✅ getOverview が要求する month（YYYY-MM-01）を作る
-function monthStartISO(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}-01`;
-}
-
 export default function DashboardClient({
   cashStatus,
   alertCards,
@@ -49,16 +29,26 @@ export default function DashboardClient({
   initialCashAccountId = null,
 }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+
+  // URL > 初期値 の順で選択口座を決める（/dashboard?cashAccountId=2 を優先）
+  const urlCashAccountId = useMemo(() => {
+    const v = searchParams?.get("cashAccountId");
+    return v ? toInt(v) : null;
+  }, [searchParams]);
+
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
-    initialCashAccountId
+    urlCashAccountId ?? initialCashAccountId
   );
 
-  const [overview, setOverview] = useState<OverviewPayload | null>(null);
-  const [monthly, setMonthly] = useState<MonthlyBalanceRow[]>([]);
-  const [loadingAccounts, setLoadingAccounts] = useState(false);
-  const [loadingData, setLoadingData] = useState(false);
+  useEffect(() => {
+    // URLが変わったら追従（直リンク/戻る進む対応）
+    if (urlCashAccountId !== null) setSelectedAccountId(urlCashAccountId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlCashAccountId]);
 
   const selectedAccount = useMemo(() => {
     return accounts.find((a) => a.id === selectedAccountId) ?? null;
@@ -76,10 +66,13 @@ export default function DashboardClient({
 
         setAccounts(data ?? []);
 
-        // 初期選択：initialCashAccountId がなければ先頭を選ぶ
+        // まだ未選択なら先頭を選ぶ
         if (selectedAccountId == null) {
           const firstId = data?.[0]?.id ?? null;
           setSelectedAccountId(firstId);
+
+          // URLにも反映（必要なら）
+          if (firstId != null) router.replace(`/dashboard?cashAccountId=${firstId}`);
         }
       } finally {
         if (alive) setLoadingAccounts(false);
@@ -92,47 +85,15 @@ export default function DashboardClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 選択口座のデータロード（Overview / Monthly）
-  const loadAccountData = useCallback(async (cashAccountId: number | null) => {
-    if (!cashAccountId) {
-      setOverview(null);
-      setMonthly([]);
-      return;
-    }
-
-    setLoadingData(true);
-    try {
-      const month = monthStartISO();
-
-      const [ov, mo] = await Promise.all([
-        // ✅ month 必須なので渡す
-        getOverview({ cashAccountId, month }),
-        getMonthlyBalance({ cashAccountId, months: 12 }),
-      ]);
-
-      setOverview((ov ?? null) as OverviewPayload | null);
-      setMonthly((mo ?? []) as MonthlyBalanceRow[]);
-    } finally {
-      setLoadingData(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadAccountData(selectedAccountId);
-  }, [selectedAccountId, loadAccountData]);
-
-  // ドロップダウン変更
   const onChangeAccount = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const v = e.target.value;
-    const id = toInt(v);
+    const id = toInt(e.target.value);
     setSelectedAccountId(id);
-    // URLに反映させたいならこれ（page.tsx が searchParams 見てる構成向け）
-    // router.push(`/dashboard?cashAccountId=${id ?? ""}`);
+    router.push(`/dashboard?cashAccountId=${id ?? ""}`);
   };
 
-  // ✅ インポートページへの正しいリンク
   const goImport = () => {
     if (!selectedAccountId) return;
+    // ✅ 正しい想定ルート：/dashboard/import
     router.push(`/dashboard/import?cashAccountId=${selectedAccountId}`);
   };
 
@@ -208,25 +169,12 @@ export default function DashboardClient({
       </div>
 
       {/* Body */}
-      <div className="px-6 pb-10 pt-6">
-        {/* page.tsx 側から children を渡してる構成ならそれを優先 */}
-        {children ? (
-          children
-        ) : (
-          <div className="grid gap-4 md:grid-cols-3">
-            <OverviewCard
-              cashStatus={cashStatus}
-              overview={overview}
-              loading={loadingData}
-            />
-            <BalanceCard monthly={monthly} loading={loadingData} />
-            <EcoCharts monthly={monthly} loading={loadingData} />
-          </div>
-        )}
+      <div className="px-6 pb-10 pt-6">{children}</div>
 
-        {/* Alerts（使ってるなら） */}
-        {alertCards?.length > 0 && (
-          <div className="mt-6 space-y-2">
+      {/* Alerts（使うなら） */}
+      {alertCards?.length > 0 && (
+        <div className="px-6 pb-10">
+          <div className="space-y-2">
             {alertCards.map((a, idx) => (
               <div
                 key={`${a.title}-${idx}`}
@@ -241,8 +189,8 @@ export default function DashboardClient({
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
