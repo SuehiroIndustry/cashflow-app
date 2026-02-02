@@ -11,8 +11,6 @@ type Props = {
   cashStatus: CashStatus;
   alertCards: AlertCard[];
   children: React.ReactNode;
-
-  // page.tsx から渡すなら使う（なくても動く）
   initialCashAccountId?: number | null;
 };
 
@@ -34,7 +32,6 @@ export default function DashboardClient({
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
 
-  // URL > 初期値 の順で選択口座を決める（/dashboard?cashAccountId=2 を優先）
   const urlCashAccountId = useMemo(() => {
     const v = searchParams?.get("cashAccountId");
     return v ? toInt(v) : null;
@@ -45,7 +42,6 @@ export default function DashboardClient({
   );
 
   useEffect(() => {
-    // URLが変わったら追従（直リンク/戻る進む対応）
     if (urlCashAccountId !== null) setSelectedAccountId(urlCashAccountId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlCashAccountId]);
@@ -54,7 +50,6 @@ export default function DashboardClient({
     return accounts.find((a) => a.id === selectedAccountId) ?? null;
   }, [accounts, selectedAccountId]);
 
-  // 口座一覧ロード
   useEffect(() => {
     let alive = true;
 
@@ -66,12 +61,10 @@ export default function DashboardClient({
 
         setAccounts(data ?? []);
 
-        // まだ未選択なら先頭を選ぶ
         if (selectedAccountId == null) {
           const firstId = data?.[0]?.id ?? null;
           setSelectedAccountId(firstId);
 
-          // URLにも反映（必要なら）
           if (firstId != null) router.replace(`/dashboard?cashAccountId=${firstId}`);
         }
       } finally {
@@ -93,7 +86,6 @@ export default function DashboardClient({
 
   const goImport = () => {
     if (!selectedAccountId) return;
-    // ✅ 正しい想定ルート：/dashboard/import
     router.push(`/dashboard/import?cashAccountId=${selectedAccountId}`);
   };
 
@@ -103,7 +95,6 @@ export default function DashboardClient({
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Header */}
       <div className="px-6 pt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="text-lg font-semibold">Cashflow Dashboard</div>
@@ -137,7 +128,6 @@ export default function DashboardClient({
           </div>
         </div>
 
-        {/* Account selector row */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <div className="text-sm text-zinc-200">口座:</div>
 
@@ -161,17 +151,14 @@ export default function DashboardClient({
 
           <div className="text-sm text-zinc-400">
             表示中:{" "}
-            <span className="text-zinc-200">
-              {selectedAccount?.name ?? "未選択"}
-            </span>
+            <span className="text-zinc-200">{selectedAccount?.name ?? "未選択"}</span>
           </div>
         </div>
       </div>
 
-      {/* Body */}
       <div className="px-6 pb-10 pt-6">{children}</div>
 
-      {/* Alerts（使うなら） */}
+      {/* Alerts（型に確実に存在する title のみ表示） */}
       {alertCards?.length > 0 && (
         <div className="px-6 pb-10">
           <div className="space-y-2">
@@ -180,12 +167,7 @@ export default function DashboardClient({
                 key={`${a.title}-${idx}`}
                 className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
               >
-                <div className="text-sm font-semibold text-zinc-100">
-                  {a.title}
-                </div>
-                {a.message && (
-                  <div className="mt-1 text-sm text-zinc-300">{a.message}</div>
-                )}
+                <div className="text-sm font-semibold text-zinc-100">{a.title}</div>
               </div>
             ))}
           </div>
