@@ -1,109 +1,106 @@
 // app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useMemo } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import OverviewCard from "./_components/OverviewCard";
-import BalanceCard from "./_components/BalanceCard";
-import EcoCharts from "./_components/EcoCharts";
-
-import type {
-  AccountRow,
-  MonthlyBalanceRow,
-  CashStatus,
-  AlertCard,
-  OverviewPayload,
-} from "./_types";
-
-type DashboardPayload = {
-  cashStatus: CashStatus | null;
-  alertCards: AlertCard[];
-  overviewPayload: OverviewPayload | null;
-  monthly: MonthlyBalanceRow[];
-};
+import type { AccountRow } from "./_types";
 
 type Props = {
   accounts: AccountRow[];
   selectedAccountId: number | null;
-  payload: DashboardPayload;
-  children?: React.ReactNode;
+  children: React.ReactNode;
 };
 
-function toInt(v: string): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-export default function DashboardClient(props: Props) {
-  const { accounts, selectedAccountId, payload, children } = props;
+export default function DashboardClient({
+  accounts,
+  selectedAccountId,
+  children,
+}: Props) {
   const router = useRouter();
+  const sp = useSearchParams();
 
-  const accountOptions = useMemo(() => {
-    return (accounts ?? []).map((a) => ({
-      id: a.id,
-      name: a.name,
-    }));
-  }, [accounts]);
+  const isSingleAccount = accounts.length === 1;
+  const singleId = isSingleAccount ? accounts[0].id : null;
 
-  const onChangeAccount = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const id = toInt(e.target.value);
-      const qs = id ? `?cashAccountId=${id}` : "";
-      router.push(`/dashboard${qs}`);
-    },
-    [router]
-  );
+  // ✅ 単一口座なら query が無くても URL を正規化（任意）
+  // これでリロード/共有URLが安定する
+  useEffect(() => {
+    if (!singleId) return;
 
-  const hasSelected = selectedAccountId != null;
+    const q = sp?.get("cashAccountId");
+    if (q === String(singleId)) return;
+
+    const next = new URLSearchParams(sp?.toString());
+    next.set("cashAccountId", String(singleId));
+    router.replace(`/dashboard?${next.toString()}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [singleId]);
+
+  const selectedName = useMemo(() => {
+    const found = accounts.find((a) => a.id === selectedAccountId);
+    return found?.name ?? "楽天銀行";
+  }, [accounts, selectedAccountId]);
 
   return (
-    <div className="space-y-4">
+    <div className="min-h-screen bg-black text-zinc-200">
       {/* Header */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-zinc-200">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <div className="text-sm font-semibold">Dashboard</div>
-            <div className="text-xs opacity-70">
-              口座を選ぶと、概要・残高推移を表示します。
+      <div className="border-b border-zinc-800 bg-zinc-950">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-4">
+            <div className="text-lg font-semibold tracking-tight">
+              Cashflow Dashboard
+            </div>
+
+            {/* ✅ 戻ってたリンク（ここが消えてた） */}
+            <nav className="hidden items-center gap-3 md:flex text-sm">
+              <Link
+                href="/dashboard"
+                className="rounded-md px-2 py-1 hover:bg-zinc-900"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/simulation"
+                className="rounded-md px-2 py-1 hover:bg-zinc-900"
+              >
+                Simulation
+              </Link>
+              <Link
+                href="/dashboard/import"
+                className="rounded-md px-2 py-1 hover:bg-zinc-900"
+              >
+                楽天銀行・明細インポート
+              </Link>
+            </nav>
+
+            <div className="ml-2 hidden text-xs opacity-70 md:block">
+              口座: <span className="opacity-90">{selectedName}</span>
             </div>
           </div>
 
+          {/* 右側（ログアウトボタン等は既存の実装があるなら置き換えてOK） */}
           <div className="flex items-center gap-2">
-            <label className="text-xs opacity-70">口座</label>
-            <select
-              className="h-9 rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100"
-              value={selectedAccountId ?? ""}
-              onChange={onChangeAccount}
-            >
-              <option value="">選択してください</option>
-              {accountOptions.map((o) => (
-                <option key={o.id} value={String(o.id)}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
+            {/* ここは既存の Logout 実装があるなら差し替えでOK */}
           </div>
         </div>
       </div>
 
-      {/* Optional message area */}
-      {!hasSelected ? (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-200">
-          まずは口座を選択してください。
-        </div>
-      ) : null}
+      {/* Body */}
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        {/* ✅ 口座選択は不要：単一口座なら表示しない */}
+        {!isSingleAccount && (
+          <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+            <div className="text-sm font-semibold">口座</div>
+            <div className="mt-2 text-sm opacity-70">
+              ※ 複数口座対応のための表示（今は楽天銀行1つなら出ません）
+            </div>
+          </div>
+        )}
 
-      {/* Main */}
-      {children ? (
-        children
-      ) : (
-        <div className="grid gap-4 md:grid-cols-3">
-          <OverviewCard payload={payload.overviewPayload} />
-          <BalanceCard rows={payload.monthly} />
-          <EcoCharts rows={payload.monthly} />
-        </div>
-      )}
+        {children}
+      </div>
     </div>
   );
 }
