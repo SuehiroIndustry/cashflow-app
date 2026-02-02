@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 
 import type { AccountRow } from "./_types";
 
@@ -20,12 +20,12 @@ export default function DashboardClient({
 }: Props) {
   const router = useRouter();
   const sp = useSearchParams();
+  const pathname = usePathname();
 
   const isSingleAccount = accounts.length === 1;
   const singleId = isSingleAccount ? accounts[0].id : null;
 
-  // ✅ 単一口座なら query が無くても URL を正規化（任意）
-  // これでリロード/共有URLが安定する
+  // ✅ 単一口座なら query が無くても URL を正規化（ただし “今のパス” を維持する）
   useEffect(() => {
     if (!singleId) return;
 
@@ -34,9 +34,11 @@ export default function DashboardClient({
 
     const next = new URLSearchParams(sp?.toString());
     next.set("cashAccountId", String(singleId));
-    router.replace(`/dashboard?${next.toString()}`);
+
+    // ★ここが本質：/dashboard 固定にせず、pathname を維持する
+    router.replace(`${pathname}?${next.toString()}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [singleId]);
+  }, [singleId, pathname]);
 
   const selectedName = useMemo(() => {
     const found = accounts.find((a) => a.id === selectedAccountId);
@@ -53,7 +55,6 @@ export default function DashboardClient({
               Cashflow Dashboard
             </div>
 
-            {/* ✅ 戻ってたリンク（ここが消えてた） */}
             <nav className="hidden items-center gap-3 md:flex text-sm">
               <Link
                 href="/dashboard"
@@ -80,16 +81,14 @@ export default function DashboardClient({
             </div>
           </div>
 
-          {/* 右側（ログアウトボタン等は既存の実装があるなら置き換えてOK） */}
           <div className="flex items-center gap-2">
-            {/* ここは既存の Logout 実装があるなら差し替えでOK */}
+            {/* 既存の Logout ボタン等があるならここ */}
           </div>
         </div>
       </div>
 
       {/* Body */}
       <div className="mx-auto max-w-6xl px-4 py-6">
-        {/* ✅ 口座選択は不要：単一口座なら表示しない */}
         {!isSingleAccount && (
           <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4">
             <div className="text-sm font-semibold">口座</div>
