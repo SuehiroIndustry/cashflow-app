@@ -36,13 +36,36 @@ function monthStartISO(d = new Date()): string {
 export default async function Page({ searchParams }: Props) {
   const cashAccountId = toInt(searchParams?.cashAccountId);
 
-  const [accounts, overviewPayload, monthly] = await Promise.all([
-    getAccounts(),
+  const accounts = (await getAccounts()) as AccountRow[];
+
+  // ✅ 口座未選択なら “空” を返して UI は出す（落とさない）
+  if (!cashAccountId) {
+    const cashStatus: CashStatus = {
+      status: "ok",
+      headline: "",
+      subline: "",
+    };
+
+    const alertCards: AlertCard[] = [];
+    const overviewPayload = null as unknown as OverviewPayload; // DashboardClientの型都合用（後で整理）
+
+    return (
+      <DashboardClient
+        accounts={accounts}
+        selectedAccountId={null}
+        monthly={[]}
+        cashStatus={cashStatus}
+        alertCards={alertCards}
+        overviewPayload={overviewPayload}
+      />
+    );
+  }
+
+  const [overviewPayload, monthly] = await Promise.all([
     getOverview({ cashAccountId, month: monthStartISO() }),
     getMonthlyBalance({ cashAccountId, months: 12 }),
   ]);
 
-  // ここは“最小実装”でOK（後でちゃんと作り込む）
   const cashStatus: CashStatus = {
     status: "ok",
     headline: "",
@@ -53,9 +76,9 @@ export default async function Page({ searchParams }: Props) {
 
   return (
     <DashboardClient
-      accounts={accounts as AccountRow[]}
+      accounts={accounts}
       selectedAccountId={cashAccountId}
-      monthly={monthly as MonthlyBalanceRow[]}
+      monthly={(monthly ?? []) as MonthlyBalanceRow[]}
       cashStatus={cashStatus}
       alertCards={alertCards}
       overviewPayload={overviewPayload as OverviewPayload}
