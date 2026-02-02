@@ -39,8 +39,6 @@ export default function ImportClient({ cashAccountId }: Props) {
       const ab = await file.arrayBuffer();
 
       // ✅ Zengin is usually Shift_JIS (cp932)
-      // Most modern browsers support "shift_jis".
-      // If a browser fails, it will throw; then we fallback to utf-8.
       let text = "";
       try {
         text = new TextDecoder("shift_jis").decode(ab);
@@ -53,10 +51,12 @@ export default function ImportClient({ cashAccountId }: Props) {
       setRows(parsed.rows);
       setDebug(parsed.debug);
 
-      // sanity: if all dates are 0000-00-00, show a strong hint
-      const allDead = parsed.rows.length > 0 && parsed.rows.every((r) => r.date === "0000-00-00");
+      const allDead =
+        parsed.rows.length > 0 && parsed.rows.every((r) => r.date === "0000-00-00");
       if (allDead) {
-        setError("日付の解釈に失敗しています（令和YYMMDDの可能性）。パーサの date 欄を確認してください。");
+        setError(
+          "日付の解釈に失敗しています（令和YYMMDDの可能性）。パーサの date 欄を確認してください。"
+        );
       }
     } catch (e: any) {
       console.error(e);
@@ -79,27 +79,32 @@ export default function ImportClient({ cashAccountId }: Props) {
 
     setImporting(true);
     try {
-      // ここは君の実装に合わせて endpoint を変更してOK
-      // 重要: source_type は DB 制約に合わせて "import" を使う
-      const res = await fetch("/api/import/zengin", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          cashAccountId,
-          sourceType: "import",
-          rows: rows.map((r) => ({
+      // ✅ multipart/form-data で送る（headers は絶対に指定しない）
+      const fd = new FormData();
+      fd.append("cashAccountId", String(cashAccountId));
+      fd.append("sourceType", "import"); // DB制約の許可値に合わせる
+      fd.append(
+        "rows",
+        JSON.stringify(
+          rows.map((r) => ({
             date: r.date,
             section: r.section,
             amount: r.amount,
             summary: r.summary,
-          })),
-        }),
+          }))
+        )
+      );
+
+      const res = await fetch("/api/import/zengin", {
+        method: "POST",
+        body: fd,
       });
 
       if (!res.ok) {
         const t = await res.text();
         throw new Error(t || `Import failed (${res.status})`);
       }
+
       const json = await res.json();
       setDone({ inserted: Number(json?.inserted ?? rows.length) });
     } catch (e: any) {
@@ -144,9 +149,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           </button>
         </div>
 
-        <div className="mt-3 text-sm text-zinc-400">
-          取り込み対象: {rows.length} 件
-        </div>
+        <div className="mt-3 text-sm text-zinc-400">取り込み対象: {rows.length} 件</div>
 
         {error && (
           <div className="mt-4 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">
