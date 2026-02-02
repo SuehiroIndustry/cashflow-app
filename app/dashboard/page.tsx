@@ -1,198 +1,28 @@
 // app/dashboard/page.tsx
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-import { getAccounts } from "./_actions/getAccounts";
-import { getOverview } from "./_actions/getOverview";
-import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
 import DashboardClient from "./DashboardClient";
 
-import type {
-  AccountRow,
-  MonthlyBalanceRow,
-  CashStatus,
-  AlertCard,
-  OverviewPayload,
-} from "./_types";
+import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
 
-type Props = {
-  searchParams?: {
-    cashAccountId?: string | string[];
-  };
-};
+import { getCashStatus } from "./_actions/getCashStatus";
+import { getAlertCards } from "./_actions/getAlertCards";
 
-function toInt(v: unknown): number | null {
-  if (typeof v === "string") {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  if (Array.isArray(v) && typeof v[0] === "string") {
-    const n = Number(v[0]);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-function monthStartISO(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}-01`;
-}
-
-export default async function DashboardPage({ searchParams }: Props) {
-  const rawAccounts = await getAccounts();
-
-  // ✅ 念のためここでも number 正規化（bigint/string地雷の二重防御）
-  const accounts: AccountRow[] = (rawAccounts ?? []).map((a: any) => ({
-    id: Number(a.id),
-    name: String(a.name ?? ""),
-    current_balance: Number(a.current_balance ?? 0),
-  }));
-
-  // -----------------------------
-  // 口座がない場合（required props を全部渡す）
-  // -----------------------------
-  if (!accounts.length) {
-    const cashStatus: CashStatus = {
-      selectedAccountId: null,
-      selectedAccountName: null,
-      currentBalance: null,
-      monthLabel: null,
-      monthIncome: null,
-      monthExpense: null,
-      monthNet: null,
-      updatedAtISO: new Date().toISOString(),
-    };
-
-    const alertCards: AlertCard[] = [
-      {
-        severity: "info",
-        title: "口座が未登録です",
-        description: "cash_accounts に口座を作成してください。",
-      },
-    ];
-
-    const overviewPayload: OverviewPayload = {
-      accountName: "-",
-      currentBalance: 0,
-      thisMonthIncome: 0,
-      thisMonthExpense: 0,
-      net: 0,
-    };
-
-    const monthly: MonthlyBalanceRow[] = [];
-
-    return (
-      <DashboardClient
-        key="dash-none"
-        accounts={accounts}
-        selectedAccountId={null}
-        monthly={monthly}
-        cashStatus={cashStatus}
-        alertCards={alertCards}
-        overviewPayload={overviewPayload}
-      />
-    );
-  }
-
-  // ✅ URLの cashAccountId を唯一の基準にする（なければ先頭）
-  const requestedId = toInt(searchParams?.cashAccountId);
-
-  const selectedAccountId =
-    requestedId != null && accounts.some((a) => a.id === requestedId)
-      ? requestedId
-      : accounts[0].id;
-
-  const currentAccount =
-    accounts.find((a) => a.id === selectedAccountId) ?? accounts[0];
-
-  // 月次（12ヶ月）
-  const monthlyDesc: MonthlyBalanceRow[] = await getMonthlyBalance({
-    cashAccountId: selectedAccountId,
-    months: 12,
-  });
-
-  // UI用に昇順へ
-  const monthly = [...monthlyDesc].reverse();
-  const latest = monthly.length ? monthly[monthly.length - 1] : null;
-
-  const monthForOverview = latest?.month ?? monthStartISO();
-
-  // ✅ Overview算出（ここを正にする）
-  const overviewFromAction = await getOverview({
-    cashAccountId: selectedAccountId,
-    month: monthForOverview,
-  });
-
-  // 月次があればそれを正にする（ズレ防止）
-  const thisMonthIncome = latest?.income ?? 0;
-  const thisMonthExpense = latest?.expense ?? 0;
-  const monthNet = thisMonthIncome - thisMonthExpense;
-
-  // ✅ currentBalance は getOverview を最優先（page側で 0 上書きしない）
-  const currentBalance =
-    typeof overviewFromAction?.currentBalance === "number"
-      ? overviewFromAction.currentBalance
-      : Number(currentAccount.current_balance ?? 0);
-
-  const overviewPayload: OverviewPayload = {
-    ...(overviewFromAction ?? {}),
-    // ✅ 口座名は accounts を正にしてOK（UI表示用）
-    accountName: currentAccount.name || "-",
-    // ✅ ここが本丸：accounts由来で上書きしない
-    currentBalance,
-
-    // ✅ in/out は getOverview が number を返したらそれを採用、なければ月次を採用
-    thisMonthIncome:
-      typeof overviewFromAction?.thisMonthIncome === "number"
-        ? overviewFromAction.thisMonthIncome
-        : thisMonthIncome,
-    thisMonthExpense:
-      typeof overviewFromAction?.thisMonthExpense === "number"
-        ? overviewFromAction.thisMonthExpense
-        : thisMonthExpense,
-    net:
-      typeof overviewFromAction?.net === "number"
-        ? overviewFromAction.net
-        : monthNet,
-  };
-
-  const monthLabel = latest?.month ? String(latest.month).slice(0, 7) : null;
-
-  const cashStatus: CashStatus = {
-    selectedAccountId,
-    selectedAccountName: currentAccount.name ?? null,
-    // ✅ アラートも同じ currentBalance を使う（これで 0 固定バグ消える）
-    currentBalance,
-    monthLabel,
-    monthIncome: latest?.income ?? null,
-    monthExpense: latest?.expense ?? null,
-    monthNet: latest ? monthNet : null,
-    updatedAtISO: new Date().toISOString(),
-  };
-
-  const alertCards: AlertCard[] = [];
-  if ((cashStatus.currentBalance ?? 0) <= 0) {
-    alertCards.push({
-      severity: "critical",
-      title: "残高が危険水域です",
-      description:
-        "現在残高が 0 円以下です。支払い予定があるなら、資金ショートが現実的です。",
-      actionLabel: "Simulationへ",
-      href: `/simulation?cashAccountId=${selectedAccountId}`,
-    });
-  }
+export default async function Page() {
+  const [cashStatus, alertCards] = await Promise.all([
+    getCashStatus(),
+    getAlertCards(),
+  ]);
 
   return (
-    <DashboardClient
-      key={`dash-${selectedAccountId}`}
-      accounts={accounts}
-      selectedAccountId={selectedAccountId}
-      monthly={monthly}
-      cashStatus={cashStatus}
-      alertCards={alertCards}
-      overviewPayload={overviewPayload}
-    />
+    <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
+      <div className="grid gap-4 md:grid-cols-3">
+        <OverviewCard />
+        <BalanceCard />
+        <EcoCharts />
+      </div>
+    </DashboardClient>
   );
 }
