@@ -2,203 +2,185 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { importCashFlowsFromRows } from "./_actions/importCashFlows";
+import { useRouter } from "next/navigation";
+import { importCashFlowsFromRows } from "./_actions/importCashFlowsFromRows";
+
+type AccountRow = {
+  id: number;
+  name: string;
+};
 
 type ParsedRow = {
   date: string; // YYYY-MM-DD
   section: "income" | "expense";
-  amount: number; // positive
+  amount: number;
   description: string;
+  raw?: string;
 };
 
-function toInt(v: unknown): number | null {
-  if (typeof v !== "string") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+type Props = {
+  cashAccountId: number | null;
+  accounts: AccountRow[];
+};
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
 }
 
-function stripBOM(s: string) {
-  return s.replace(/^\uFEFF/, "");
-}
-
-function normalizeDate(s: string): string | null {
-  const t = (s ?? "").trim();
-  if (!t) return null;
-
-  // 2026/01/31 or 2026-01-31
-  const m = t.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-  if (m) {
-    const y = m[1];
-    const mm = String(Number(m[2])).padStart(2, "0");
-    const dd = String(Number(m[3])).padStart(2, "0");
-    return `${y}-${mm}-${dd}`;
-  }
-
-  return null;
-}
-
-function parseNumber(s: string): number {
-  const t = (s ?? "").replace(/,/g, "").trim();
-  const n = Number(t);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function splitLines(text: string) {
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .split("\n")
-    .map((l) => l.trimEnd())
-    .filter((l) => l.length > 0);
+function yymmddToISO(yymmdd: string): string | null {
+  const s = (yymmdd ?? "").trim();
+  if (!/^\d{6}$/.test(s)) return null;
+  const yy = Number(s.slice(0, 2));
+  const mm = Number(s.slice(2, 4));
+  const dd = Number(s.slice(4, 6));
+  if (!(mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31)) return null;
+  const yyyy = 2000 + yy; // 20xx 前提（楽天の出力的にOK）
+  return `${yyyy}-${pad2(mm)}-${pad2(dd)}`;
 }
 
 /**
- * ✅ 引用符対応の1行パーサ（CSV/TSV）
- * - "a,b" を1セルとして扱う
- * - "" を " として扱う
+ * CSV（クォート/改行/カンマ対応）の最小パーサ
+ * - 返り値：2次元配列（row -> cols）
  */
-function parseDelimitedLine(line: string, delimiter: string): string[] {
-  const out: string[] = [];
+function parseCSV(text: string, delimiter: "," | "\t"): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
   let cur = "";
   let inQuotes = false;
 
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
 
-    if (ch === '"') {
-      const next = line[i + 1];
-      if (inQuotes && next === '"') {
+    if (inQuotes) {
+      if (ch === '"') {
         // escaped quote
-        cur += '"';
-        i++;
+        if (text[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
       } else {
-        inQuotes = !inQuotes;
+        cur += ch;
       }
       continue;
     }
 
-    if (!inQuotes && ch === delimiter) {
-      out.push(cur.trim());
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+
+    if (ch === delimiter) {
+      row.push(cur);
       cur = "";
+      continue;
+    }
+
+    if (ch === "\n") {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = "";
+      continue;
+    }
+
+    if (ch === "\r") {
+      // ignore
       continue;
     }
 
     cur += ch;
   }
 
-  out.push(cur.trim());
-  return out.map((s) => stripBOM(s));
-}
+  // last
+  row.push(cur);
+  rows.push(row);
 
-function detectDelimiter(line: string) {
-  // tab優先（TSV）
-  if (line.includes("\t") && !line.includes(",")) return "\t";
-  // CSV
-  return ",";
-}
-
-function mapHeaders(headers: string[]) {
-  const h = headers.map((x) => (x ?? "").trim());
-
-  const idx = (candidates: string[]) =>
-    h.findIndex((x) => candidates.some((k) => x === k || x.includes(k)));
-
-  // ✅ 日付表記ゆれを増やす
-  const dateIdx = idx([
-    "日付",
-    "取引日",
-    "年月日",
-    "利用日",
-    "Date",
-    "date",
-  ]);
-
-  const descIdx = idx([
-    "摘要",
-    "内容",
-    "摘要内容",
-    "取引内容",
-    "Description",
-    "description",
-  ]);
-
-  // ✅ 入出金表記ゆれを増やす（楽天CSVでありがち）
-  const inIdx = idx([
-    "預り金額",
-    "入金",
-    "入金額",
-    "受取金額",
-    "credit",
-    "income",
-  ]);
-
-  const outIdx = idx([
-    "支払金額",
-    "出金",
-    "出金額",
-    "支払",
-    "debit",
-    "expense",
-  ]);
-
-  return { dateIdx, descIdx, inIdx, outIdx };
-}
-
-/**
- * ✅ 先頭N行から「ヘッダ行」を探す
- * 条件：日付列があり、かつ入金/出金のどちらかがある
- */
-function findHeader(lines: string[], maxScan = 20) {
-  const scan = Math.min(lines.length, maxScan);
-
-  for (let i = 0; i < scan; i++) {
-    const line = lines[i];
-    const delimiter = detectDelimiter(line);
-    const headers = parseDelimitedLine(line, delimiter);
-    const { dateIdx, inIdx, outIdx } = mapHeaders(headers);
-
-    if (dateIdx >= 0 && (inIdx >= 0 || outIdx >= 0)) {
-      return { headerIndex: i, delimiter, headers };
-    }
+  // trim end empty line
+  while (rows.length && rows[rows.length - 1].every((c) => (c ?? "").trim() === "")) {
+    rows.pop();
   }
 
-  // 見つからない場合、1行目を参考情報として返す
-  const delimiter = detectDelimiter(lines[0] ?? "");
-  const headers = parseDelimitedLine(lines[0] ?? "", delimiter);
-  return { headerIndex: -1, delimiter, headers };
+  return rows;
 }
 
-export default function ImportClient(props: { cashAccountId: number | null }) {
-  const sp = useSearchParams();
+function guessDelimiter(text: string): "," | "\t" {
+  const comma = (text.match(/,/g) ?? []).length;
+  const tab = (text.match(/\t/g) ?? []).length;
+  return tab > comma ? "\t" : ",";
+}
 
-  const cashAccountId = useMemo(() => {
-    if (typeof props.cashAccountId === "number") return props.cashAccountId;
-    const fromUrl = sp.get("cashAccountId");
-    return toInt(fromUrl);
-  }, [props.cashAccountId, sp]);
+function normalize(s: string) {
+  return (s ?? "").replace(/\uFEFF/g, "").trim();
+}
 
-  const [fileName, setFileName] = useState("");
-  const [rawError, setRawError] = useState("");
-  const [rows, setRows] = useState<ParsedRow[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [resultMsg, setResultMsg] = useState("");
+function isZenginLike(rows: string[][]): boolean {
+  const first = rows.find((r) => r.some((c) => normalize(c) !== ""));
+  if (!first) return false;
+  const t = normalize(first[0]);
+  return t === "1" || t === "2";
+}
 
-  // ✅ デバッグ表示用（どの行がヘッダ扱いになったか）
-  const [debug, setDebug] = useState<{
-    headerIndex: number;
-    delimiter: string;
-    headers: string[];
-    firstLines: string[];
-  } | null>(null);
+function parseZengin(rows: string[][]): ParsedRow[] {
+  // record type "2" = detail
+  const details = rows.filter((r) => normalize(r[0]) === "2");
 
-  const canImport = !!cashAccountId && rows.length > 0 && !busy;
+  const out: ParsedRow[] = [];
+  for (const r of details) {
+    // だいたい： [0]=2, [2]=取引日(YYMMDD), [4]=入出金(1/2), [6]=金額(ゼロ埋め), [15]=摘要
+    const dateISO = yymmddToISO(normalize(r[2]));
+    if (!dateISO) continue;
+
+    const kbn = normalize(r[4]); // 1 or 2
+    const amountStr = normalize(r[6]).replace(/^0+/, "") || "0";
+    const amount = Number(amountStr);
+
+    if (!Number.isFinite(amount)) continue;
+
+    const section: "income" | "expense" = kbn === "2" ? "income" : "expense";
+
+    const descBase = normalize(r[15] ?? "");
+    const desc2 = normalize(r[16] ?? "");
+    const desc3 = normalize(r[14] ?? "");
+    const description = [descBase, desc2, desc3].filter(Boolean).join(" ").trim() || "-";
+
+    out.push({
+      date: dateISO,
+      section,
+      amount,
+      description,
+      raw: r.join(","),
+    });
+  }
+
+  return out;
+}
+
+export default function ImportClient({ cashAccountId, accounts }: Props) {
+  const router = useRouter();
+
+  const [fileName, setFileName] = useState<string>("");
+  const [rawText, setRawText] = useState<string>("");
+  const [rows, setRows] = useState<string[][]>([]);
+  const [parsed, setParsed] = useState<ParsedRow[]>([]);
+  const [error, setError] = useState<string>("");
+  const [busy, setBusy] = useState<boolean>(false);
+  const [resultMsg, setResultMsg] = useState<string>("");
+
+  const effectiveCashAccountId = cashAccountId;
+
+  const accountName = useMemo(() => {
+    if (!effectiveCashAccountId) return "（未指定）";
+    return accounts.find((a) => a.id === effectiveCashAccountId)?.name ?? `ID:${effectiveCashAccountId}`;
+  }, [accounts, effectiveCashAccountId]);
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    setRawError("");
+    setError("");
     setResultMsg("");
+    setParsed([]);
     setRows([]);
-    setDebug(null);
+    setRawText("");
 
     const f = e.target.files?.[0];
     if (!f) return;
@@ -206,114 +188,94 @@ export default function ImportClient(props: { cashAccountId: number | null }) {
     setFileName(f.name);
 
     const text = await f.text();
-    const lines = splitLines(text);
-    if (lines.length < 2) {
-      setRawError("ファイルの行数が足りません（ヘッダ＋データが必要）。");
+    setRawText(text);
+
+    const delimiter = guessDelimiter(text);
+    const r = parseCSV(text, delimiter);
+    setRows(r);
+
+    if (!effectiveCashAccountId) {
+      setError("cashAccountId が決められていません（URLに ?cashAccountId= を付けるか、口座が取得できているか確認）");
       return;
     }
 
-    const headerInfo = findHeader(lines, 20);
-    setDebug({
-      headerIndex: headerInfo.headerIndex,
-      delimiter: headerInfo.delimiter === "\t" ? "\\t" : headerInfo.delimiter,
-      headers: headerInfo.headers,
-      firstLines: lines.slice(0, 5),
-    });
-
-    if (headerInfo.headerIndex < 0) {
-      setRawError(
-        "ヘッダに日付列が見つかりません。ファイル先頭に説明行が入っているか、ヘッダ名が想定外です（下のデバッグ表示を見てください）。"
-      );
-      return;
-    }
-
-    const headers = headerInfo.headers;
-    const { dateIdx, descIdx, inIdx, outIdx } = mapHeaders(headers);
-
-    // 念のため（findHeaderで保証してるが）
-    if (dateIdx < 0) {
-      setRawError("ヘッダに日付列が見つかりません（例: 日付 / 取引日 / 年月日）。");
-      return;
-    }
-    if (inIdx < 0 && outIdx < 0) {
-      setRawError("入金/出金の列が見つかりません（例: 預り金額 / 支払金額）。");
-      return;
-    }
-
-    const parsed: ParsedRow[] = [];
-    const delimiter = headerInfo.delimiter;
-
-    for (let i = headerInfo.headerIndex + 1; i < lines.length; i++) {
-      const cols = parseDelimitedLine(lines[i], delimiter);
-      if (!cols.length) continue;
-
-      const date = normalizeDate(cols[dateIdx] ?? "");
-      if (!date) continue;
-
-      const description = descIdx >= 0 ? (cols[descIdx] ?? "").trim() : "";
-
-      const income = inIdx >= 0 ? parseNumber(cols[inIdx] ?? "") : 0;
-      const expense = outIdx >= 0 ? parseNumber(cols[outIdx] ?? "") : 0;
-
-      if (income === 0 && expense === 0) continue;
-
-      if (income > 0) {
-        parsed.push({ date, section: "income", amount: Math.abs(income), description });
-      } else if (expense > 0) {
-        parsed.push({ date, section: "expense", amount: Math.abs(expense), description });
+    // Zengin
+    if (isZenginLike(r)) {
+      const p = parseZengin(r);
+      if (!p.length) {
+        setError("Zengin形式として読めましたが、明細レコード（種別=2）が取れませんでした。");
+        return;
       }
-    }
-
-    if (!parsed.length) {
-      setRawError("取り込める行がありませんでした（0円行/日付不正など）。");
+      setParsed(p);
       return;
     }
 
-    setRows(parsed);
+    // ここから先は「ヘッダありCSV」用（将来用）
+    setError("このCSVは未対応です（Zengin形式ではありません）。いまは RB-torihikimeisai-zengin.csv のみ対応しています。");
   }
 
   async function onImport() {
-    setRawError("");
+    setError("");
     setResultMsg("");
 
-    if (!cashAccountId) {
-      setRawError("cashAccountId が未指定です（URLに ?cashAccountId=2 が必要）。");
+    if (!effectiveCashAccountId) {
+      setError("cashAccountId がありません。");
+      return;
+    }
+    if (!parsed.length) {
+      setError("取り込み対象がありません。");
       return;
     }
 
     setBusy(true);
     try {
-      const res = await importCashFlowsFromRows({ cashAccountId, rows });
+      const res = await importCashFlowsFromRows({
+        cashAccountId: effectiveCashAccountId,
+        rows: parsed.map((p) => ({
+          date: p.date,
+          section: p.section,
+          amount: p.amount,
+          description: p.description,
+        })),
+      });
 
       if (!res.ok) {
-        setRawError(res.error ?? "インポートに失敗しました。");
+        setError(res.error ?? "インポートに失敗しました。");
       } else {
-        setResultMsg(`インポート完了：${res.inserted}件`);
+        setResultMsg(`インポート完了：${res.inserted ?? 0}件`);
       }
     } catch (e: any) {
-      setRawError(e?.message ?? "インポートで例外が発生しました。");
+      setError(e?.message ?? "インポートで例外が発生しました。");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-200">
-        <div className="text-sm">
-          <div className="text-zinc-400">cashAccountId（final）</div>
-          <div className="mt-1 font-mono text-zinc-100">
-            {cashAccountId ?? "（未指定）"}
-          </div>
+    <div className="mx-auto w-full max-w-6xl space-y-4 p-6 text-zinc-200">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6">
+        <div className="text-xl font-semibold">楽天銀行・明細インポート</div>
+        <div className="mt-1 text-sm text-zinc-400">
+          CSV/TSV をアップロードして、内容を確認してから取り込みます（Zengin形式対応）。
         </div>
 
-        <div className="mt-5 flex items-center justify-between gap-4">
+        <div className="mt-4 grid gap-2 text-sm">
           <div>
-            <div className="text-sm font-semibold">ファイルアップロード</div>
-            <div className="mt-1 text-xs text-zinc-400">CSV/TSV 対応（引用符も対応）</div>
+            <span className="text-zinc-400">口座:</span>{" "}
+            <span className="font-semibold text-zinc-100">{accountName}</span>
           </div>
+          <div>
+            <span className="text-zinc-400">cashAccountId:</span>{" "}
+            <span className="font-mono text-zinc-100">{String(effectiveCashAccountId ?? "null")}</span>
+          </div>
+        </div>
+      </div>
 
-          <label className="inline-flex cursor-pointer items-center rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm hover:bg-zinc-800">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6">
+        <div className="text-sm font-semibold">ファイルアップロード</div>
+
+        <div className="mt-3 flex items-center gap-3">
+          <label className="inline-flex cursor-pointer items-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 hover:bg-zinc-800">
             <input
               type="file"
               accept=".csv,.tsv,text/csv,text/tab-separated-values"
@@ -322,100 +284,92 @@ export default function ImportClient(props: { cashAccountId: number | null }) {
             />
             ファイルを選択
           </label>
+
+          <div className="text-sm text-zinc-300">
+            {fileName ? `選択中: ${fileName}` : "未選択"}
+          </div>
         </div>
 
-        {fileName ? (
-          <div className="mt-3 text-sm text-zinc-300">
-            選択中: <span className="font-mono">{fileName}</span>
+        {error && (
+          <div className="mt-4 rounded-lg border border-red-800 bg-red-950/40 p-3 text-sm text-red-200">
+            {error}
           </div>
-        ) : null}
+        )}
 
-        {rawError ? (
-          <div className="mt-4 rounded-md border border-red-900 bg-red-950/40 p-3 text-sm text-red-200">
-            {rawError}
-          </div>
-        ) : null}
-
-        {resultMsg ? (
-          <div className="mt-4 rounded-md border border-emerald-900 bg-emerald-950/30 p-3 text-sm text-emerald-200">
+        {resultMsg && (
+          <div className="mt-4 rounded-lg border border-emerald-800 bg-emerald-950/30 p-3 text-sm text-emerald-200">
             {resultMsg}
           </div>
-        ) : null}
+        )}
 
-        <div className="mt-5 flex items-center gap-3">
+        <div className="mt-4 flex items-center gap-3">
           <button
-            onClick={onImport}
-            disabled={!canImport}
-            className="rounded-md border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50 hover:bg-zinc-800"
+            onClick={() => router.push("/dashboard")}
+            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 hover:bg-zinc-800"
           >
-            {busy ? "取り込み中..." : "インポート実行"}
+            ダッシュボードへ戻る
           </button>
 
-          {!cashAccountId ? (
-            <div className="text-xs text-zinc-400">※ URLの cashAccountId が取れていません</div>
-          ) : null}
+          <button
+            onClick={onImport}
+            disabled={busy || !parsed.length || !effectiveCashAccountId}
+            className="rounded-lg bg-zinc-100 px-3 py-2 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? "インポート中..." : "インポート実行"}
+          </button>
+
+          <div className="text-xs text-zinc-400">
+            {parsed.length ? `取り込み対象: ${parsed.length}件` : "まずファイルを選択してください"}
+          </div>
         </div>
       </div>
 
-      {/* ✅ デバッグ表示（原因即特定） */}
-      {debug ? (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-200 space-y-3">
-          <div className="text-sm font-semibold">デバッグ（読み取り状況）</div>
-          <div className="text-sm text-zinc-400">
-            headerIndex: <span className="font-mono text-zinc-200">{debug.headerIndex}</span>{" "}
-            / delimiter: <span className="font-mono text-zinc-200">{debug.delimiter}</span>
-          </div>
-          <div className="text-xs text-zinc-400">先頭5行（参考）</div>
-          <pre className="rounded-md border border-zinc-800 bg-zinc-900 p-3 text-xs overflow-x-auto whitespace-pre-wrap">
-{debug.firstLines.join("\n")}
-          </pre>
-          <div className="text-xs text-zinc-400">検出したヘッダ（参考）</div>
-          <pre className="rounded-md border border-zinc-800 bg-zinc-900 p-3 text-xs overflow-x-auto whitespace-pre-wrap">
-{debug.headers.join(" | ")}
-          </pre>
-        </div>
-      ) : null}
-
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6 text-zinc-200">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6">
         <div className="text-sm font-semibold">プレビュー（先頭50件）</div>
 
-        <div className="mt-3 overflow-x-auto">
-          <table className="min-w-[720px] w-full text-sm">
-            <thead className="text-zinc-400">
-              <tr>
-                <th className="py-2 text-left">日付</th>
-                <th className="py-2 text-left">区分</th>
-                <th className="py-2 text-right">金額</th>
-                <th className="py-2 text-left">摘要</th>
-              </tr>
-            </thead>
-            <tbody className="text-zinc-200">
-              {rows.slice(0, 50).map((r, idx) => (
-                <tr key={`${r.date}-${idx}`} className="border-t border-zinc-800">
-                  <td className="py-2">{r.date}</td>
-                  <td className="py-2">{r.section === "income" ? "収入" : "支出"}</td>
-                  <td className="py-2 text-right tabular-nums">
-                    {r.amount.toLocaleString("ja-JP")} 円
-                  </td>
-                  <td className="py-2">{r.description || "-"}</td>
+        {!parsed.length ? (
+          <div className="mt-3 text-sm text-zinc-400">まだデータがありません（ファイルを選択してください）</div>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full table-auto border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800 text-zinc-300">
+                  <th className="px-2 py-2 text-left font-semibold">日付</th>
+                  <th className="px-2 py-2 text-left font-semibold">区分</th>
+                  <th className="px-2 py-2 text-right font-semibold">金額</th>
+                  <th className="px-2 py-2 text-left font-semibold">摘要</th>
                 </tr>
-              ))}
-              {!rows.length ? (
-                <tr>
-                  <td className="py-4 text-zinc-500" colSpan={4}>
-                    まだデータがありません（ファイルを選択してください）
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {parsed.slice(0, 50).map((p, idx) => (
+                  <tr key={idx} className="border-b border-zinc-900">
+                    <td className="px-2 py-2 text-left text-zinc-100">{p.date}</td>
+                    <td className="px-2 py-2 text-left text-zinc-100">
+                      {p.section === "income" ? "収入" : "支出"}
+                    </td>
+                    <td className="px-2 py-2 text-right text-zinc-100 tabular-nums">
+                      {p.amount.toLocaleString("ja-JP")} 円
+                    </td>
+                    <td className="px-2 py-2 text-left text-zinc-100">{p.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
 
-        {rows.length > 50 ? (
-          <div className="mt-2 text-xs text-zinc-400">
-            ※ {rows.length}件中、先頭50件のみ表示
+            <div className="mt-3 text-xs text-zinc-500">
+              ※Zengin形式はヘッダ行が無いため、列名検索ではなく「レコード種別=2」から抽出しています。
+            </div>
           </div>
-        ) : null}
+        )}
+      </div>
+
+      {/* デバッグ用：必要なら表示 */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-6">
+        <div className="text-sm font-semibold">デバッグ（読み取り状況）</div>
+        <div className="mt-2 text-xs text-zinc-400">
+          delimiter 推定: {rawText ? guessDelimiter(rawText) : "-"} / rows: {rows.length} / parsed:{" "}
+          {parsed.length}
+        </div>
       </div>
     </div>
   );
