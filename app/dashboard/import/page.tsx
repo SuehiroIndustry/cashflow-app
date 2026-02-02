@@ -1,32 +1,44 @@
-// app/dashboard/page.tsx
+// app/dashboard/import/page.tsx
 export const dynamic = "force-dynamic";
 
-import DashboardClient from "./DashboardClient";
+import ImportClient from "./ImportClient";
 
-import OverviewCard from "./_components/OverviewCard";
-import BalanceCard from "./_components/BalanceCard";
-import EcoCharts from "./_components/EcoCharts";
+type Props = {
+  searchParams?: {
+    cashAccountId?: string;
+  };
+};
 
-import { getCashStatus } from "./_actions/getCashStatus";
-import { getAlertCards } from "./_actions/getAlertCards";
+function toInt(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
-import type { CashStatus, AlertCard } from "./_types";
-
-export default async function DashboardPage() {
-  // ✅ ここは「危険信号だけ」のためにサーバー側で取る（今まで通りの思想）
-  const [cashStatus, alertCards] = await Promise.all([
-    getCashStatus().catch(() => ({ status: "unknown" } as CashStatus)),
-    getAlertCards().catch(() => [] as AlertCard[]),
-  ]);
+export default function Page({ searchParams }: Props) {
+  const cashAccountId = toInt(searchParams?.cashAccountId);
 
   return (
-    <DashboardClient cashStatus={cashStatus} alertCards={alertCards}>
-      {/* ✅ ダッシュボード本体（カード等）は page.tsx 側で固定表示 */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <OverviewCard />
-        <BalanceCard />
-        <EcoCharts />
+    <div className="min-h-screen bg-black text-white">
+      <div className="mx-auto max-w-5xl p-6">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">楽天銀行 明細インポート</h1>
+          <a
+            href="/dashboard"
+            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-800"
+          >
+            ダッシュボードへ戻る
+          </a>
+        </div>
+
+        <p className="mt-2 text-sm text-zinc-300">
+          CSVは一切いじらず、そのままアップロードして取り込みます。
+        </p>
+
+        <div className="mt-6">
+          <ImportClient cashAccountId={cashAccountId} />
+        </div>
       </div>
-    </DashboardClient>
+    </div>
   );
 }
