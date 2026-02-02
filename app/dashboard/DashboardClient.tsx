@@ -1,160 +1,237 @@
 // app/dashboard/DashboardClient.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState, useTransition } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
 
+import { getAccounts } from "./_actions/getAccounts";
+import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
+import { getOverview } from "./_actions/getOverview";
+
 import type {
   AccountRow,
   MonthlyBalanceRow,
+  OverviewPayload,
   CashStatus,
   AlertCard,
-  OverviewPayload,
 } from "./_types";
 
 type Props = {
-  accounts: AccountRow[];
-  selectedAccountId: number | null;
-  monthly: MonthlyBalanceRow[];
   cashStatus: CashStatus;
   alertCards: AlertCard[];
-  overviewPayload: OverviewPayload;
+  children?: React.ReactNode;
+
+  // page.tsx 側から渡してるなら使う（無くても動くようにしてある）
+  initialCashAccountId?: number | null;
 };
 
-export default function DashboardClient(props: Props) {
-  const {
-    accounts,
-    selectedAccountId,
-    monthly,
-    cashStatus,
-    alertCards,
-    overviewPayload,
-  } = props;
+function toInt(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
+export default function DashboardClient({
+  cashStatus,
+  alertCards,
+  children,
+  initialCashAccountId = null,
+}: Props) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
 
-  // select は string で統一
-  const [localSelectedId, setLocalSelectedId] = useState<string>(() =>
-    selectedAccountId != null ? String(selectedAccountId) : ""
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(
+    initialCashAccountId
   );
 
-  // props 追従
+  const [overview, setOverview] = useState<OverviewPayload | null>(null);
+  const [monthly, setMonthly] = useState<MonthlyBalanceRow[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [loadingData, setLoadingData] = useState(false);
+
+  const selectedAccount = useMemo(() => {
+    return accounts.find((a) => a.id === selectedAccountId) ?? null;
+  }, [accounts, selectedAccountId]);
+
+  // 口座一覧ロード
   useEffect(() => {
-    setLocalSelectedId(selectedAccountId != null ? String(selectedAccountId) : "");
-  }, [selectedAccountId]);
+    let alive = true;
 
-  const selectedLabel = useMemo(() => {
-    const idNum = Number(localSelectedId);
-    const a = accounts.find((x) => x.id === idNum);
-    return a?.name ?? "-";
-  }, [accounts, localSelectedId]);
+    (async () => {
+      try {
+        setLoadingAccounts(true);
+        const data = await getAccounts();
+        if (!alive) return;
 
-  function handleAccountChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const nextIdStr = e.target.value;
-    setLocalSelectedId(nextIdStr);
+        setAccounts(data ?? []);
 
-    // ✅ “確実に” サーバー側を再実行させる（これが一番強い）
-    // router.refresh の効きが怪しい環境でも必ず切り替わる
-    window.location.assign(`/dashboard?cashAccountId=${encodeURIComponent(nextIdStr)}`);
-  }
+        // 初期選択：initialCashAccountId がなければ先頭を選ぶ
+        if (selectedAccountId == null) {
+          const firstId = data?.[0]?.id ?? null;
+          setSelectedAccountId(firstId);
+        }
+      } finally {
+        if (alive) setLoadingAccounts(false);
+      }
+    })();
 
-  const selectedAccountIdForLinks =
-    localSelectedId && String(localSelectedId).trim() !== "" ? localSelectedId : "";
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 選択口座のデータロード（Overview / Monthly）
+  const loadAccountData = useCallback(async (cashAccountId: number | null) => {
+    if (!cashAccountId) {
+      setOverview(null);
+      setMonthly([]);
+      return;
+    }
+
+    setLoadingData(true);
+    try {
+      const [ov, mo] = await Promise.all([
+        getOverview({ cashAccountId }),
+        getMonthlyBalance({ cashAccountId, months: 12 }),
+      ]);
+
+      setOverview((ov ?? null) as OverviewPayload | null);
+      setMonthly((mo ?? []) as MonthlyBalanceRow[]);
+    } finally {
+      setLoadingData(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAccountData(selectedAccountId);
+  }, [selectedAccountId, loadAccountData]);
+
+  // ドロップダウン変更
+  const onChangeAccount = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value;
+    const id = toInt(v);
+    setSelectedAccountId(id);
+    // URLに反映させたいならこれ（page.tsx が searchParams 見てる構成向け）
+    // router.push(`/dashboard?cashAccountId=${id ?? ""}`);
+  };
+
+  // ✅ ここが今回の本題：インポートページへの正しいリンク
+  const goImport = () => {
+    if (!selectedAccountId) return;
+    router.push(`/dashboard/import?cashAccountId=${selectedAccountId}`);
+  };
+
+  const goSimulation = () => {
+    router.push("/simulation");
+  };
 
   return (
-    <div className="w-full">
-      {/* 上部 */}
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="text-sm opacity-80">口座:</div>
+    <div className="min-h-screen bg-black text-white">
+      {/* Header */}
+      <div className="px-6 pt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-lg font-semibold">Cashflow Dashboard</div>
 
-          <select
-            className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white"
-            value={localSelectedId}
-            onChange={handleAccountChange}
-            disabled={isPending || accounts.length === 0}
-          >
-            {accounts.map((a) => (
-              <option key={String(a.id)} value={String(a.id)}>
-                {a.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-800"
+              onClick={goSimulation}
+            >
+              Simulation
+            </button>
 
-          <div className="text-xs opacity-70">
-            表示中: {isPending ? "切替中..." : selectedLabel}
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={goImport}
+              disabled={!selectedAccountId}
+              title={!selectedAccountId ? "口座を選択してください" : ""}
+            >
+              楽天銀行・明細インポート
+            </button>
+
+            <button
+              type="button"
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-800"
+              onClick={() => router.push("/logout")}
+            >
+              Logout
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              startTransition(() => {
-                router.push(
-                  selectedAccountIdForLinks
-                    ? `/simulation?cashAccountId=${encodeURIComponent(selectedAccountIdForLinks)}`
-                    : "/simulation"
-                );
-              })
-            }
-            className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white hover:bg-white/10"
-          >
-            Simulation
-          </button>
+        {/* Account selector row */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="text-sm text-zinc-200">口座:</div>
 
-          <button
-            type="button"
-            onClick={() =>
-              startTransition(() => {
-                router.push(
-                  selectedAccountIdForLinks
-                    ? `/import?cashAccountId=${encodeURIComponent(selectedAccountIdForLinks)}`
-                    : "/import"
-                );
-              })
-            }
-            className="rounded border border-white/20 bg-black px-3 py-2 text-sm text-white hover:bg-white/10"
+          <select
+            value={selectedAccountId ?? ""}
+            onChange={onChangeAccount}
+            className="min-w-[220px] rounded-lg border border-zinc-700 bg-black px-3 py-2 text-sm text-white"
+            disabled={loadingAccounts}
           >
-            楽天銀行・明細インポート
-          </button>
+            {loadingAccounts && <option value="">読み込み中...</option>}
+            {!loadingAccounts && accounts.length === 0 && (
+              <option value="">口座がありません</option>
+            )}
+            {!loadingAccounts &&
+              accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+          </select>
+
+          <div className="text-sm text-zinc-400">
+            表示中:{" "}
+            <span className="text-zinc-200">
+              {selectedAccount?.name ?? "未選択"}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* アラート */}
-      {alertCards.length > 0 && (
-        <div className="mb-6 space-y-3">
-          {alertCards.map((a, i) => (
-            <div
-              key={`${a.title}-${i}`}
-              className="rounded border border-white/10 bg-white p-4 text-black"
-            >
-              <div className="font-semibold">{a.title}</div>
-              {a.description && <div className="mt-1 text-sm">{a.description}</div>}
-              {a.href && a.actionLabel && (
-                <button
-                  type="button"
-                  onClick={() => startTransition(() => router.push(a.href!))}
-                  className="mt-3 inline-flex rounded bg-black px-3 py-2 text-sm text-white hover:bg-black/80"
-                >
-                  {a.actionLabel}
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Body */}
+      <div className="px-6 pb-10 pt-6">
+        {/* ページ側から children を渡してる構成ならそれを優先 */}
+        {children ? (
+          children
+        ) : (
+          <div className="grid gap-4 md:grid-cols-3">
+            <OverviewCard
+              cashStatus={cashStatus}
+              overview={overview}
+              loading={loadingData}
+            />
+            <BalanceCard monthly={monthly} loading={loadingData} />
+            <EcoCharts monthly={monthly} loading={loadingData} />
+          </div>
+        )}
 
-      {/* 中身 */}
-      <div className="grid gap-4 md:grid-cols-3" key={`grid-${selectedAccountId ?? "none"}`}>
-        <OverviewCard payload={overviewPayload} />
-        <BalanceCard rows={monthly} />
-        <EcoCharts rows={monthly} />
+        {/* Alerts（使ってるなら） */}
+        {alertCards?.length > 0 && (
+          <div className="mt-6 space-y-2">
+            {alertCards.map((a, idx) => (
+              <div
+                key={`${a.title}-${idx}`}
+                className="rounded-xl border border-zinc-800 bg-zinc-950 p-4"
+              >
+                <div className="text-sm font-semibold text-zinc-100">
+                  {a.title}
+                </div>
+                {a.message && (
+                  <div className="mt-1 text-sm text-zinc-300">{a.message}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
