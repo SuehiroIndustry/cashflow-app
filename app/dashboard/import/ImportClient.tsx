@@ -33,14 +33,14 @@ export default function ImportClient({ cashAccountId }: Props) {
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
         <p className="mt-2 text-xs text-zinc-400">
-          ※ まずは画面復旧（404解消）が目的。次に「アップロード→DB反映」を繋ぐ。
+          まずは画面を出す（404解消）。次に「アップロード→DB反映」を繋ぐ。
         </p>
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
         <button
           type="button"
-          className="rounded-lg bg-zinc-800 px-4 py-2 text-sm text-white hover:bg-zinc-700"
+          className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white hover:bg-zinc-800"
           onClick={() => router.push("/dashboard")}
         >
           ダッシュボードへ戻る
@@ -51,8 +51,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           disabled={!!disabledReason}
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
           onClick={() => {
-            // ここに後で「アップロード→取り込み」処理を繋ぐ
-            alert("次はここにインポート処理を繋ぐ。まず404は潰れたはず。");
+            alert("次はここにインポート処理を繋ぐ。まず画面を復旧。");
           }}
         >
           インポート実行（仮）
