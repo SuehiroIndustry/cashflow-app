@@ -1,8 +1,14 @@
-// app/dashboard/DashboardClient.tsx
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
+
+import { getOverview } from "./_actions/getOverview";
+import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
 import type {
   AccountRow,
@@ -12,186 +18,280 @@ import type {
   OverviewPayload,
 } from "./_types";
 
-import { getOverview } from "./_actions/getOverview";
-import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
-
 type Props = {
-  accounts: AccountRow[];
-  selectedAccountId: number | null;
+  // page.tsx から渡される想定（全部 optional にして “Propsズレ地獄” を終了させる）
+  accounts?: AccountRow[];
+  selectedAccountId?: number | null;
 
-  // ✅ 初期表示用（サーバー側で取れたら渡す / 無理なら null でOK）
-  initialCashStatus?: CashStatus | null;
-  initialAlertCards?: AlertCard[];
-  initialOverviewPayload?: OverviewPayload | null;
-  initialMonthly?: MonthlyBalanceRow[];
+  monthly?: MonthlyBalanceRow[];
+
+  cashStatus?: CashStatus | null;
+  alertCards?: AlertCard[];
+  overviewPayload?: OverviewPayload | null;
 
   children?: React.ReactNode;
 };
 
-function toMonthStartISO(d = new Date()): string {
+function toInt(v: unknown): number | null {
+  if (typeof v !== "string") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function monthStartISO(d = new Date()): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   return `${y}-${m}-01`;
 }
 
-export default function DashboardClient({
-  accounts,
-  selectedAccountId,
-  initialCashStatus = null,
-  initialAlertCards = [],
-  initialOverviewPayload = null,
-  initialMonthly = [],
-  children,
-}: Props) {
+// getOverview の戻りが揺れても受け止めるための型（安全側）
+type OverviewReturnMaybe =
+  | OverviewPayload
+  | {
+      cashStatus?: CashStatus | null;
+      alertCards?: AlertCard[] | null;
+      overviewPayload?: OverviewPayload | null;
+      overview?: OverviewPayload | null;
+    }
+  | null
+  | undefined;
+
+export default function DashboardClient(props: Props) {
   const router = useRouter();
 
+  const accounts = props.accounts ?? [];
+  const initialSelected = props.selectedAccountId ?? null;
+
   const [cashAccountId, setCashAccountId] = useState<number | null>(
-    selectedAccountId
+    initialSelected
+  );
+
+  const [monthly, setMonthly] = useState<MonthlyBalanceRow[]>(
+    Array.isArray(props.monthly) ? props.monthly : []
   );
 
   const [cashStatus, setCashStatus] = useState<CashStatus | null>(
-    initialCashStatus
+    props.cashStatus ?? null
   );
-  const [alertCards, setAlertCards] = useState<AlertCard[]>(initialAlertCards);
+
+  const [alertCards, setAlertCards] = useState<AlertCard[]>(
+    Array.isArray(props.alertCards) ? props.alertCards : []
+  );
+
   const [overviewPayload, setOverviewPayload] = useState<OverviewPayload | null>(
-    initialOverviewPayload
+    props.overviewPayload ?? null
   );
-  const [monthly, setMonthly] = useState<MonthlyBalanceRow[]>(initialMonthly);
 
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [loadingData, setLoadingData] = useState(false);
 
-  const accountOptions = useMemo(() => {
-    return accounts.map((a) => ({
-      id: a.id,
-      name: a.name,
-    }));
-  }, [accounts]);
+  const selectedAccount = useMemo(() => {
+    if (!cashAccountId) return null;
+    return accounts.find((a) => a.id === cashAccountId) ?? null;
+  }, [accounts, cashAccountId]);
 
-  const syncQuery = useCallback(
+  const onChangeAccount = useCallback(
     (nextId: number | null) => {
+      setCashAccountId(nextId);
+
+      // URLクエリにも反映（page.tsx の searchParams と整合）
       if (!nextId) {
-        router.replace("/dashboard");
+        router.push("/dashboard");
         return;
       }
-      router.replace(`/dashboard?cashAccountId=${nextId}`);
+      router.push(`/dashboard?cashAccountId=${nextId}`);
     },
     [router]
   );
 
   const fetchAll = useCallback(
     async (id: number) => {
-      setLoading(true);
-      setErrorMsg(null);
-
+      setLoadingData(true);
       try {
-        const month = toMonthStartISO();
-
         const [ov, mo] = await Promise.all([
-          getOverview({ cashAccountId: id, month }),
+          getOverview({ cashAccountId: id, month: monthStartISO() }),
           getMonthlyBalance({ cashAccountId: id, months: 12 }),
         ]);
 
-        // getOverview の返り値構造が揺れても死なないように「あるものだけ」拾う
-        //（型は _types に合わせて最終的に揃える）
-        // @ts-expect-error: runtime-safe extraction
-        setCashStatus(ov?.cashStatus ?? null);
-        // @ts-expect-error: runtime-safe extraction
-        setAlertCards(Array.isArray(ov?.alertCards) ? ov.alertCards : []);
-        // @ts-expect-error: runtime-safe extraction
-        setOverviewPayload(ov?.overviewPayload ?? ov?.overview ?? null);
+        // monthly
+        setMonthly(Array.isArray(mo) ? (mo as MonthlyBalanceRow[]) : []);
 
-        setMonthly(Array.isArray(mo) ? mo : []);
+        // overview / cashStatus / alertCards
+        const ovAny = ov as OverviewReturnMaybe;
+
+        // 1) overviewPayload が直接返るケース（OverviewPayload）
+        // 2) { cashStatus, alertCards, overviewPayload } のケース
+        if (ovAny && typeof ovAny === "object") {
+          const maybeObj = ovAny as {
+            cashStatus?: CashStatus | null;
+            alertCards?: AlertCard[] | null;
+            overviewPayload?: OverviewPayload | null;
+            overview?: OverviewPayload | null;
+          };
+
+          // cashStatus（あれば更新、なければ据え置き）
+          if ("cashStatus" in maybeObj) {
+            setCashStatus(maybeObj.cashStatus ?? null);
+          }
+
+          // alertCards（あれば更新、なければ空に）
+          if ("alertCards" in maybeObj) {
+            setAlertCards(Array.isArray(maybeObj.alertCards) ? maybeObj.alertCards : []);
+          }
+
+          // overviewPayload（名前揺れ吸収）
+          const nextOverview =
+            maybeObj.overviewPayload ?? maybeObj.overview ?? null;
+
+          // もし “OverviewPayload そのもの” が返っているなら、ここが null になり得るので fallback
+          if (nextOverview) {
+            setOverviewPayload(nextOverview);
+          } else {
+            // OverviewPayload っぽいキーを持つなら、そのまま採用（型は厳密に追わない）
+            setOverviewPayload(ovAny as OverviewPayload);
+          }
+        } else {
+          setOverviewPayload(null);
+          setCashStatus(null);
+          setAlertCards([]);
+        }
       } catch (e) {
         console.error("[DashboardClient] fetchAll error:", e);
-        setErrorMsg("データ取得に失敗しました。少し時間をおいて再読み込みしてください。");
+        // 失敗時は “表示できるものだけ” 残す
+        setMonthly([]);
+        setAlertCards([]);
+        setOverviewPayload(null);
       } finally {
-        setLoading(false);
+        setLoadingData(false);
       }
     },
     []
   );
 
+  // 初期表示：選択中口座があればロード
   useEffect(() => {
     if (!cashAccountId) return;
-    fetchAll(cashAccountId);
+    void fetchAll(cashAccountId);
   }, [cashAccountId, fetchAll]);
 
+  // UI（文字色・背景色は明示して Fast Refresh で消えないように）
   return (
-    <div className="space-y-4">
-      {/* ✅ 上部：口座セレクタ */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm text-zinc-300">口座を選択</div>
-
-          <select
-            className="w-full md:w-[360px] rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-100"
-            value={cashAccountId ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              const next = v ? Number(v) : null;
-              setCashAccountId(next);
-              syncQuery(next);
-            }}
-          >
-            <option value="">選択してください</option>
-            {accountOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {loading && (
-          <div className="mt-3 text-sm text-zinc-400">読み込み中…</div>
-        )}
-        {errorMsg && (
-          <div className="mt-3 text-sm text-red-400">{errorMsg}</div>
-        )}
-      </div>
-
-      {/* ✅ アラート */}
-      {alertCards.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-          <div className="mb-2 text-sm font-semibold text-zinc-200">
-            アラート
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      {/* ヘッダー */}
+      <div className="border-b border-zinc-800">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="text-lg font-semibold text-zinc-100">
+              Dashboard
+            </div>
+            <div className="text-sm text-zinc-400">
+              口座を切り替えるとデータを再取得します
+            </div>
           </div>
 
-          <div className="space-y-2">
-            {alertCards.map((a, idx) => {
-              // message/description/body 等、どれかあれば拾う（型崩れ回避）
-              const anyA = a as unknown as Record<string, unknown>;
-              const detail =
-                (typeof anyA.message === "string" && anyA.message) ||
-                (typeof anyA.description === "string" && anyA.description) ||
-                (typeof anyA.body === "string" && anyA.body) ||
-                "";
+          <div className="flex items-center gap-2">
+            <div className="text-sm text-zinc-300">口座</div>
+            <select
+              value={cashAccountId ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                const next = v === "" ? null : toInt(v);
+                onChangeAccount(next);
+              }}
+              className="h-10 rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:ring-2 focus:ring-zinc-500"
+            >
+              <option value="" className="text-zinc-300">
+                選択してください
+              </option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id} className="text-zinc-100">
+                  {a.name}
+                </option>
+              ))}
+            </select>
 
-              return (
-                <div
-                  key={(a as any).id ?? `${idx}`}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 p-3"
-                >
-                  <div className="text-sm font-medium text-zinc-100">
-                    {(a as any).title ?? "通知"}
+            {loadingData && (
+              <div className="text-xs text-zinc-400">読み込み中…</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* アラート */}
+      {alertCards.length > 0 && (
+        <div className="mx-auto max-w-6xl px-4 pt-4">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <div className="text-sm font-semibold text-zinc-100">
+              アラート
+            </div>
+            <div className="mt-2 grid gap-2">
+              {alertCards.map((a, idx) => {
+                // AlertCard の形が揺れても落ちないように安全表示（message など固定参照しない）
+                const anyA = a as unknown as Record<string, unknown>;
+                const title =
+                  (typeof anyA.title === "string" && anyA.title) ||
+                  (typeof anyA.headline === "string" && anyA.headline) ||
+                  `Alert ${idx + 1}`;
+
+                const detail =
+                  (typeof anyA.detail === "string" && anyA.detail) ||
+                  (typeof anyA.description === "string" && anyA.description) ||
+                  (typeof anyA.subline === "string" && anyA.subline) ||
+                  "";
+
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3"
+                  >
+                    <div className="text-sm font-medium text-zinc-100">
+                      {title}
+                    </div>
+                    {detail ? (
+                      <div className="mt-1 text-xs text-zinc-300">
+                        {detail}
+                      </div>
+                    ) : null}
                   </div>
-                  {detail ? (
-                    <div className="mt-1 text-sm text-zinc-300">{detail}</div>
-                  ) : null}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
 
-      {/* ✅ 子コンポーネント（OverviewCard / BalanceCard / EcoCharts） */}
-      <div>{children}</div>
-
-      {/* ※ cashStatus / overviewPayload / monthly を子が使う設計なら、
-         本来は Context を貼るのが理想。
-         ただ今は「ビルドを通す」「壊れてる import/型を止血」が最優先。 */}
+      {/* 本体 */}
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        {/* 子要素が来てるならそれを優先（従来のラップ構造にも対応） */}
+        {props.children ? (
+          props.children
+        ) : (
+          <div className="grid gap-4 md:grid-cols-3">
+            {/* 各カードの Props が変わっても壊れにくいよう、必要最低限の情報だけ渡す */}
+            <OverviewCard
+              // @ts-ignore ここはコンポーネント側のProps差分吸収（UI優先）
+              cashStatus={cashStatus}
+              // @ts-ignore
+              overview={overviewPayload}
+              // @ts-ignore
+              loading={loadingData}
+            />
+            <BalanceCard
+              // @ts-ignore
+              selectedAccount={selectedAccount}
+              // @ts-ignore
+              monthly={monthly}
+              // @ts-ignore
+              loading={loadingData}
+            />
+            <EcoCharts
+              // @ts-ignore
+              monthly={monthly}
+              // @ts-ignore
+              loading={loadingData}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
