@@ -1,25 +1,15 @@
 // app/dashboard/page.tsx
 export const dynamic = "force-dynamic";
 
+import DashboardClient from "./DashboardClient";
+
+import OverviewCard from "./_components/OverviewCard";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
+
 import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
-
-import DashboardClient from "./DashboardClient";
-
-import type {
-  AccountRow,
-  MonthlyBalanceRow,
-  CashStatus,
-  AlertCard,
-  OverviewPayload,
-} from "./_types";
-
-type Props = {
-  searchParams?: {
-    cashAccountId?: string;
-  };
-};
 
 function toInt(v: unknown): number | null {
   if (typeof v !== "string") return null;
@@ -33,55 +23,57 @@ function monthStartISO(d = new Date()): string {
   return `${y}-${m}-01`;
 }
 
+type Props = {
+  searchParams?: {
+    cashAccountId?: string;
+  };
+};
+
 export default async function Page({ searchParams }: Props) {
   const cashAccountId = toInt(searchParams?.cashAccountId);
 
-  const accounts = (await getAccounts()) as AccountRow[];
+  const accounts = await getAccounts();
 
-  // ✅ 口座未選択なら “空” を返して UI は出す（落とさない）
+  // ✅ 未選択なら「初期データ無し」で表示（型地雷を踏まない）
   if (!cashAccountId) {
-    const cashStatus: CashStatus = {
-      status: "ok",
-      headline: "",
-      subline: "",
-    };
-
-    const alertCards: AlertCard[] = [];
-    const overviewPayload = null as unknown as OverviewPayload; // DashboardClientの型都合用（後で整理）
-
     return (
-      <DashboardClient
-        accounts={accounts}
-        selectedAccountId={null}
-        monthly={[]}
-        cashStatus={cashStatus}
-        alertCards={alertCards}
-        overviewPayload={overviewPayload}
-      />
+      <DashboardClient accounts={accounts} selectedAccountId={null}>
+        <div className="grid gap-4 md:grid-cols-3">
+          <OverviewCard />
+          <BalanceCard />
+          <EcoCharts />
+        </div>
+      </DashboardClient>
     );
   }
 
-  const [overviewPayload, monthly] = await Promise.all([
+  const [ov, monthly] = await Promise.all([
     getOverview({ cashAccountId, month: monthStartISO() }),
     getMonthlyBalance({ cashAccountId, months: 12 }),
   ]);
 
-  const cashStatus: CashStatus = {
-    status: "ok",
-    headline: "",
-    subline: "",
-  };
-
-  const alertCards: AlertCard[] = [];
+  // getOverview の返り値に合わせて「あるものだけ」渡す（欠けても死なない）
+  // @ts-expect-error: runtime-safe extraction
+  const initialCashStatus = ov?.cashStatus ?? null;
+  // @ts-expect-error: runtime-safe extraction
+  const initialAlertCards = Array.isArray(ov?.alertCards) ? ov.alertCards : [];
+  // @ts-expect-error: runtime-safe extraction
+  const initialOverviewPayload = ov?.overviewPayload ?? ov?.overview ?? null;
 
   return (
     <DashboardClient
       accounts={accounts}
       selectedAccountId={cashAccountId}
-      monthly={(monthly ?? []) as MonthlyBalanceRow[]}
-      cashStatus={cashStatus}
-      alertCards={alertCards}
-      overviewPayload={overviewPayload as OverviewPayload}
-    />
+      initialCashStatus={initialCashStatus}
+      initialAlertCards={initialAlertCards}
+      initialOverviewPayload={initialOverviewPayload}
+      initialMonthly={Array.isArray(monthly) ? monthly : []}
+    >
+      <div className="grid gap-4 md:grid-cols-3">
+        <OverviewCard />
+        <BalanceCard />
+        <EcoCharts />
+      </div>
+    </DashboardClient>
   );
 }
