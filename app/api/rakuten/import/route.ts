@@ -28,31 +28,17 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
+function maskInfo(v: string | undefined | null) {
+  const s = (v ?? "").trim();
+  return {
+    present: !!s,
+    length: s.length,
+  };
+}
+
 export async function POST(req: Request) {
   try {
-    /* =========================================================
-       🔍 デバッグ：env が本当に読めているかを即返す
-       Header: x-debug-env: 1 を付けたときだけ発動
-    ========================================================= */
-    const debugEnv = req.headers.get("x-debug-env") === "1";
-    if (debugEnv) {
-      return NextResponse.json({
-        env: {
-          NEXT_PUBLIC_SUPABASE_URL:
-            process.env.NEXT_PUBLIC_SUPABASE_URL ? "OK" : "MISSING",
-          NEXT_PUBLIC_SUPABASE_ANON_KEY:
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "OK" : "MISSING",
-          SUPABASE_SERVICE_ROLE_KEY:
-            process.env.SUPABASE_SERVICE_ROLE_KEY ? "OK" : "MISSING",
-          SERVICE_ROLE_KEY_LENGTH:
-            (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").length,
-        },
-      });
-    }
-
-    /* =========================================================
-       ① Content-Type チェック
-    ========================================================= */
+    // ✅ JSONで受け取る
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
       return NextResponse.json(
@@ -61,9 +47,6 @@ export async function POST(req: Request) {
       );
     }
 
-    /* =========================================================
-       ② Body パース
-    ========================================================= */
     const body = (await req.json()) as Partial<Body>;
     const cashAccountId = Number(body.cashAccountId);
 
@@ -76,28 +59,45 @@ export async function POST(req: Request) {
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
     if (!rows.length) {
+      return NextResponse.json({ error: "rows is required" }, { status: 400 });
+    }
+
+    // ✅ cookies は await しない（Next.jsのビルドエラー回避）
+    const cookieStore = cookies();
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // ✅ 「本当に env が空なのか」をAPIが返す（値は返さない＝漏洩防止）
+    if (req.headers.get("x-debug-env") === "1") {
+      return NextResponse.json({
+        ok: true,
+        debug: {
+          NEXT_PUBLIC_SUPABASE_URL: maskInfo(supabaseUrl),
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: maskInfo(supabaseAnonKey),
+          SUPABASE_SERVICE_ROLE_KEY: maskInfo(serviceKey),
+          VERCEL_ENV: process.env.VERCEL_ENV ?? null,
+          NODE_ENV: process.env.NODE_ENV ?? null,
+        },
+      });
+    }
+
+    if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json(
-        { error: "rows is required" },
-        { status: 400 }
+        { error: "Supabase public env missing" },
+        { status: 500 }
       );
     }
 
-    /* =========================================================
-       ③ Cookie からログインユーザー取得
-       ✅ Next.js 16: cookies() は Promise なので await 必須
-    ========================================================= */
-    const cookieStore = await cookies();
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
+    // ✅ ログイン中ユーザーを cookies から取得（クライアントから userId を送らせない）
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return cookieStore.getAll();
         },
         setAll() {
-          // Route Handler では set 不要（参照のみ）
+          // Route handler内では setAll を必須にしない（参照だけ）
         },
       },
     });
@@ -108,21 +108,19 @@ export async function POST(req: Request) {
     }
     const userId = userData.user.id;
 
-    /* =========================================================
-       ④ Service Role Client（RLS 回避）
-    ========================================================= */
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    // ✅ Service Role でDB書き込み（RLS回避）
     if (!serviceKey) {
-      return NextResponse.json({ error: "supabaseKey is required." }, { status: 500 });
+      return NextResponse.json(
+        { error: "SUPABASE_SERVICE_ROLE_KEY is missing on server env" },
+        { status: 500 }
+      );
     }
 
     const supabase = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
     });
 
-    /* =========================================================
-       ⑤ raw transactions 作成
-    ========================================================= */
+    // raw rows を作る（既存テーブルに合わせる）
     const nowIso = new Date().toISOString();
 
     const rawRows = rows
@@ -138,9 +136,8 @@ export async function POST(req: Request) {
 
         const direction = section === "income" ? "in" : "out";
 
-        const rowHash = sha256Hex(
-          `${userId}|${date}|${direction}|${amount}|${description}`
-        );
+        // ✅ 重複排除のキー（ここが超重要）
+        const rowHash = sha256Hex(`${userId}|${date}|${direction}|${amount}|${description}`);
 
         return {
           user_id: userId,
@@ -157,12 +154,13 @@ export async function POST(req: Request) {
       .filter(Boolean) as any[];
 
     if (rawRows.length === 0) {
-      return NextResponse.json({ error: "No valid rows" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No valid rows (date/amount/section invalid)" },
+        { status: 400 }
+      );
     }
 
-    /* =========================================================
-       ⑥ raw テーブルへ UPSERT
-    ========================================================= */
+    // ✅ rawにUPSERT（重複は user_id,row_hash で弾く）
     const { error: rawErr } = await supabase
       .from("rakuten_bank_raw_transactions")
       .upsert(rawRows, { onConflict: "user_id,row_hash" });
@@ -171,9 +169,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: rawErr.message }, { status: 500 });
     }
 
-    /* =========================================================
-       ⑦ RPC 実行（cash_flows へ反映）
-    ========================================================= */
+    // ✅ cash_flows へ反映（既存RPC）
     const { data: inserted, error: rpcErr } = await supabase.rpc(
       "import_rakuten_raw_to_cash_flows",
       { p_cash_account_id: cashAccountId }
@@ -183,9 +179,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: rpcErr.message }, { status: 500 });
     }
 
-    /* =========================================================
-       ⑧ 正常終了
-    ========================================================= */
     return NextResponse.json({
       ok: true,
       raw_rows_received: rawRows.length,
