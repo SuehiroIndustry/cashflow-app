@@ -79,7 +79,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ cookies（Nextの型がPromise版でも必ずawait）
+    // ✅ cookies（必ず await）
     const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ ログイン中ユーザー取得（clientからuserIdを送らせない）
+    // ✅ ログイン中ユーザー取得＆RPC実行用（auth.uid() を生かす）
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
@@ -111,7 +111,7 @@ export async function POST(req: Request) {
     }
     const userId = userData.user.id;
 
-    // ✅ Service Role（RLS回避）
+    // ✅ rawへの書き込みはService Role（RLS回避）
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceKey) {
       return NextResponse.json(
@@ -120,14 +120,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = createClient(supabaseUrl, serviceKey, {
+    const supabaseService = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
     });
 
     const nowIso = new Date().toISOString();
 
-    // ✅ raw rows 作成
-    // 重要: 同一リクエスト内で row_hash が重複すると upsert が落ちるので、あとで重複排除する
     const prepared = rows
       .map((r) => {
         const date = String(r.date ?? "").trim();
@@ -141,7 +139,7 @@ export async function POST(req: Request) {
 
         const direction = section === "income" ? "in" : "out";
 
-        // ✅ 安定した重複排除キー（再インポートしても同一なら同じhash）
+        // ✅ 安定した重複排除キー（再インポートでも同じなら同じhash）
         const rowHash = sha256Hex(
           `${userId}|${date}|${direction}|${amount}|${description}`
         );
@@ -167,7 +165,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ 同一リクエスト内の重複を排除（ここが今回の本丸）
+    // ✅ 同一リクエスト内の重複排除（upsertクラッシュ回避）
     const uniqueMap = new Map<string, any>();
     for (const row of prepared) {
       const key = `${row.user_id}|${row.row_hash}`;
@@ -175,8 +173,7 @@ export async function POST(req: Request) {
     }
     const rawRows = Array.from(uniqueMap.values());
 
-    // ✅ rawにUPSERT（重複は user_id,row_hash で弾く）
-    const { error: rawErr } = await supabase
+    const { error: rawErr } = await supabaseService
       .from("rakuten_bank_raw_transactions")
       .upsert(rawRows, { onConflict: "user_id,row_hash" });
 
@@ -184,8 +181,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: rawErr.message }, { status: 500 });
     }
 
-    // ✅ cash_flows へ反映（既存RPC）
-    const { data: inserted, error: rpcErr } = await supabase.rpc(
+    // ✅ ここが肝：RPCは “ログイン中ユーザー” の supabaseAuth で叩く（auth.uid() が生きる）
+    const { data: inserted, error: rpcErr } = await supabaseAuth.rpc(
       "import_rakuten_raw_to_cash_flows",
       { p_cash_account_id: cashAccountId }
     );
