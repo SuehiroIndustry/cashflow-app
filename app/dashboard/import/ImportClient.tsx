@@ -21,7 +21,7 @@ export default function ImportClient({ cashAccountId }: Props) {
   const [error, setError] = useState<string>("");
   const [debug, setDebug] = useState<any>(null);
   const [importing, setImporting] = useState(false);
-  const [done, setDone] = useState<{ inserted: number } | null>(null);
+  const [done, setDone] = useState<{ inserted: number; rawReceived?: number } | null>(null);
 
   const preview = useMemo(() => rows.slice(0, 50), [rows]);
 
@@ -38,7 +38,6 @@ export default function ImportClient({ cashAccountId }: Props) {
     try {
       const ab = await file.arrayBuffer();
 
-      // ✅ Zengin is usually Shift_JIS (cp932)
       let text = "";
       try {
         text = new TextDecoder("shift_jis").decode(ab);
@@ -47,7 +46,6 @@ export default function ImportClient({ cashAccountId }: Props) {
       }
 
       const parsed = parseZenginCsvText(text);
-
       setRows(parsed.rows);
       setDebug(parsed.debug);
 
@@ -79,34 +77,28 @@ export default function ImportClient({ cashAccountId }: Props) {
 
     setImporting(true);
     try {
-      // ✅ multipart/form-data で送る（headers は絶対に指定しない）
-      const fd = new FormData();
-      fd.append("cashAccountId", String(cashAccountId));
-      fd.append("sourceType", "import"); // DB制約の許可値に合わせる
-      fd.append(
-        "rows",
-        JSON.stringify(
-          rows.map((r) => ({
+      const res = await fetch("/api/import/zengin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cashAccountId,
+          rows: rows.map((r) => ({
             date: r.date,
             section: r.section,
             amount: r.amount,
             summary: r.summary,
-          }))
-        )
-      );
-
-      const res = await fetch("/api/import/zengin", {
-        method: "POST",
-        body: fd,
+          })),
+        }),
       });
 
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || `Import failed (${res.status})`);
-      }
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || `Import failed (${res.status})`);
 
-      const json = await res.json();
-      setDone({ inserted: Number(json?.inserted ?? rows.length) });
+      const json = text ? JSON.parse(text) : {};
+      setDone({
+        inserted: Number(json?.cash_flows_inserted ?? 0),
+        rawReceived: Number(json?.raw_rows_received ?? 0),
+      });
     } catch (e: any) {
       console.error(e);
       setError(e?.message ?? "インポートに失敗しました。");
@@ -159,7 +151,12 @@ export default function ImportClient({ cashAccountId }: Props) {
 
         {done && (
           <div className="mt-4 rounded-md border border-emerald-900 bg-emerald-950/30 p-3 text-sm text-emerald-200">
-            インポート完了：{done.inserted} 件
+            raw受領：{done.rawReceived ?? "-"} 件 ／ cash_flows 反映：{done.inserted} 件
+            {done.inserted === 0 ? (
+              <span className="ml-2 text-emerald-200/80">
+                （重複だった可能性が高い）
+              </span>
+            ) : null}
           </div>
         )}
       </div>
@@ -183,7 +180,9 @@ export default function ImportClient({ cashAccountId }: Props) {
                   <td className="py-2 pr-4 tabular-nums">{r.date}</td>
                   <td className="py-2 pr-4">{sectionLabel(r.section)}</td>
                   <td className="py-2 pr-4 tabular-nums">{yen(r.amount)}</td>
-                  <td className="py-2 pr-4">{r.summary || <span className="text-zinc-500">-</span>}</td>
+                  <td className="py-2 pr-4">
+                    {r.summary || <span className="text-zinc-500">-</span>}
+                  </td>
                 </tr>
               ))}
               {!preview.length && (
