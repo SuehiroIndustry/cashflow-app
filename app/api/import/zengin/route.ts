@@ -36,7 +36,7 @@ function maskEnv(v: string | undefined | null) {
 
 export async function POST(req: Request) {
   try {
-    // ✅ Debug: envが入ってるか「だけ」確認（実値は返さない）
+    // ✅ Debug: envが入ってるかだけ確認（実値は返さない）
     if (req.headers.get("x-debug-env") === "1") {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -80,8 +80,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ cookies（Next 16: 同期）
-    const cookieStore = cookies();
+    // ✅ cookies（ここが修正点：必ず await）
+    const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -97,8 +97,9 @@ export async function POST(req: Request) {
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
-          // supabaseが期待する形式に合わせる
-          return cookieStore.getAll().map((c) => ({ name: c.name, value: c.value }));
+          return cookieStore
+            .getAll()
+            .map((c) => ({ name: c.name, value: c.value }));
         },
         setAll() {
           // Route Handler では set しない（参照のみ）
@@ -141,8 +142,10 @@ export async function POST(req: Request) {
 
         const direction = section === "income" ? "in" : "out";
 
-        // ✅ 重複排除のキー（ユーザー単位）
-        const rowHash = sha256Hex(`${userId}|${date}|${direction}|${amount}|${description}`);
+        // ✅ 重複排除キー（ユーザー単位）
+        const rowHash = sha256Hex(
+          `${userId}|${date}|${direction}|${amount}|${description}`
+        );
 
         return {
           user_id: userId,
