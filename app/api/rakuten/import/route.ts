@@ -28,34 +28,8 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-function maskEnv(v: string | undefined | null) {
-  if (v === null) return null;
-  if (v === undefined) return undefined;
-  return v.length ? "SET" : "EMPTY";
-}
-
 export async function POST(req: Request) {
   try {
-    // ✅ Debug: env が入ってるかだけ返す（実値は返さない）
-    if (req.headers.get("x-debug-env") === "1") {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-      return NextResponse.json({
-        ok: true,
-        env: {
-          SUPABASE_URL: maskEnv(supabaseUrl),
-          SUPABASE_ANON_KEY: maskEnv(supabaseAnonKey),
-          SUPABASE_SERVICE_ROLE_KEY: maskEnv(serviceKey),
-        },
-        runtime: {
-          nodeEnv: process.env.NODE_ENV ?? null,
-          vercelEnv: process.env.VERCEL_ENV ?? null,
-        },
-      });
-    }
-
     // ✅ JSONで受け取る
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
@@ -69,7 +43,10 @@ export async function POST(req: Request) {
     const cashAccountId = Number(body.cashAccountId);
 
     if (!Number.isFinite(cashAccountId)) {
-      return NextResponse.json({ error: "cashAccountId is invalid" }, { status: 400 });
+      return NextResponse.json(
+        { error: "cashAccountId is invalid" },
+        { status: 400 }
+      );
     }
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
@@ -77,24 +54,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ cookies（Next の型差異を吸収するため await 前提で扱う）
+    // ✅ cookies（Nextの型差異に備えて await + 型ガード）
     const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json({ error: "Supabase public env is missing" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Supabase public env is missing" },
+        { status: 500 }
+      );
     }
 
     // ✅ ログイン中ユーザーを cookies から取得（クライアントから userId を送らせない）
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          // Nextの型が環境によって Promise 扱いに見えることがあるため、ここだけ確実に握りつぶす
+          return (cookieStore as any).getAll();
         },
         setAll() {
-          // Route Handler では set しない（参照だけ）
+          // Route Handler では set 不要（参照だけ）
         },
       },
     });
@@ -181,6 +162,9 @@ export async function POST(req: Request) {
       cash_account_id: cashAccountId,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "unknown error" },
+      { status: 500 }
+    );
   }
 }
