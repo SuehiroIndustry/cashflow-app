@@ -36,7 +36,7 @@ function maskEnv(v: string | undefined | null) {
 
 export async function POST(req: Request) {
   try {
-    // ✅ Debug: envが入ってるかだけ確認（実値は返さない）
+    // ✅ Debug: env が入ってるかだけ返す（実値は返さない）
     if (req.headers.get("x-debug-env") === "1") {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ JSONで受け取る
+    // ✅ JSONのみ
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
       return NextResponse.json(
@@ -67,7 +67,6 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Partial<Body>;
     const cashAccountId = Number(body.cashAccountId);
-
     if (!Number.isFinite(cashAccountId)) {
       return NextResponse.json(
         { error: "cashAccountId is invalid" },
@@ -80,12 +79,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ cookies（ここが修正点：必ず await）
+    // ✅ cookies（Nextの型がPromise版でも必ずawait）
     const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
     if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json(
         { error: "Supabase public env is missing" },
@@ -93,7 +91,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ ログイン中ユーザーを cookies から取得（clientからuserIdを送らせない）
+    // ✅ ログイン中ユーザー取得（clientからuserIdを送らせない）
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
@@ -102,7 +100,7 @@ export async function POST(req: Request) {
             .map((c) => ({ name: c.name, value: c.value }));
         },
         setAll() {
-          // Route Handler では set しない（参照のみ）
+          // Route Handlerでは参照のみ
         },
       },
     });
@@ -113,7 +111,7 @@ export async function POST(req: Request) {
     }
     const userId = userData.user.id;
 
-    // ✅ Service Role でDB書き込み（RLS回避）
+    // ✅ Service Role（RLS回避）
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceKey) {
       return NextResponse.json(
@@ -128,8 +126,9 @@ export async function POST(req: Request) {
 
     const nowIso = new Date().toISOString();
 
-    // ✅ raw rows を作る（テーブル構造に合わせる）
-    const rawRows = rows
+    // ✅ raw rows 作成
+    // 重要: 同一リクエスト内で row_hash が重複すると upsert が落ちるので、あとで重複排除する
+    const prepared = rows
       .map((r) => {
         const date = String(r.date ?? "").trim();
         const section = r.section;
@@ -142,7 +141,7 @@ export async function POST(req: Request) {
 
         const direction = section === "income" ? "in" : "out";
 
-        // ✅ 重複排除キー（ユーザー単位）
+        // ✅ 安定した重複排除キー（再インポートしても同一なら同じhash）
         const rowHash = sha256Hex(
           `${userId}|${date}|${direction}|${amount}|${description}`
         );
@@ -161,12 +160,20 @@ export async function POST(req: Request) {
       })
       .filter(Boolean) as any[];
 
-    if (rawRows.length === 0) {
+    if (prepared.length === 0) {
       return NextResponse.json(
         { error: "No valid rows (date/amount/section invalid)" },
         { status: 400 }
       );
     }
+
+    // ✅ 同一リクエスト内の重複を排除（ここが今回の本丸）
+    const uniqueMap = new Map<string, any>();
+    for (const row of prepared) {
+      const key = `${row.user_id}|${row.row_hash}`;
+      if (!uniqueMap.has(key)) uniqueMap.set(key, row);
+    }
+    const rawRows = Array.from(uniqueMap.values());
 
     // ✅ rawにUPSERT（重複は user_id,row_hash で弾く）
     const { error: rawErr } = await supabase
@@ -189,11 +196,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      raw_rows_received: rawRows.length,
+      raw_rows_received: prepared.length,
+      raw_rows_upserted: rawRows.length,
       cash_flows_inserted: inserted ?? 0,
       cash_account_id: cashAccountId,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "unknown error" },
+      { status: 500 }
+    );
   }
 }
