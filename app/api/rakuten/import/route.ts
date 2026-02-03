@@ -16,7 +16,6 @@ type BodyRow = {
 
 type Body = {
   cashAccountId: number;
-  sourceType?: string;
   rows: BodyRow[];
 };
 
@@ -30,7 +29,20 @@ function isYmd(s: string) {
 
 export async function POST(req: Request) {
   try {
-    // ✅ JSONで受け取る
+    /* ============================
+       🔍 一時デバッグ：環境変数確認
+       ============================ */
+    if (req.headers.get("x-debug-env") === "1") {
+      return NextResponse.json({
+        NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      });
+    }
+
+    /* ============================
+       JSONチェック
+       ============================ */
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
       return NextResponse.json(
@@ -51,19 +63,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ ログイン中ユーザーを cookies から取得（クライアントから userId を送らせない）
+    /* ============================
+       認証ユーザー取得（cookie）
+       ============================ */
     const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-    const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
+    const supabaseAuth = createServerClient(supabaseUrl, anonKey, {
       cookies: {
         getAll() {
           return cookieStore.getAll();
         },
         setAll() {
-          // Route handler内では setAll を必須にしない（参照だけ）
+          /* route handler では不要 */
         },
       },
     });
@@ -74,11 +88,24 @@ export async function POST(req: Request) {
     }
     const userId = userData.user.id;
 
-    // ✅ Service Role でDB書き込み（RLS回避）
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+    /* ============================
+       Service Role クライアント
+       ============================ */
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceKey) {
+      return NextResponse.json(
+        { error: "SUPABASE_SERVICE_ROLE_KEY is missing on server" },
+        { status: 500 }
+      );
+    }
 
-    // raw rows を作る（既存テーブルに合わせる）
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false },
+    });
+
+    /* ============================
+       raw rows 作成
+       ============================ */
     const nowIso = new Date().toISOString();
 
     const rawRows = rows
@@ -94,8 +121,9 @@ export async function POST(req: Request) {
 
         const direction = section === "income" ? "in" : "out";
 
-        // ✅ 重複排除のキー（ここが超重要）
-        const rowHash = sha256Hex(`${userId}|${date}|${direction}|${amount}|${description}`);
+        const rowHash = sha256Hex(
+          `${userId}|${date}|${direction}|${amount}|${description}`
+        );
 
         return {
           user_id: userId,
@@ -113,12 +141,14 @@ export async function POST(req: Request) {
 
     if (rawRows.length === 0) {
       return NextResponse.json(
-        { error: "No valid rows (date/amount/section invalid)" },
+        { error: "No valid rows (invalid date/amount/section)" },
         { status: 400 }
       );
     }
 
-    // ✅ rawにUPSERT（重複は user_id,row_hash で弾く）
+    /* ============================
+       raw upsert
+       ============================ */
     const { error: rawErr } = await supabase
       .from("rakuten_bank_raw_transactions")
       .upsert(rawRows, { onConflict: "user_id,row_hash" });
@@ -127,7 +157,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: rawErr.message }, { status: 500 });
     }
 
-    // ✅ cash_flows へ反映（既存RPC）
+    /* ============================
+       cash_flows 反映（RPC）
+       ============================ */
     const { data: inserted, error: rpcErr } = await supabase.rpc(
       "import_rakuten_raw_to_cash_flows",
       { p_cash_account_id: cashAccountId }
