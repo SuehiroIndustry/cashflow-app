@@ -8,15 +8,14 @@ import crypto from "crypto";
 export const runtime = "nodejs";
 
 type BodyRow = {
-  date: string; // "YYYY-MM-DD"
-  section: string; // "income" | "expense" | "収入" | "支出" など
-  amount: number | string; // CSV由来で文字列の可能性もあるので吸収
+  date: string; // YYYY-MM-DD
+  section: "income" | "expense";
+  amount: number;
   summary?: string | null;
 };
 
 type Body = {
   cashAccountId: number;
-  sourceType?: string;
   rows: BodyRow[];
 };
 
@@ -28,46 +27,23 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-// ✅ 今回の核心：区分の正規化（収入/支出 も受ける）
-function normalizeSection(s: unknown): "income" | "expense" | null {
-  if (typeof s !== "string") return null;
-  const v = s.trim();
-
-  if (v === "income" || v === "収入") return "income";
-  if (v === "expense" || v === "支出") return "expense";
-
-  return null;
-}
-
-// ✅ 金額の吸収（"1,502,920" みたいなのを潰す）※今後の地雷予防
-function normalizeAmount(a: unknown): number {
-  if (typeof a === "number") return a;
-  if (typeof a !== "string") return NaN;
-  const cleaned = a.replace(/,/g, "").trim();
-  return Number(cleaned);
-}
-
-// ✅ env debug用（実値は返さない）
 function maskEnv(v: string | undefined | null) {
-  if (v === null) return null;
-  if (v === undefined) return undefined;
+  if (v == null) return null;
   return v.length ? "SET" : "EMPTY";
 }
 
 export async function POST(req: Request) {
   try {
-    // ✅ Debug: env が入ってるかだけ返す（実値は返さない）
+    // ===== Debug（env確認用）=====
     if (req.headers.get("x-debug-env") === "1") {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
       return NextResponse.json({
         ok: true,
         env: {
-          SUPABASE_URL: maskEnv(supabaseUrl),
-          SUPABASE_ANON_KEY: maskEnv(supabaseAnonKey),
-          SUPABASE_SERVICE_ROLE_KEY: maskEnv(serviceKey),
+          SUPABASE_URL: maskEnv(process.env.NEXT_PUBLIC_SUPABASE_URL),
+          SUPABASE_ANON_KEY: maskEnv(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+          SUPABASE_SERVICE_ROLE_KEY: maskEnv(
+            process.env.SUPABASE_SERVICE_ROLE_KEY
+          ),
         },
         runtime: {
           nodeEnv: process.env.NODE_ENV ?? null,
@@ -76,9 +52,8 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ JSONで受け取る
-    const contentType = req.headers.get("content-type") ?? "";
-    if (!contentType.includes("application/json")) {
+    // ===== JSONチェック =====
+    if (!req.headers.get("content-type")?.includes("application/json")) {
       return NextResponse.json(
         { error: "Content-Type must be application/json" },
         { status: 415 }
@@ -100,8 +75,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ cookies（Next 16系で Promise になってる差異を吸収）
-    const cookieStore = await cookies();
+    // ===== Auth（Cookie → user）=====
+    const cookieStore = cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -113,60 +88,63 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ ログイン中ユーザーを cookies から取得（クライアントから userId を送らせない）
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return cookieStore.getAll();
         },
-        // Route Handler内は基本 set しないが、型的に引数を取ることがあるので受け口だけ作る
-        setAll(_cookies) {
-          // no-op
-        },
+        setAll() {},
       },
     });
 
-    const { data: userData, error: userErr } = await supabaseAuth.auth.getUser();
+    const { data: userData, error: userErr } =
+      await supabaseAuth.auth.getUser();
+
     if (userErr || !userData?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
     const userId = userData.user.id;
 
-    // ✅ Service Role でDB書き込み（RLS回避）
+    // ===== Service Role Client =====
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceKey) {
-      return NextResponse.json({ error: "supabaseKey is required." }, { status: 500 });
+      return NextResponse.json(
+        { error: "supabaseKey is required." },
+        { status: 500 }
+      );
     }
 
     const supabase = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
     });
 
+    // ===== raw rows 作成 =====
     const nowIso = new Date().toISOString();
 
-    // ✅ raw rows を作る（既存テーブルに合わせる）
     const rawRows = rows
       .map((r) => {
-        const date = String(r.date ?? "").trim();
-        const section = normalizeSection(r.section);
-        const amount = normalizeAmount(r.amount);
+        if (
+          !isYmd(r.date) ||
+          !Number.isFinite(r.amount) ||
+          r.amount <= 0
+        )
+          return null;
+
+        const direction = r.section === "income" ? "in" : "out";
+        if (!direction) return null;
+
         const description = String(r.summary ?? "").trim();
-
-        if (!isYmd(date)) return null;
-        if (!section) return null;
-        if (!Number.isFinite(amount) || amount <= 0) return null;
-
-        const direction = section === "income" ? "in" : "out";
-
-        // ✅ 重複排除のキー
-        const rowHash = sha256Hex(`${userId}|${date}|${direction}|${amount}|${description}`);
+        const rowHash = sha256Hex(
+          `${userId}|${r.date}|${direction}|${r.amount}|${description}`
+        );
 
         return {
           user_id: userId,
           imported_at: nowIso,
-          txn_date: date,
+          txn_date: r.date,
           description,
-          amount,
+          amount: r.amount,
           direction,
           balance: null,
           row_hash: rowHash,
@@ -175,17 +153,14 @@ export async function POST(req: Request) {
       })
       .filter(Boolean) as any[];
 
-    if (rawRows.length === 0) {
+    if (!rawRows.length) {
       return NextResponse.json(
-        {
-          error: "No valid rows (date/amount/section invalid)",
-          hint: "section は income/expense または 収入/支出 を想定。date は YYYY-MM-DD。",
-        },
+        { error: "No valid rows" },
         { status: 400 }
       );
     }
 
-    // ✅ rawにUPSERT（重複は user_id,row_hash で弾く）
+    // ===== raw upsert =====
     const { error: rawErr } = await supabase
       .from("rakuten_bank_raw_transactions")
       .upsert(rawRows, { onConflict: "user_id,row_hash" });
@@ -194,8 +169,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: rawErr.message }, { status: 500 });
     }
 
-    // ✅ cash_flows へ反映（既存RPC）
-    const { data: inserted, error: rpcErr } = await supabase.rpc(
+    // ===== cash_flows 反映 =====
+    const { data, error: rpcErr } = await supabase.rpc(
       "import_rakuten_raw_to_cash_flows",
       { p_cash_account_id: cashAccountId }
     );
@@ -207,8 +182,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       raw_rows_received: rawRows.length,
-      cash_flows_inserted: inserted ?? 0,
-      cash_account_id: cashAccountId,
+      cash_flows_inserted: data ?? 0,
     });
   } catch (e: any) {
     return NextResponse.json(
