@@ -16,6 +16,7 @@ type BodyRow = {
 
 type Body = {
   cashAccountId: number;
+  sourceType?: string;
   rows: BodyRow[];
 };
 
@@ -29,20 +30,29 @@ function isYmd(s: string) {
 
 export async function POST(req: Request) {
   try {
-    /* ============================
-       🔍 一時デバッグ：環境変数確認
-       ============================ */
-    if (req.headers.get("x-debug-env") === "1") {
+    /* =========================================================
+       🔍 デバッグ：env が本当に読めているかを即返す
+       Header: x-debug-env: 1 を付けたときだけ発動
+    ========================================================= */
+    const debugEnv = req.headers.get("x-debug-env") === "1";
+    if (debugEnv) {
       return NextResponse.json({
-        NEXT_PUBLIC_SUPABASE_URL: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-        SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        env: {
+          NEXT_PUBLIC_SUPABASE_URL:
+            process.env.NEXT_PUBLIC_SUPABASE_URL ? "OK" : "MISSING",
+          NEXT_PUBLIC_SUPABASE_ANON_KEY:
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "OK" : "MISSING",
+          SUPABASE_SERVICE_ROLE_KEY:
+            process.env.SUPABASE_SERVICE_ROLE_KEY ? "OK" : "MISSING",
+          SERVICE_ROLE_KEY_LENGTH:
+            (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").length,
+        },
       });
     }
 
-    /* ============================
-       JSONチェック
-       ============================ */
+    /* =========================================================
+       ① Content-Type チェック
+    ========================================================= */
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
       return NextResponse.json(
@@ -51,61 +61,83 @@ export async function POST(req: Request) {
       );
     }
 
+    /* =========================================================
+       ② Body パース
+    ========================================================= */
     const body = (await req.json()) as Partial<Body>;
     const cashAccountId = Number(body.cashAccountId);
 
     if (!Number.isFinite(cashAccountId)) {
-      return NextResponse.json({ error: "cashAccountId is invalid" }, { status: 400 });
+      return NextResponse.json(
+        { error: "cashAccountId is invalid" },
+        { status: 400 }
+      );
     }
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
     if (!rows.length) {
-      return NextResponse.json({ error: "rows is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "rows is required" },
+        { status: 400 }
+      );
     }
 
-    /* ============================
-       認証ユーザー取得（cookie）
-       ============================ */
-    const cookieStore = await cookies();
+    /* =========================================================
+       ③ Cookie からログインユーザー取得
+    ========================================================= */
+    const cookieStore = cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-    const supabaseAuth = createServerClient(supabaseUrl, anonKey, {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
+    const supabaseAuth = createServerClient(
+      supabaseUrl,
+      supabaseAnonKey,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll() {
+            // Route Handler では set 不要
+          },
         },
-        setAll() {
-          /* route handler では不要 */
-        },
-      },
-    });
+      }
+    );
 
-    const { data: userData, error: userErr } = await supabaseAuth.auth.getUser();
+    const { data: userData, error: userErr } =
+      await supabaseAuth.auth.getUser();
+
     if (userErr || !userData?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
     }
+
     const userId = userData.user.id;
 
-    /* ============================
-       Service Role クライアント
-       ============================ */
+    /* =========================================================
+       ④ Service Role Client（RLS 回避）
+    ========================================================= */
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceKey) {
+      // ← 本来ここには来ない想定（debug で確認済みのはず）
       return NextResponse.json(
-        { error: "SUPABASE_SERVICE_ROLE_KEY is missing on server" },
+        { error: "supabaseKey is required." },
         { status: 500 }
       );
     }
 
-    const supabase = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    });
+    const supabase = createClient(
+      supabaseUrl,
+      serviceKey,
+      { auth: { persistSession: false } }
+    );
 
-    /* ============================
-       raw rows 作成
-       ============================ */
+    /* =========================================================
+       ⑤ raw transactions 作成
+    ========================================================= */
     const nowIso = new Date().toISOString();
 
     const rawRows = rows
@@ -141,34 +173,43 @@ export async function POST(req: Request) {
 
     if (rawRows.length === 0) {
       return NextResponse.json(
-        { error: "No valid rows (invalid date/amount/section)" },
+        { error: "No valid rows" },
         { status: 400 }
       );
     }
 
-    /* ============================
-       raw upsert
-       ============================ */
+    /* =========================================================
+       ⑥ raw テーブルへ UPSERT
+    ========================================================= */
     const { error: rawErr } = await supabase
       .from("rakuten_bank_raw_transactions")
       .upsert(rawRows, { onConflict: "user_id,row_hash" });
 
     if (rawErr) {
-      return NextResponse.json({ error: rawErr.message }, { status: 500 });
+      return NextResponse.json(
+        { error: rawErr.message },
+        { status: 500 }
+      );
     }
 
-    /* ============================
-       cash_flows 反映（RPC）
-       ============================ */
+    /* =========================================================
+       ⑦ RPC 実行（cash_flows へ反映）
+    ========================================================= */
     const { data: inserted, error: rpcErr } = await supabase.rpc(
       "import_rakuten_raw_to_cash_flows",
       { p_cash_account_id: cashAccountId }
     );
 
     if (rpcErr) {
-      return NextResponse.json({ error: rpcErr.message }, { status: 500 });
+      return NextResponse.json(
+        { error: rpcErr.message },
+        { status: 500 }
+      );
     }
 
+    /* =========================================================
+       ⑧ 正常終了
+    ========================================================= */
     return NextResponse.json({
       ok: true,
       raw_rows_received: rawRows.length,
@@ -176,6 +217,9 @@ export async function POST(req: Request) {
       cash_account_id: cashAccountId,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "unknown error" },
+      { status: 500 }
+    );
   }
 }
