@@ -9,8 +9,8 @@ export const runtime = "nodejs";
 
 type BodyRow = {
   date: string; // "YYYY-MM-DD"
-  section: "income" | "expense";
-  amount: number;
+  section: string; // "income" | "expense" | "収入" | "支出" など
+  amount: number | string; // CSV由来で文字列の可能性もあるので吸収
   summary?: string | null;
 };
 
@@ -28,8 +28,54 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
+// ✅ 今回の核心：区分の正規化（収入/支出 も受ける）
+function normalizeSection(s: unknown): "income" | "expense" | null {
+  if (typeof s !== "string") return null;
+  const v = s.trim();
+
+  if (v === "income" || v === "収入") return "income";
+  if (v === "expense" || v === "支出") return "expense";
+
+  return null;
+}
+
+// ✅ 金額の吸収（"1,502,920" みたいなのを潰す）※今後の地雷予防
+function normalizeAmount(a: unknown): number {
+  if (typeof a === "number") return a;
+  if (typeof a !== "string") return NaN;
+  const cleaned = a.replace(/,/g, "").trim();
+  return Number(cleaned);
+}
+
+// ✅ env debug用（実値は返さない）
+function maskEnv(v: string | undefined | null) {
+  if (v === null) return null;
+  if (v === undefined) return undefined;
+  return v.length ? "SET" : "EMPTY";
+}
+
 export async function POST(req: Request) {
   try {
+    // ✅ Debug: env が入ってるかだけ返す（実値は返さない）
+    if (req.headers.get("x-debug-env") === "1") {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      return NextResponse.json({
+        ok: true,
+        env: {
+          SUPABASE_URL: maskEnv(supabaseUrl),
+          SUPABASE_ANON_KEY: maskEnv(supabaseAnonKey),
+          SUPABASE_SERVICE_ROLE_KEY: maskEnv(serviceKey),
+        },
+        runtime: {
+          nodeEnv: process.env.NODE_ENV ?? null,
+          vercelEnv: process.env.VERCEL_ENV ?? null,
+        },
+      });
+    }
+
     // ✅ JSONで受け取る
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
@@ -54,7 +100,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ cookies（Nextの型差異に備えて await + 型ガード）
+    // ✅ cookies（Next 16系で Promise になってる差異を吸収）
     const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -71,11 +117,11 @@ export async function POST(req: Request) {
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
-          // Nextの型が環境によって Promise 扱いに見えることがあるため、ここだけ確実に握りつぶす
-          return (cookieStore as any).getAll();
+          return cookieStore.getAll();
         },
-        setAll() {
-          // Route Handler では set 不要（参照だけ）
+        // Route Handler内は基本 set しないが、型的に引数を取ることがあるので受け口だけ作る
+        setAll(_cookies) {
+          // no-op
         },
       },
     });
@@ -96,18 +142,18 @@ export async function POST(req: Request) {
       auth: { persistSession: false },
     });
 
-    // raw rows を作る（既存テーブルに合わせる）
     const nowIso = new Date().toISOString();
 
+    // ✅ raw rows を作る（既存テーブルに合わせる）
     const rawRows = rows
       .map((r) => {
         const date = String(r.date ?? "").trim();
-        const section = r.section;
-        const amount = Number(r.amount);
+        const section = normalizeSection(r.section);
+        const amount = normalizeAmount(r.amount);
         const description = String(r.summary ?? "").trim();
 
         if (!isYmd(date)) return null;
-        if (section !== "income" && section !== "expense") return null;
+        if (!section) return null;
         if (!Number.isFinite(amount) || amount <= 0) return null;
 
         const direction = section === "income" ? "in" : "out";
@@ -131,7 +177,10 @@ export async function POST(req: Request) {
 
     if (rawRows.length === 0) {
       return NextResponse.json(
-        { error: "No valid rows (date/amount/section invalid)" },
+        {
+          error: "No valid rows (date/amount/section invalid)",
+          hint: "section は income/expense または 収入/支出 を想定。date は YYYY-MM-DD。",
+        },
         { status: 400 }
       );
     }
