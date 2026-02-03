@@ -28,16 +28,34 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-// Next の cookies() の型差異を吸収（Route Handlerで安全に getAll/set を呼べるようにする）
-function getCookieStore(): {
-  getAll: () => { name: string; value: string }[];
-  set: (name: string, value: string, options?: any) => void;
-} {
-  return cookies() as any;
+function maskEnv(v: string | undefined | null) {
+  if (v === null) return null;
+  if (v === undefined) return undefined;
+  return v.length ? "SET" : "EMPTY";
 }
 
 export async function POST(req: Request) {
   try {
+    // ✅ Debug: env が入ってるかだけ返す（実値は返さない）
+    if (req.headers.get("x-debug-env") === "1") {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      return NextResponse.json({
+        ok: true,
+        env: {
+          SUPABASE_URL: maskEnv(supabaseUrl),
+          SUPABASE_ANON_KEY: maskEnv(supabaseAnonKey),
+          SUPABASE_SERVICE_ROLE_KEY: maskEnv(serviceKey),
+        },
+        runtime: {
+          nodeEnv: process.env.NODE_ENV ?? null,
+          vercelEnv: process.env.VERCEL_ENV ?? null,
+        },
+      });
+    }
+
     // ✅ JSONで受け取る
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
@@ -62,10 +80,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ env
+    // ✅ cookies（Next.js の型が Promise になる版でも通す）
+    const cookieStore = await cookies();
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !supabaseAnonKey) {
       return NextResponse.json(
@@ -73,23 +92,18 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
-    if (!serviceKey) {
-      return NextResponse.json({ error: "supabaseKey is required." }, { status: 500 });
-    }
 
-    // ✅ cookies からログインユーザー取得（クライアントから userId を送らせない）
-    const cookieStore = getCookieStore();
-
+    // ✅ ログイン中ユーザーを cookies から取得（クライアントから userId を送らせない）
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
-          return cookieStore.getAll();
+          // supabase/ssr が期待する { name, value } 形式に寄せる
+          return cookieStore
+            .getAll()
+            .map((c) => ({ name: c.name, value: c.value }));
         },
-        // Route Handler でも setAll は実装しておく（型/挙動の事故防止）
-        setAll(cookiesToSet) {
-          for (const c of cookiesToSet) {
-            cookieStore.set(c.name, c.value, c.options);
-          }
+        setAll() {
+          // Route Handler では set しない（参照だけ）
         },
       },
     });
@@ -101,15 +115,24 @@ export async function POST(req: Request) {
     const userId = userData.user.id;
 
     // ✅ Service Role でDB書き込み（RLS回避）
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceKey) {
+      return NextResponse.json(
+        { error: "SUPABASE_SERVICE_ROLE_KEY is required." },
+        { status: 500 }
+      );
+    }
+
     const supabase = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
     });
 
     const nowIso = new Date().toISOString();
 
-    // raw rows を作る（既存テーブルに合わせる）
+    // ✅ raw rows を作る（既存テーブルに合わせる）
+    // 重要: 同一CSV内で「日付/金額/摘要」が同じ行があり得るので idx を hash に混ぜる
     const rawRows = rows
-      .map((r) => {
+      .map((r, idx) => {
         const date = String(r.date ?? "").trim();
         const section = r.section;
         const amount = Number(r.amount);
@@ -120,7 +143,11 @@ export async function POST(req: Request) {
         if (!Number.isFinite(amount) || amount <= 0) return null;
 
         const direction = section === "income" ? "in" : "out";
-        const rowHash = sha256Hex(`${userId}|${date}|${direction}|${amount}|${description}`);
+
+        // ✅ 重複排除キー（同一バッチ内衝突を避けるため idx を含める）
+        const rowHash = sha256Hex(
+          `${userId}|${date}|${direction}|${amount}|${description}|${idx}`
+        );
 
         return {
           user_id: userId,
@@ -143,7 +170,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ raw に UPSERT（重複は user_id,row_hash で弾く）
+    // ✅ rawにUPSERT（重複は user_id,row_hash で弾く）
     const { error: rawErr } = await supabase
       .from("rakuten_bank_raw_transactions")
       .upsert(rawRows, { onConflict: "user_id,row_hash" });
@@ -169,6 +196,9 @@ export async function POST(req: Request) {
       cash_account_id: cashAccountId,
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message ?? "unknown error" },
+      { status: 500 }
+    );
   }
 }
