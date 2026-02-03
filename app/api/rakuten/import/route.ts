@@ -75,8 +75,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ===== Auth（Cookie → user）=====
-    const cookieStore = cookies();
+    // ✅ cookies（Next 16系では Promise なので await 必須）
+    const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -88,12 +88,14 @@ export async function POST(req: Request) {
       );
     }
 
+    // ✅ Cookie からログイン中ユーザーを取る
     const supabaseAuth = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll() {},
+        // Route Handler では書き込み不要なので捨てる（型だけ合わせる）
+        setAll(_cookies) {},
       },
     });
 
@@ -106,7 +108,7 @@ export async function POST(req: Request) {
 
     const userId = userData.user.id;
 
-    // ===== Service Role Client =====
+    // ✅ Service Role（RLS回避）
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceKey) {
       return NextResponse.json(
@@ -124,19 +126,17 @@ export async function POST(req: Request) {
 
     const rawRows = rows
       .map((r) => {
-        if (
-          !isYmd(r.date) ||
-          !Number.isFinite(r.amount) ||
-          r.amount <= 0
-        )
-          return null;
+        if (!isYmd(r.date)) return null;
+
+        const amount = Number(r.amount);
+        if (!Number.isFinite(amount) || amount <= 0) return null;
 
         const direction = r.section === "income" ? "in" : "out";
-        if (!direction) return null;
+        if (r.section !== "income" && r.section !== "expense") return null;
 
         const description = String(r.summary ?? "").trim();
         const rowHash = sha256Hex(
-          `${userId}|${r.date}|${direction}|${r.amount}|${description}`
+          `${userId}|${r.date}|${direction}|${amount}|${description}`
         );
 
         return {
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
           imported_at: nowIso,
           txn_date: r.date,
           description,
-          amount: r.amount,
+          amount,
           direction,
           balance: null,
           row_hash: rowHash,
@@ -154,10 +154,7 @@ export async function POST(req: Request) {
       .filter(Boolean) as any[];
 
     if (!rawRows.length) {
-      return NextResponse.json(
-        { error: "No valid rows" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No valid rows" }, { status: 400 });
     }
 
     // ===== raw upsert =====
