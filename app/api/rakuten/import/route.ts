@@ -62,8 +62,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ cookies は await しない（Next.jsのビルドエラー回避）
-    const cookieStore = cookies();
+    // ✅ Next.js 16系では cookies() が Promise 扱い → await 必須
+    const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -136,8 +136,10 @@ export async function POST(req: Request) {
 
         const direction = section === "income" ? "in" : "out";
 
-        // ✅ 重複排除のキー（ここが超重要）
-        const rowHash = sha256Hex(`${userId}|${date}|${direction}|${amount}|${description}`);
+        // ✅ 重複排除のキー
+        const rowHash = sha256Hex(
+          `${userId}|${date}|${direction}|${amount}|${description}`
+        );
 
         return {
           user_id: userId,
