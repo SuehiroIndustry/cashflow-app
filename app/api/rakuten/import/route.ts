@@ -28,16 +28,34 @@ function isYmd(s: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-function maskInfo(v: string | undefined | null) {
-  const s = (v ?? "").trim();
-  return {
-    present: !!s,
-    length: s.length,
-  };
+function maskEnv(v: string | undefined | null) {
+  if (v === null) return null;
+  if (v === undefined) return undefined;
+  return v.length ? "SET" : "EMPTY";
 }
 
 export async function POST(req: Request) {
   try {
+    // ✅ Debug: env が入ってるかだけ返す（実値は返さない）
+    if (req.headers.get("x-debug-env") === "1") {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      return NextResponse.json({
+        ok: true,
+        env: {
+          SUPABASE_URL: maskEnv(supabaseUrl),
+          SUPABASE_ANON_KEY: maskEnv(supabaseAnonKey),
+          SUPABASE_SERVICE_ROLE_KEY: maskEnv(serviceKey),
+        },
+        runtime: {
+          nodeEnv: process.env.NODE_ENV ?? null,
+          vercelEnv: process.env.VERCEL_ENV ?? null,
+        },
+      });
+    }
+
     // ✅ JSONで受け取る
     const contentType = req.headers.get("content-type") ?? "";
     if (!contentType.includes("application/json")) {
@@ -51,10 +69,7 @@ export async function POST(req: Request) {
     const cashAccountId = Number(body.cashAccountId);
 
     if (!Number.isFinite(cashAccountId)) {
-      return NextResponse.json(
-        { error: "cashAccountId is invalid" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "cashAccountId is invalid" }, { status: 400 });
     }
 
     const rows = Array.isArray(body.rows) ? body.rows : [];
@@ -62,32 +77,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "rows is required" }, { status: 400 });
     }
 
-    // ✅ Next.js 16系では cookies() が Promise 扱い → await 必須
+    // ✅ cookies（Next の型差異を吸収するため await 前提で扱う）
     const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    // ✅ 「本当に env が空なのか」をAPIが返す（値は返さない＝漏洩防止）
-    if (req.headers.get("x-debug-env") === "1") {
-      return NextResponse.json({
-        ok: true,
-        debug: {
-          NEXT_PUBLIC_SUPABASE_URL: maskInfo(supabaseUrl),
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: maskInfo(supabaseAnonKey),
-          SUPABASE_SERVICE_ROLE_KEY: maskInfo(serviceKey),
-          VERCEL_ENV: process.env.VERCEL_ENV ?? null,
-          NODE_ENV: process.env.NODE_ENV ?? null,
-        },
-      });
-    }
 
     if (!supabaseUrl || !supabaseAnonKey) {
-      return NextResponse.json(
-        { error: "Supabase public env missing" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Supabase public env is missing" }, { status: 500 });
     }
 
     // ✅ ログイン中ユーザーを cookies から取得（クライアントから userId を送らせない）
@@ -97,7 +94,7 @@ export async function POST(req: Request) {
           return cookieStore.getAll();
         },
         setAll() {
-          // Route handler内では setAll を必須にしない（参照だけ）
+          // Route Handler では set しない（参照だけ）
         },
       },
     });
@@ -109,11 +106,9 @@ export async function POST(req: Request) {
     const userId = userData.user.id;
 
     // ✅ Service Role でDB書き込み（RLS回避）
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceKey) {
-      return NextResponse.json(
-        { error: "SUPABASE_SERVICE_ROLE_KEY is missing on server env" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "supabaseKey is required." }, { status: 500 });
     }
 
     const supabase = createClient(supabaseUrl, serviceKey, {
@@ -137,9 +132,7 @@ export async function POST(req: Request) {
         const direction = section === "income" ? "in" : "out";
 
         // ✅ 重複排除のキー
-        const rowHash = sha256Hex(
-          `${userId}|${date}|${direction}|${amount}|${description}`
-        );
+        const rowHash = sha256Hex(`${userId}|${date}|${direction}|${amount}|${description}`);
 
         return {
           user_id: userId,
