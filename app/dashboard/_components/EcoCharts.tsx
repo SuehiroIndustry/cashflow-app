@@ -11,13 +11,14 @@ function yen(n: number) {
 export default function EcoCharts(props: { rows: MonthlyBalanceRow[] }) {
   const { rows } = props;
 
+  // rows は page.tsx 側で「昇順」にして渡す前提（末尾が最新）
   const latest = useMemo(() => {
     if (!rows.length) return null;
     return rows[rows.length - 1];
   }, [rows]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 bg-white text-black">
       {/* Summary */}
       <div className="border rounded p-4">
         <div className="font-semibold mb-2">推移（サマリ）</div>
@@ -51,12 +52,17 @@ export default function EcoCharts(props: { rows: MonthlyBalanceRow[] }) {
 
         <div className="space-y-2">
           {rows.map((r) => (
-            <div key={r.month} className="flex items-center justify-between text-sm">
+            <div
+              key={r.month}
+              className="flex items-center justify-between text-sm"
+            >
               <span className="opacity-70">{r.month}</span>
               <span className="flex gap-3">
                 <span className="tabular-nums">{yen(r.income)}</span>
                 <span className="tabular-nums opacity-70">{yen(r.expense)}</span>
-                <span className="tabular-nums font-semibold">{yen(r.balance)}</span>
+                <span className="tabular-nums font-semibold">
+                  {yen(r.balance)}
+                </span>
               </span>
             </div>
           ))}

@@ -8,9 +8,8 @@ import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
 import OverviewCard from "./_components/OverviewCard";
-// まだPropsが不明なので一旦OFF（後で同様に戻す）
-// import BalanceCard from "./_components/BalanceCard";
-// import EcoCharts from "./_components/EcoCharts";
+import BalanceCard from "./_components/BalanceCard";
+import EcoCharts from "./_components/EcoCharts";
 
 import type {
   AccountRow,
@@ -54,14 +53,18 @@ export default async function DashboardPage({ searchParams }: Props) {
     ? await getOverview({ cashAccountId, month })
     : null;
 
-  // getOverview の戻り（キーが違う可能性があるので any で受ける）
   const cashStatus = (overview as any)?.cashStatus ?? null;
   const alertCards = ((overview as any)?.alertCards ?? []) as AlertCard[];
 
   // 5) 月次推移
-  const monthly = (cashAccountId
+  const monthlyRaw = (cashAccountId
     ? await getMonthlyBalance({ cashAccountId, months: 12 })
     : []) as MonthlyBalanceRow[];
+
+  // ✅ カード側が「末尾=最新」前提なので、昇順に整える
+  const monthly: MonthlyBalanceRow[] = [...monthlyRaw].sort((a, b) =>
+    a.month.localeCompare(b.month)
+  );
 
   // --- OverviewCard 用 payload を組み立てる ---
   const account = accounts?.find((a: any) => a.id === cashAccountId) as any;
@@ -77,11 +80,13 @@ export default async function DashboardPage({ searchParams }: Props) {
   const thisMonthExpense = thisMonthRow?.expense ?? 0;
   const net = thisMonthIncome - thisMonthExpense;
 
-  // currentBalance は overview 側にあるなら優先、なければ monthly の balance を暫定採用
+  // currentBalance は overview 側にあるなら優先、なければ当月 balance、無ければ最新行の balance
+  const latestRow = monthly.length ? monthly[monthly.length - 1] : null;
   const currentBalance =
     (overview as any)?.currentBalance ??
     (overview as any)?.balance ??
     thisMonthRow?.balance ??
+    latestRow?.balance ??
     0;
 
   const overviewPayload: OverviewPayload = {
@@ -101,10 +106,8 @@ export default async function DashboardPage({ searchParams }: Props) {
     >
       <div className="grid gap-4 md:grid-cols-3">
         <OverviewCard payload={overviewPayload} />
-
-        {/* 次はこの2つも Props を合わせて復活させる */}
-        {/* <BalanceCard payload={...} /> */}
-        {/* <EcoCharts payload={...} /> */}
+        <BalanceCard rows={monthly} />
+        <EcoCharts rows={monthly} />
       </div>
     </DashboardClient>
   );
