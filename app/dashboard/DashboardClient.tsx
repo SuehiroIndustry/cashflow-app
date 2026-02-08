@@ -12,7 +12,13 @@ type Props = {
   children?: ReactNode;
 };
 
-export default function DashboardClient(_props: Props) {
-  // まずは型を通してビルドを通す（UIは後で既存実装に戻す）
-  return null;
+export default function DashboardClient(props: Props) {
+  const { children } = props;
+
+  // ✅ まずは「画面が出る」状態に戻す（UIの中身は後で復旧）
+  return (
+    <div className="min-h-screen bg-white text-black">
+      {children ?? null}
+    </div>
+  );
 }
