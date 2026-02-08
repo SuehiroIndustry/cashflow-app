@@ -7,11 +7,6 @@ import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
-// ※ 君の実ファイル構成に合わせてパス調整してOK
-import OverviewCard from "./_components/OverviewCard";
-import BalanceCard from "./_components/BalanceCard";
-import EcoCharts from "./_components/EcoCharts";
-
 import type {
   AccountRow,
   MonthlyBalanceRow,
@@ -38,26 +33,20 @@ function monthStartISO(d = new Date()): string {
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
-  // 1) 口座一覧
   const accounts = (await getAccounts()) as AccountRow[];
 
-  // 2) 表示対象の口座ID（URL優先 → なければ先頭）
   const selectedFromQuery = toInt(searchParams?.cashAccountId);
   const cashAccountId = selectedFromQuery ?? (accounts?.[0]?.id ?? null);
 
-  // 3) Overview（危険信号など）
-  // ✅ getOverview の Input は month 必須なので渡す
   const month = monthStartISO();
 
   const overview = cashAccountId
     ? await getOverview({ cashAccountId, month })
     : null;
 
-  // ✅ getOverview の戻りが違う場合はここだけ合わせればOK
   const cashStatus = (overview as any)?.cashStatus ?? null;
   const alertCards = ((overview as any)?.alertCards ?? []) as AlertCard[];
 
-  // 4) 月次推移
   const monthly = (cashAccountId
     ? await getMonthlyBalance({ cashAccountId, months: 12 })
     : []) as MonthlyBalanceRow[];
@@ -69,10 +58,19 @@ export default async function DashboardPage({ searchParams }: Props) {
       accounts={accounts}
       monthly={monthly}
     >
-      <div className="grid gap-4 md:grid-cols-3">
-        <OverviewCard />
-        <BalanceCard />
-        <EcoCharts />
+      {/* ✅ ここは一旦 “仮表示”。カードは props が揃ってから戻す */}
+      <div className="p-6">
+        <h1 className="text-lg font-semibold">Dashboard</h1>
+        <p className="text-sm opacity-80 mt-2">
+          UI components are temporarily disabled due to required props (payload).
+        </p>
+
+        <div className="mt-4 text-sm">
+          <div>cashAccountId: {cashAccountId ?? "null"}</div>
+          <div>month: {month}</div>
+          <div>alertCards: {alertCards.length}</div>
+          <div>monthly rows: {monthly.length}</div>
+        </div>
       </div>
     </DashboardClient>
   );
