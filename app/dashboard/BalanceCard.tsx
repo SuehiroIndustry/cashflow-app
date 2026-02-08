@@ -1,7 +1,7 @@
-// app/dashboard/_components/BalanceCard.tsx
+// app/dashboard/BalanceCard.tsx
 "use client";
 
-import type { MonthlyBalanceRow } from "../_types";
+import type { MonthlyBalanceRow } from "./_types";
 
 function yen(n: number) {
   return "¥" + n.toLocaleString("ja-JP");
