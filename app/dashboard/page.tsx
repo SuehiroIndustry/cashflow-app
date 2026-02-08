@@ -7,11 +7,17 @@ import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
+import OverviewCard from "./_components/OverviewCard";
+// まだPropsが不明なので一旦OFF（後で同様に戻す）
+// import BalanceCard from "./_components/BalanceCard";
+// import EcoCharts from "./_components/EcoCharts";
+
 import type {
   AccountRow,
   MonthlyBalanceRow,
   CashStatus,
   AlertCard,
+  OverviewPayload,
 } from "./_types";
 
 type Props = {
@@ -33,23 +39,58 @@ function monthStartISO(d = new Date()): string {
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
+  // 1) 口座一覧
   const accounts = (await getAccounts()) as AccountRow[];
 
+  // 2) 表示対象の口座ID（URL優先 → なければ先頭）
   const selectedFromQuery = toInt(searchParams?.cashAccountId);
   const cashAccountId = selectedFromQuery ?? (accounts?.[0]?.id ?? null);
 
+  // 3) month（getOverview Input 必須）
   const month = monthStartISO();
 
+  // 4) Overview（危険信号など）
   const overview = cashAccountId
     ? await getOverview({ cashAccountId, month })
     : null;
 
+  // getOverview の戻り（キーが違う可能性があるので any で受ける）
   const cashStatus = (overview as any)?.cashStatus ?? null;
   const alertCards = ((overview as any)?.alertCards ?? []) as AlertCard[];
 
+  // 5) 月次推移
   const monthly = (cashAccountId
     ? await getMonthlyBalance({ cashAccountId, months: 12 })
     : []) as MonthlyBalanceRow[];
+
+  // --- OverviewCard 用 payload を組み立てる ---
+  const account = accounts?.find((a: any) => a.id === cashAccountId) as any;
+  const accountName =
+    typeof account?.name === "string"
+      ? account.name
+      : typeof account?.account_name === "string"
+      ? account.account_name
+      : "-";
+
+  const thisMonthRow = monthly.find((r) => r.month === month);
+  const thisMonthIncome = thisMonthRow?.income ?? 0;
+  const thisMonthExpense = thisMonthRow?.expense ?? 0;
+  const net = thisMonthIncome - thisMonthExpense;
+
+  // currentBalance は overview 側にあるなら優先、なければ monthly の balance を暫定採用
+  const currentBalance =
+    (overview as any)?.currentBalance ??
+    (overview as any)?.balance ??
+    thisMonthRow?.balance ??
+    0;
+
+  const overviewPayload: OverviewPayload = {
+    accountName,
+    currentBalance,
+    thisMonthIncome,
+    thisMonthExpense,
+    net,
+  } as OverviewPayload;
 
   return (
     <DashboardClient
@@ -58,19 +99,12 @@ export default async function DashboardPage({ searchParams }: Props) {
       accounts={accounts}
       monthly={monthly}
     >
-      {/* ✅ ここは一旦 “仮表示”。カードは props が揃ってから戻す */}
-      <div className="p-6">
-        <h1 className="text-lg font-semibold">Dashboard</h1>
-        <p className="text-sm opacity-80 mt-2">
-          UI components are temporarily disabled due to required props (payload).
-        </p>
+      <div className="grid gap-4 md:grid-cols-3">
+        <OverviewCard payload={overviewPayload} />
 
-        <div className="mt-4 text-sm">
-          <div>cashAccountId: {cashAccountId ?? "null"}</div>
-          <div>month: {month}</div>
-          <div>alertCards: {alertCards.length}</div>
-          <div>monthly rows: {monthly.length}</div>
-        </div>
+        {/* 次はこの2つも Props を合わせて復活させる */}
+        {/* <BalanceCard payload={...} /> */}
+        {/* <EcoCharts payload={...} /> */}
       </div>
     </DashboardClient>
   );
