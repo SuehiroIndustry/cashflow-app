@@ -7,7 +7,7 @@ import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 
-// ここは君の実ファイルに合わせてパス調整してOK
+// ※ 君の実ファイル構成に合わせてパス調整してOK
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
 import EcoCharts from "./_components/EcoCharts";
@@ -31,18 +31,26 @@ function toInt(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function monthStartISO(d = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}-01`;
+}
+
 export default async function DashboardPage({ searchParams }: Props) {
   // 1) 口座一覧
   const accounts = (await getAccounts()) as AccountRow[];
 
   // 2) 表示対象の口座ID（URL優先 → なければ先頭）
   const selectedFromQuery = toInt(searchParams?.cashAccountId);
-  const cashAccountId =
-    selectedFromQuery ?? (accounts?.[0]?.id ?? null);
+  const cashAccountId = selectedFromQuery ?? (accounts?.[0]?.id ?? null);
 
   // 3) Overview（危険信号など）
+  // ✅ getOverview の Input は month 必須なので渡す
+  const month = monthStartISO();
+
   const overview = cashAccountId
-    ? await getOverview({ cashAccountId })
+    ? await getOverview({ cashAccountId, month })
     : null;
 
   // ✅ getOverview の戻りが違う場合はここだけ合わせればOK
@@ -61,7 +69,6 @@ export default async function DashboardPage({ searchParams }: Props) {
       accounts={accounts}
       monthly={monthly}
     >
-      {/* ✅ ここが “children” になる。自己閉じにしない */}
       <div className="grid gap-4 md:grid-cols-3">
         <OverviewCard />
         <BalanceCard />
