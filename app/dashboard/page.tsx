@@ -11,6 +11,8 @@ import type {
   AccountRow,
   MonthlyBalanceRow,
   OverviewPayload,
+  CashStatus,
+  AlertCard,
 } from "./_types";
 
 type Props = {
@@ -56,13 +58,14 @@ export default async function Page(props: Props) {
     );
   }
 
-  // ✅ getOverview は month 必須（ここが今回のエラー原因）
   const month = monthStartISO(new Date());
 
-  const overview = (await getOverview({
-    cashAccountId,
-    month,
-  })) as OverviewPayload;
+  // ✅ getOverview の戻りが unknown 扱いになるのをここで確定させる
+  const overviewRaw = await getOverview({ cashAccountId, month });
+  const overview = overviewRaw as unknown as {
+    cashStatus: CashStatus;
+    alertCards: AlertCard[];
+  };
 
   const monthly = (await getMonthlyBalance({
     cashAccountId,
