@@ -1,7 +1,7 @@
 // app/dashboard/import/_actions/importRakutenCsv.ts
 "use server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 
 type Row = {
   date: string; // YYYY-MM-DD
@@ -20,13 +20,11 @@ export async function importRakutenCsv(params: {
   const user = auth.user;
   if (!user) return { ok: false, error: "未ログインです" };
 
-  // cash_flows: source_type NOT NULL, cash_account_id NOT NULL
-  // manual時だけカテゴリ必須なので import はカテゴリ無しでOK
   const payload = params.rows.map((r) => ({
     user_id: user.id,
     cash_account_id: params.cashAccountId,
     date: r.date,
-    section: r.section === "income" ? "income" : "expense",
+    section: r.section,
     amount: Math.abs(Math.trunc(r.amount)),
     memo: r.memo?.slice(0, 200) ?? "",
     source_type: "import" as const,
