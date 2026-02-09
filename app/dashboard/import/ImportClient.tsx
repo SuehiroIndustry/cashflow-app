@@ -1,60 +1,116 @@
 // app/dashboard/import/ImportClient.tsx
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
-import { runRakutenImport, type RakutenImportRow } from "./_actions/runRakutenImport";
+import Link from "next/link";
+
+// ✅ 既存のアクションを使う（名前は君の環境に合わせる）
+import { importRakutenCsv } from "./_actions/importRakutenCsv";
+// ✅ Row型も「同じ場所」から import して二重定義を潰す
+import type { Row } from "./_actions/importRakutenCsv";
+
+type PreviewRow = Row & {
+  // 表示用（任意）
+  displaySection: "収入" | "支出";
+};
 
 type Props = {
-  cashAccountId: number; // ✅ 固定 number（nullなし）
+  cashAccountId: number; // 2固定
 };
 
 function yen(n: number) {
   return "¥" + Math.round(n).toLocaleString("ja-JP");
 }
 
-/**
- * CSV → rows（全件）を作る
- * ※ ここは「楽天CSVの列名」が違うとズレる。
- * 　もし既存の堅牢なパーサがあるなら、ここだけ差し替えてOK。
- */
-async function parseCsvToRows(file: File): Promise<RakutenImportRow[]> {
-  const text = await file.text();
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
 
-  const lines = text.split(/\r?\n/).filter(Boolean);
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === "," && !inQuotes) {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim());
+}
+
+async function readCsvText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder("shift-jis").decode(buf);
+  } catch {
+    return new TextDecoder("utf-8").decode(buf);
+  }
+}
+
+async function parseRakutenCsv(file: File): Promise<Row[]> {
+  const text = await readCsvText(file);
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
   if (lines.length <= 1) return [];
 
-  // 超簡易CSV（ダブルクォート/カンマ含みがあると壊れる）
-  // 既存実装があるなら絶対そっちを使うのが正解。
-  const header = lines[0].split(",");
-  const idxDate = header.findIndex((h) => h.includes("日付"));
-  const idxInOut = header.findIndex((h) => h.includes("入出金"));
-  const idxAmount = header.findIndex((h) => h.includes("金額"));
-  const idxMemo = header.findIndex((h) => h.includes("摘要") || h.includes("内容"));
+  const header = parseCsvLine(lines[0]).map((h) => h.replaceAll("\uFEFF", "").trim());
 
-  if (idxDate < 0 || idxInOut < 0 || idxAmount < 0) return [];
+  const findIdx = (cands: string[]) =>
+    header.findIndex((h) => cands.some((c) => h.includes(c)));
 
-  const rows: RakutenImportRow[] = [];
+  const idxDate = findIdx(["日付", "取引日", "取引日付", "支払日"]);
+  const idxInOut = findIdx(["入出金", "区分", "摘要区分"]);
+  const idxAmount = findIdx(["金額", "入金額", "出金額"]);
+  const idxMemo = findIdx(["摘要", "内容", "メモ", "取引内容"]);
+
+  const rows: Row[] = [];
+
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",");
-    const dateRaw = (cols[idxDate] ?? "").replaceAll('"', "").trim();
-    const ioRaw = (cols[idxInOut] ?? "").replaceAll('"', "").trim();
-    const amountRaw = (cols[idxAmount] ?? "").replaceAll('"', "").replaceAll(",", "").trim();
-    const memoRaw = idxMemo >= 0 ? (cols[idxMemo] ?? "").replaceAll('"', "").trim() : "";
+    const cols = parseCsvLine(lines[i]);
 
-    if (!dateRaw) continue;
+    const dateRaw = (idxDate >= 0 ? cols[idxDate] : "") ?? "";
+    const ioRaw = (idxInOut >= 0 ? cols[idxInOut] : "") ?? "";
+    const amountRaw = (idxAmount >= 0 ? cols[idxAmount] : "") ?? "";
+    const memoRaw = (idxMemo >= 0 ? cols[idxMemo] : "") ?? "";
 
-    const amount = Number(amountRaw || 0);
-    if (!Number.isFinite(amount) || amount === 0) continue;
+    const date = dateRaw.replaceAll("/", "-").replaceAll('"', "").trim();
 
-    const section: RakutenImportRow["section"] =
-      ioRaw.includes("入金") || ioRaw.toLowerCase().includes("in") ? "収入" : "支出";
+    const amount = Number(
+      String(amountRaw)
+        .replaceAll('"', "")
+        .replaceAll(",", "")
+        .replaceAll("円", "")
+        .trim() || 0
+    );
+
+    if (!date || !Number.isFinite(amount)) continue;
+
+    const io = ioRaw.replaceAll('"', "").trim();
+    const section: Row["section"] =
+      io.includes("入") || io.toLowerCase().includes("in") ? "income" : "expense";
 
     rows.push({
-      date: dateRaw,
+      date,
       section,
-      amount,
-      memo: memoRaw || null,
+      amount: Math.abs(amount),
+      memo: memoRaw?.replaceAll('"', "").trim() || null,
     });
   }
 
@@ -63,33 +119,40 @@ async function parseCsvToRows(file: File): Promise<RakutenImportRow[]> {
 
 export default function ImportClient({ cashAccountId }: Props) {
   const [file, setFile] = useState<File | null>(null);
-  const [allRows, setAllRows] = useState<RakutenImportRow[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const preview = useMemo(() => allRows.slice(0, 50), [allRows]);
-  const previewCount = preview.length;
-  const allCount = allRows.length;
+  const preview: PreviewRow[] = useMemo(() => {
+    return rows.slice(0, 50).map((r) => ({
+      ...r,
+      displaySection: r.section === "income" ? "収入" : "支出",
+    }));
+  }, [rows]);
 
-  const previewSum = useMemo(
-    () => preview.reduce((s, r) => s + (r.section === "収入" ? r.amount : -r.amount), 0),
-    [preview]
-  );
+  const previewSum = useMemo(() => {
+    return preview.reduce((s, r) => s + (r.section === "income" ? r.amount : -r.amount), 0);
+  }, [preview]);
 
   async function onPick(f: File | null) {
     setMsg(null);
     setErr(null);
     setFile(f);
-    setAllRows([]);
+    setRows([]);
 
     if (!f) return;
 
     try {
       setBusy(true);
-      const rows = await parseCsvToRows(f);
-      setAllRows(rows);
-      setMsg(rows.length ? `プレビューを作成しました（全${rows.length}件 / 先頭${Math.min(50, rows.length)}件表示）` : "プレビュー対象がありません（CSVを確認してください）");
+      const parsed = await parseRakutenCsv(f);
+      setRows(parsed);
+
+      setMsg(
+        parsed.length
+          ? `プレビューを作成しました（全${parsed.length}件 / 表示は先頭${Math.min(50, parsed.length)}件）`
+          : "プレビュー対象がありません（CSVの形式/文字コードを確認してください）"
+      );
     } catch (e: any) {
       setErr(e?.message ?? "プレビュー作成に失敗しました");
     } finally {
@@ -101,27 +164,21 @@ export default function ImportClient({ cashAccountId }: Props) {
     setMsg(null);
     setErr(null);
 
-    if (!file) {
-      setErr("CSVファイルを選択してください");
-      return;
-    }
-    if (allRows.length === 0) {
-      setErr("取り込み対象がありません（CSVを確認してください）");
-      return;
-    }
+    if (!file) return setErr("CSVファイルを選択してください");
+    if (rows.length === 0) return setErr("取り込み対象が0件です（まずプレビューが出る状態にしてください）");
 
     try {
       setBusy(true);
 
-      // ✅ ここが本命：rowsを渡してDBへinsertする
-      const res = await runRakutenImport({ cashAccountId, rows: allRows });
+      // ✅ 既存アクションの型どおり：cashAccountId + rows
+      const res = await importRakutenCsv({ cashAccountId, rows });
 
-      if (!res.ok) {
-        setErr(res.error ?? "取り込みに失敗しました");
+      if (!res?.ok) {
+        setErr(res?.error ?? "取り込みに失敗しました");
         return;
       }
 
-      setMsg(`インポートしました：${res.inserted}件（楽天銀行 ID=${cashAccountId}）`);
+      setMsg(`インポートしました：${res.inserted ?? 0}件（口座ID=${cashAccountId}）`);
     } catch (e: any) {
       setErr(e?.message ?? "取り込みに失敗しました");
     } finally {
@@ -141,7 +198,6 @@ export default function ImportClient({ cashAccountId }: Props) {
             </div>
           </div>
 
-          {/* ✅ 依頼どおり Dashboardへ戻る */}
           <Link
             href={`/dashboard?cashAccountId=${cashAccountId}`}
             className="rounded-lg border border-white/10 bg-white/10 px-4 py-2 text-sm hover:bg-white/15"
@@ -169,7 +225,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           <button
             type="button"
             onClick={onImport}
-            disabled={busy || !file || allRows.length === 0}
+            disabled={busy || !file || rows.length === 0}
             className="rounded-lg bg-white px-5 py-2 text-sm font-semibold text-black disabled:opacity-40"
           >
             インポート実行
@@ -177,7 +233,8 @@ export default function ImportClient({ cashAccountId }: Props) {
         </div>
 
         <div className="mt-3 text-sm text-white/70">
-          選択: {file ? file.name : "なし"} / 全件: {allCount}件 / 表示(プレビュー): {previewCount}件 / 差分: {yen(previewSum)}
+          選択: {file ? file.name : "なし"} / 全件: {rows.length}件 / 表示(プレビュー): {preview.length}件 / 差分:{" "}
+          {yen(previewSum)}
         </div>
 
         {msg ? <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">{msg}</div> : null}
@@ -208,7 +265,7 @@ export default function ImportClient({ cashAccountId }: Props) {
                 preview.map((r, i) => (
                   <tr key={i} className="border-t border-white/10">
                     <td className="px-3 py-2">{r.date}</td>
-                    <td className="px-3 py-2">{r.section}</td>
+                    <td className="px-3 py-2">{r.displaySection}</td>
                     <td className="px-3 py-2 text-right">{yen(r.amount)}</td>
                     <td className="px-3 py-2 text-white/70">{r.memo ?? ""}</td>
                   </tr>
@@ -218,9 +275,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">
-          ※ CSVの列定義が違う場合は、パース処理だけ既存の堅牢な実装に差し替えるのが安全。
-        </div>
+        <div className="mt-3 text-xs text-white/50">※ 楽天CSVの Shift_JIS を前提にデコードしています</div>
       </div>
     </div>
   );
