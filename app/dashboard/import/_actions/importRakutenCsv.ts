@@ -3,7 +3,7 @@
 
 import { createSupabaseServerClient } from "../../../../lib/supabase/server";
 
-type Row = {
+export type Row = {
   date: string; // YYYY-MM-DD
   section: "income" | "expense";
   amount: number;
