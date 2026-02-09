@@ -35,6 +35,11 @@ export type OverviewPayload = {
   thisMonthIncome: number;
   thisMonthExpense: number;
   net: number;
+
+  // ✅ 追加：警告判定に使う固定費（月額）
+  fixedMonthlyCost: number;
+
+  // 互換用（既存のUI/試作で追加フィールドを積んでも落ちない）
   [key: string]: unknown;
 };
 

@@ -46,9 +46,10 @@ export default function DashboardClient(props: Props) {
     : "/dashboard/import";
 
   const simulationHref = "/simulation";
+  const fixedCostsHref = "/dashboard/fixed-costs";
 
   const isActive = (href: string) => {
-    // /dashboard?xxx みたいなクエリは pathname だけでは判定できないので雑に
+    if (href === "/dashboard/fixed-costs") return pathname === "/dashboard/fixed-costs";
     if (href.startsWith("/dashboard/import")) return pathname === "/dashboard/import";
     if (href.startsWith("/dashboard")) return pathname === "/dashboard";
     if (href.startsWith("/simulation")) return pathname === "/simulation";
@@ -64,7 +65,6 @@ export default function DashboardClient(props: Props) {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* ✅ 上部ナビ（前の形に復活） */}
       <div className="mx-auto max-w-6xl px-4 pt-6">
         <div className="rounded-xl border border-white/10 bg-white/5">
           <div className="flex items-center justify-between px-6 py-4">
@@ -81,6 +81,9 @@ export default function DashboardClient(props: Props) {
                 <Link className={linkClass("/dashboard/import")} href={importHref}>
                   楽天銀行・明細インポート
                 </Link>
+                <Link className={linkClass("/dashboard/fixed-costs")} href={fixedCostsHref}>
+                  固定費（警告用）
+                </Link>
 
                 <div className="mx-2 h-4 w-px bg-white/20" />
 
@@ -89,12 +92,9 @@ export default function DashboardClient(props: Props) {
                 </div>
               </nav>
             </div>
-
-            {/* 右側は既存の Logout が別にあるなら消してOK */}
           </div>
         </div>
 
-        {/* ✅ ページ本体 */}
         <div className="py-6">{children ?? null}</div>
       </div>
     </div>
