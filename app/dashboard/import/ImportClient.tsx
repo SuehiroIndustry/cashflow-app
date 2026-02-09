@@ -3,17 +3,10 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { runRakutenImport } from "./_actions/runRakutenImport";
-
-type PreviewRow = {
-  date: string; // YYYY-MM-DD
-  section: "収入" | "支出" | "income" | "expense";
-  amount: number;
-  memo?: string | null;
-};
+import { runRakutenImport, type RakutenImportRow } from "./_actions/runRakutenImport";
 
 type Props = {
-  cashAccountId: number; // ✅ 固定で number（null を許さない）
+  cashAccountId: number; // ✅ 固定 number（nullなし）
 };
 
 function yen(n: number) {
@@ -21,68 +14,82 @@ function yen(n: number) {
 }
 
 /**
- * ここは “最低限” のCSVプレビュー生成。
- * 既にあなたのコードにパーサがあるなら、そこへ差し替えればOK。
+ * CSV → rows（全件）を作る
+ * ※ ここは「楽天CSVの列名」が違うとズレる。
+ * 　もし既存の堅牢なパーサがあるなら、ここだけ差し替えてOK。
  */
-async function parseCsvToPreview(file: File): Promise<PreviewRow[]> {
+async function parseCsvToRows(file: File): Promise<RakutenImportRow[]> {
   const text = await file.text();
 
-  // 既存のパーサがある前提ならここは差し替え推奨。
-  // とりあえず「プレビューだけ作る」簡易版（列定義が違う場合はあなたの既存実装に戻す）
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length <= 1) return [];
 
+  // 超簡易CSV（ダブルクォート/カンマ含みがあると壊れる）
+  // 既存実装があるなら絶対そっちを使うのが正解。
   const header = lines[0].split(",");
   const idxDate = header.findIndex((h) => h.includes("日付"));
   const idxInOut = header.findIndex((h) => h.includes("入出金"));
   const idxAmount = header.findIndex((h) => h.includes("金額"));
   const idxMemo = header.findIndex((h) => h.includes("摘要") || h.includes("内容"));
 
-  const rows: PreviewRow[] = [];
+  if (idxDate < 0 || idxInOut < 0 || idxAmount < 0) return [];
+
+  const rows: RakutenImportRow[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",");
-    const dateRaw = cols[idxDate] ?? "";
-    const ioRaw = cols[idxInOut] ?? "";
-    const amountRaw = cols[idxAmount] ?? "0";
-    const memoRaw = idxMemo >= 0 ? cols[idxMemo] : "";
+    const dateRaw = (cols[idxDate] ?? "").replaceAll('"', "").trim();
+    const ioRaw = (cols[idxInOut] ?? "").replaceAll('"', "").trim();
+    const amountRaw = (cols[idxAmount] ?? "").replaceAll('"', "").replaceAll(",", "").trim();
+    const memoRaw = idxMemo >= 0 ? (cols[idxMemo] ?? "").replaceAll('"', "").trim() : "";
 
-    const date = dateRaw.replaceAll('"', "").trim();
-    const amount = Number(String(amountRaw).replaceAll('"', "").replaceAll(",", "").trim() || 0);
+    if (!dateRaw) continue;
 
-    const io = ioRaw.replaceAll('"', "").trim();
-    const section: PreviewRow["section"] =
-      io.includes("入金") || io.toLowerCase().includes("in") ? "収入" : "支出";
+    const amount = Number(amountRaw || 0);
+    if (!Number.isFinite(amount) || amount === 0) continue;
 
-    if (!date) continue;
-    rows.push({ date, section, amount, memo: memoRaw?.replaceAll('"', "").trim() || null });
+    const section: RakutenImportRow["section"] =
+      ioRaw.includes("入金") || ioRaw.toLowerCase().includes("in") ? "収入" : "支出";
+
+    rows.push({
+      date: dateRaw,
+      section,
+      amount,
+      memo: memoRaw || null,
+    });
   }
 
-  return rows.slice(0, 50);
+  return rows;
 }
 
 export default function ImportClient({ cashAccountId }: Props) {
   const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<PreviewRow[]>([]);
+  const [allRows, setAllRows] = useState<RakutenImportRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  const preview = useMemo(() => allRows.slice(0, 50), [allRows]);
   const previewCount = preview.length;
-  const previewSum = useMemo(() => preview.reduce((s, r) => s + (r.section === "収入" ? r.amount : -r.amount), 0), [preview]);
+  const allCount = allRows.length;
+
+  const previewSum = useMemo(
+    () => preview.reduce((s, r) => s + (r.section === "収入" ? r.amount : -r.amount), 0),
+    [preview]
+  );
 
   async function onPick(f: File | null) {
     setMsg(null);
     setErr(null);
     setFile(f);
-    setPreview([]);
+    setAllRows([]);
 
     if (!f) return;
 
     try {
       setBusy(true);
-      const rows = await parseCsvToPreview(f);
-      setPreview(rows);
-      setMsg(rows.length ? `プレビューを作成しました（先頭${rows.length}件）` : "プレビュー対象がありません（CSVを確認してください）");
+      const rows = await parseCsvToRows(f);
+      setAllRows(rows);
+      setMsg(rows.length ? `プレビューを作成しました（全${rows.length}件 / 先頭${Math.min(50, rows.length)}件表示）` : "プレビュー対象がありません（CSVを確認してください）");
     } catch (e: any) {
       setErr(e?.message ?? "プレビュー作成に失敗しました");
     } finally {
@@ -98,19 +105,23 @@ export default function ImportClient({ cashAccountId }: Props) {
       setErr("CSVファイルを選択してください");
       return;
     }
+    if (allRows.length === 0) {
+      setErr("取り込み対象がありません（CSVを確認してください）");
+      return;
+    }
 
     try {
       setBusy(true);
 
-      // ✅ 重要：ここで “必ず” cashAccountId=2 を渡す
-      const res = await runRakutenImport({ cashAccountId, fileName: file.name });
+      // ✅ ここが本命：rowsを渡してDBへinsertする
+      const res = await runRakutenImport({ cashAccountId, rows: allRows });
 
       if (!res.ok) {
         setErr(res.error ?? "取り込みに失敗しました");
         return;
       }
 
-      setMsg(`インポートしました：${res.inserted}件（口座ID=${cashAccountId}）`);
+      setMsg(`インポートしました：${res.inserted}件（楽天銀行 ID=${cashAccountId}）`);
     } catch (e: any) {
       setErr(e?.message ?? "取り込みに失敗しました");
     } finally {
@@ -158,7 +169,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           <button
             type="button"
             onClick={onImport}
-            disabled={busy || !file}
+            disabled={busy || !file || allRows.length === 0}
             className="rounded-lg bg-white px-5 py-2 text-sm font-semibold text-black disabled:opacity-40"
           >
             インポート実行
@@ -166,7 +177,7 @@ export default function ImportClient({ cashAccountId }: Props) {
         </div>
 
         <div className="mt-3 text-sm text-white/70">
-          選択: {file ? file.name : "なし"} / 取り込み対象(プレビュー): {previewCount}件 / 差分: {yen(previewSum)}
+          選択: {file ? file.name : "なし"} / 全件: {allCount}件 / 表示(プレビュー): {previewCount}件 / 差分: {yen(previewSum)}
         </div>
 
         {msg ? <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">{msg}</div> : null}
@@ -208,7 +219,7 @@ export default function ImportClient({ cashAccountId }: Props) {
         </div>
 
         <div className="mt-3 text-xs text-white/50">
-          ※ パース処理が既存実装にある場合は、ここは既存のパーサへ戻してOK（表示だけこのUIを残すのが安全）
+          ※ CSVの列定義が違う場合は、パース処理だけ既存の堅牢な実装に差し替えるのが安全。
         </div>
       </div>
     </div>
