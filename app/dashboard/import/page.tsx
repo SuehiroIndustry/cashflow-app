@@ -15,7 +15,12 @@ function toInt(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export default function Page({ searchParams }: Props) {
-  const cashAccountId = toInt(searchParams?.cashAccountId) ?? 2; // ✅ 口座1個なのでデフォ2でOK
-  return <ImportClient cashAccountId={cashAccountId} />;
+export default async function ImportPage({ searchParams }: Props) {
+  const cashAccountId = toInt(searchParams?.cashAccountId) ?? null;
+
+  return (
+    <div className="w-full">
+      <ImportClient cashAccountId={cashAccountId} />
+    </div>
+  );
 }
