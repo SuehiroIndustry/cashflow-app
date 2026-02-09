@@ -45,13 +45,16 @@ export default function DashboardClient(props: Props) {
     ? `/dashboard/import?cashAccountId=${cashAccountId}`
     : "/dashboard/import";
 
-  const simulationHref = "/simulation";
+  // ✅ ここを dashboard配下にする（上バー維持）
+  const simulationHref = "/dashboard/simulation";
   const fixedCostsHref = "/dashboard/fixed-costs";
 
   const isActive = (href: string) => {
     if (href === "/dashboard/fixed-costs") return pathname === "/dashboard/fixed-costs";
     if (href.startsWith("/dashboard/import")) return pathname === "/dashboard/import";
+    if (href.startsWith("/dashboard/simulation")) return pathname === "/dashboard/simulation";
     if (href.startsWith("/dashboard")) return pathname === "/dashboard";
+    // 旧URL /simulation は redirect する前提だけど、一応拾う
     if (href.startsWith("/simulation")) return pathname === "/simulation";
     return false;
   };
@@ -75,14 +78,13 @@ export default function DashboardClient(props: Props) {
                 <Link className={linkClass("/dashboard")} href={dashboardHref}>
                   Dashboard
                 </Link>
-                <Link className={linkClass("/simulation")} href={simulationHref}>
+                <Link className={linkClass("/dashboard/simulation")} href={simulationHref}>
                   Simulation
                 </Link>
                 <Link className={linkClass("/dashboard/import")} href={importHref}>
                   楽天銀行・明細インポート
                 </Link>
 
-                {/* ✅ 表示名だけ変更 */}
                 <Link className={linkClass("/dashboard/fixed-costs")} href={fixedCostsHref}>
                   固定費設定
                 </Link>
