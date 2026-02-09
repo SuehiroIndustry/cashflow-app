@@ -3,24 +3,13 @@ export const dynamic = "force-dynamic";
 
 import ImportClient from "./ImportClient";
 
-type Props = {
-  searchParams?: {
-    cashAccountId?: string;
-  };
-};
+// 楽天銀行の口座IDを固定
+const RAKUTEN_BANK_ACCOUNT_ID = 2;
 
-function toInt(v: unknown): number | null {
-  if (typeof v !== "string") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-export default async function ImportPage({ searchParams }: Props) {
-  const cashAccountId = toInt(searchParams?.cashAccountId) ?? null;
-
+export default async function ImportPage() {
   return (
     <div className="w-full">
-      <ImportClient cashAccountId={cashAccountId} />
+      <ImportClient cashAccountId={RAKUTEN_BANK_ACCOUNT_ID} />
     </div>
   );
 }
