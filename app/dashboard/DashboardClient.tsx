@@ -81,8 +81,10 @@ export default function DashboardClient(props: Props) {
                 <Link className={linkClass("/dashboard/import")} href={importHref}>
                   楽天銀行・明細インポート
                 </Link>
+
+                {/* ✅ 表示名だけ変更 */}
                 <Link className={linkClass("/dashboard/fixed-costs")} href={fixedCostsHref}>
-                  固定費（警告用）
+                  固定費設定
                 </Link>
 
                 <div className="mx-2 h-4 w-px bg-white/20" />
