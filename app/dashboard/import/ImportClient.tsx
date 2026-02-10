@@ -60,20 +60,16 @@ function safeDecodeWithTextDecoder(buf: ArrayBuffer, enc: string): string | null
   }
 }
 
-// ✅ここが本命：Shift_JIS/UTF-8 を確実に読む
 async function readCsvText(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
 
-  // まずTextDecoderで読めるなら読む（速い）
   for (const enc of ["shift_jis", "shift-jis", "windows-31j", "utf-8"]) {
     const t = safeDecodeWithTextDecoder(buf, enc);
     if (t && looksLikeRakutenCsv(t)) return t;
   }
 
-  // TextDecoderがSJIS未対応の環境があるので、encoding-japaneseで確実に読む
   const uint8 = new Uint8Array(buf);
 
-  // SJISとして変換
   const sjisToUnicode = Encoding.convert(uint8, {
     to: "UNICODE",
     from: "SJIS",
@@ -84,7 +80,6 @@ async function readCsvText(file: File): Promise<string> {
     return sjisToUnicode.replace(/^\uFEFF/, "");
   }
 
-  // UTF-8として変換（BOMも落とす）
   const utf8ToUnicode = Encoding.convert(uint8, {
     to: "UNICODE",
     from: "UTF8",
@@ -97,8 +92,9 @@ async function readCsvText(file: File): Promise<string> {
 async function parseRakutenCsv(file: File): Promise<Row[]> {
   const text = await readCsvText(file);
 
+  // ✅ ここだけ修正：CR(\r) 単体も改行として扱う
   const lines = text
-    .split(/\r?\n/)
+    .split(/\r\n|\n|\r/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
@@ -174,7 +170,7 @@ export default function ImportClient({ cashAccountId }: Props) {
       setMsg(
         parsed.length
           ? `プレビューを作成しました（全${parsed.length}件 / 表示は先頭${Math.min(50, parsed.length)}件）`
-          : "プレビュー対象がありません（CSVの形式/文字コードを確認してください）"
+          : "プレビュー対象がありません（CSVの形式/文字コード/改行コードを確認してください）"
       );
     } catch (e: any) {
       setErr(e?.message ?? "プレビュー作成に失敗しました");
