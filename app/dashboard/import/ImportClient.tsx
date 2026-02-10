@@ -1,4 +1,3 @@
-// app/dashboard/import/ImportClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -17,7 +16,7 @@ function yen(n: number) {
 }
 
 function looksLikeRakutenHeaderCsv(text: string): boolean {
-  const keys = ["日付", "取引日", "支払日", "入出金", "区分", "金額", "摘要", "内容", "メモ"];
+  const keys = ["日付", "取引日", "支払日", "入出金", "区分", "金額", "摘要", "内容", "メモ", "令和", "R"];
   return keys.some((k) => text.includes(k));
 }
 
@@ -33,15 +32,12 @@ function safeDecodeWithTextDecoder(buf: ArrayBuffer, enc: string): string | null
 async function readCsvText(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
 
-  // 速い経路：TextDecoderで当たりを引けばそれでOK
   for (const enc of ["shift_jis", "shift-jis", "windows-31j", "utf-8"]) {
     const t = safeDecodeWithTextDecoder(buf, enc);
     if (!t) continue;
-    // ヘッダCSV or Zenginっぽいレコードタイプ（"1","2"）が見えるなら採用
     if (looksLikeRakutenHeaderCsv(t) || t.includes('"1","') || t.includes('"2","')) return t;
   }
 
-  // 保険：Shift_JISでも確実に読む（ブラウザ差分対策）
   const uint8 = new Uint8Array(buf);
 
   const sjisToUnicode = Encoding.convert(uint8, {
@@ -62,10 +58,7 @@ async function readCsvText(file: File): Promise<string> {
 }
 
 /**
- * ✅ クォート内の改行も扱える最小CSVパーサ
- * - 区切り: ,
- * - クォート: "
- * - CRLF/LF/CR すべて対応
+ * クォート内改行も扱える最小CSVパーサ
  */
 function parseCsvAll(text: string): string[][] {
   const rows: string[][] = [];
@@ -79,7 +72,6 @@ function parseCsvAll(text: string): string[][] {
   };
 
   const pushRow = () => {
-    // 完全な空行だけ捨てる
     if (row.length === 1 && row[0].trim() === "") {
       row = [];
       return;
@@ -92,7 +84,6 @@ function parseCsvAll(text: string): string[][] {
     const ch = text[i];
 
     if (ch === '"') {
-      // "" -> "
       if (inQuotes && text[i + 1] === '"') {
         field += '"';
         i++;
@@ -129,7 +120,7 @@ function parseCsvAll(text: string): string[][] {
   return rows;
 }
 
-// YYMMDD -> YYYY-MM-DD（暫定：00-79=2000年代、80-99=1900年代）
+// YYMMDD -> YYYY-MM-DD（Zengin用）
 function yymmddToIso(v: string): string | null {
   const s = (v ?? "").trim();
   if (!/^\d{6}$/.test(s)) return null;
@@ -139,8 +130,48 @@ function yymmddToIso(v: string): string | null {
   const dd = Number(s.slice(4, 6));
   if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
 
+  // ※ここは「実データの世代」に合わせたいが、まず動かすこと優先
   const yyyy = yy <= 79 ? 2000 + yy : 1900 + yy;
   return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+}
+
+// 令和/平成など -> YYYY-MM-DD
+function normalizeDateToISO(raw: string): string | null {
+  const s0 = String(raw ?? "").trim();
+  if (!s0) return null;
+
+  // まず西暦 yyyy/mm/dd or yyyy-mm-dd
+  const s = s0.replaceAll("年", "/").replaceAll("月", "/").replaceAll("日", "").trim();
+
+  // yyyy/mm/dd
+  const m1 = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (m1) {
+    const yyyy = Number(m1[1]);
+    const mm = Number(m1[2]);
+    const dd = Number(m1[3]);
+    if (yyyy >= 1900 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    }
+  }
+
+  // 令和R / 平成H（例: R6/2/5, 令和6/2/5）
+  const era = s.match(/^(R|令和|H|平成)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  if (era) {
+    const kind = era[1];
+    const y = Number(era[2]);
+    const mm = Number(era[3]);
+    const dd = Number(era[4]);
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || y < 1) return null;
+
+    let yyyy: number | null = null;
+    if (kind === "R" || kind === "令和") yyyy = 2018 + y; // R1=2019
+    if (kind === "H" || kind === "平成") yyyy = 1988 + y; // H1=1989
+
+    if (!yyyy) return null;
+    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+
+  return null;
 }
 
 function toIntSafeDigits(v: string): number | null {
@@ -155,10 +186,7 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
   const table = parseCsvAll(text);
   if (table.length === 0) return [];
 
-  // -------------------------
   // 1) 全銀協(Zengin) 形式
-  // 先頭列に 1/2/8/9 が来て、明細(2)が含まれる
-  // -------------------------
   const hasZenginDetail = table.some((r) => (r?.[0] ?? "").trim() === "2");
   const firstType = (table[0]?.[0] ?? "").trim();
 
@@ -168,22 +196,17 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
     for (const r of table) {
       if ((r?.[0] ?? "").trim() !== "2") continue;
 
-      // 実ファイル: r[2], r[3] に 6桁日付が入る（例: 071113）
       const date =
         yymmddToIso(String(r[2] ?? "").trim()) ??
         yymmddToIso(String(r[3] ?? "").trim());
 
-      // 実ファイル: r[6] に 12桁金額（例: 000001502920）
       const amountVal = toIntSafeDigits(String(r[6] ?? "").trim());
 
       if (!date || amountVal === null) continue;
 
-      // 実ファイル: r[4] が 1/2（入出金区分）
-      // ※逆だったらここだけ入れ替えればOK
       const inout = String(r[4] ?? "").trim();
       const section: Row["section"] = inout === "1" ? "income" : "expense";
 
-      // 実ファイル: r[14] に相手名っぽい、r[15] に銀行名っぽい（半角カナ）
       const name = String(r[14] ?? "").trim();
       const bank = String(r[15] ?? "").trim();
       const memo = [name, bank].filter(Boolean).join(" / ");
@@ -199,9 +222,7 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
     return out;
   }
 
-  // -------------------------
-  // 2) ヘッダあり通常CSV 形式
-  // -------------------------
+  // 2) ヘッダあり通常CSV
   if (table.length <= 1) return [];
 
   const header = table[0].map((h) => String(h ?? "").replaceAll("\uFEFF", "").trim());
@@ -226,7 +247,7 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
     const amountRaw = (idxAmount >= 0 ? cols[idxAmount] : "") ?? "";
     const memoRaw = (idxMemo >= 0 ? cols[idxMemo] : "") ?? "";
 
-    const date = String(dateRaw).replaceAll("/", "-").replaceAll('"', "").trim();
+    const date = normalizeDateToISO(String(dateRaw).replaceAll('"', "").trim());
     const amount = Number(
       String(amountRaw).replaceAll('"', "").replaceAll(",", "").replaceAll("円", "").trim() || 0
     );
@@ -279,7 +300,7 @@ export default function ImportClient({ cashAccountId }: Props) {
               50,
               parsed.length
             )}件）`
-          : "プレビュー対象がありません（CSV形式を確認してください：ヘッダCSV / 全銀協(Zengin) 両対応）"
+          : "プレビュー対象がありません（CSV形式/日付形式/文字コードを確認してください）"
       );
     } catch (e: any) {
       setErr(e?.message ?? "プレビュー作成に失敗しました");
@@ -405,7 +426,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">※ ヘッダCSV / 全銀協(Zengin) 両対応</div>
+        <div className="mt-3 text-xs text-white/50">※ 和暦(令和/平成)も西暦に変換して取り込みます</div>
       </div>
     </div>
   );
