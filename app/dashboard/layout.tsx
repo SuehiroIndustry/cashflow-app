@@ -39,13 +39,6 @@ export default function DashboardLayout({
             <Link className="hover:text-white" href="/dashboard/fixed-costs">
               固定費設定
             </Link>
-
-            <span className="mx-1 text-white/30">|</span>
-
-            {/* 口座選択をクエリで維持してるなら、ここもクエリ付きリンクにしてOK */}
-            <Link className="hover:text-white" href="/dashboard?cashAccountId=0">
-              口座：全口座
-            </Link>
           </nav>
         </div>
       </div>
