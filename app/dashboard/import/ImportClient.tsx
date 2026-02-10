@@ -45,18 +45,59 @@ function parseCsvLine(line: string): string[] {
   return out.map((s) => s.trim());
 }
 
+function looksLikeRakutenCsv(text: string): boolean {
+  // 楽天のヘッダ/項目名が読めているかを雑に判定（文字化け対策）
+  // 1つでも含まれれば「当たり」の可能性が高い
+  const keys = ["日付", "取引日", "支払日", "入出金", "区分", "金額", "摘要", "内容", "メモ"];
+  return keys.some((k) => text.includes(k));
+}
+
+function safeDecode(buf: ArrayBuffer, encoding: string): string | null {
+  try {
+    // TextDecoder は未対応の encoding を渡すと例外になる環境がある
+    const td = new TextDecoder(encoding as any);
+    return td.decode(buf);
+  } catch {
+    return null;
+  }
+}
+
 async function readCsvText(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
-  // 楽天CSVはShift_JISが多いので優先
-  try {
-    return new TextDecoder("shift-jis").decode(buf);
-  } catch {
-    return new TextDecoder("utf-8").decode(buf);
+
+  // ✅ ここがポイント：環境ごとの encoder 名差を吸収する
+  // - "shift-jis" がダメな環境がある
+  // - "windows-31j" が通る環境がある
+  // - どれもダメなら utf-8
+  const candidates = [
+    "shift-jis",
+    "windows-31j",
+    "shift_jis",
+    "sjis",
+    "utf-8",
+  ];
+
+  // 1) ヘッダが読めるエンコーディングを探す
+  for (const enc of candidates) {
+    const text = safeDecode(buf, enc);
+    if (!text) continue;
+
+    // BOM除去（UTF-8 BOM対策）
+    const cleaned = text.replace(/^\uFEFF/, "");
+
+    if (looksLikeRakutenCsv(cleaned)) {
+      return cleaned;
+    }
   }
+
+  // 2) どれも「楽天っぽく」見えなかった場合は、最後の保険で utf-8
+  const fallback = safeDecode(buf, "utf-8");
+  return (fallback ?? "").replace(/^\uFEFF/, "");
 }
 
 async function parseRakutenCsv(file: File): Promise<Row[]> {
   const text = await readCsvText(file);
+
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
@@ -222,7 +263,11 @@ export default function ImportClient({ cashAccountId }: Props) {
         </div>
 
         {msg ? <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">{msg}</div> : null}
-        {err ? <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{err}</div> : null}
+        {err ? (
+          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
+            {err}
+          </div>
+        ) : null}
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
@@ -259,7 +304,9 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">※ 楽天CSVの Shift_JIS を優先してデコードしています</div>
+        <div className="mt-3 text-xs text-white/50">
+          ※ Shift_JIS / Windows-31J / UTF-8 を自動判定してデコードしています
+        </div>
       </div>
     </div>
   );
