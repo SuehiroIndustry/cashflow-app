@@ -3,8 +3,22 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
+import type {
+  CashStatus,
+  AlertCard,
+  AccountRow,
+  MonthlyBalanceRow,
+} from "./_types";
+
 type Props = {
   children: React.ReactNode;
+
+  // ✅ 互換性のために受け取れるようにする（他ページが渡してくる）
+  // ※ このコンポーネント内では使わなくてOK
+  cashStatus?: CashStatus;
+  alertCards?: AlertCard[];
+  accounts?: AccountRow[];
+  monthly?: MonthlyBalanceRow[];
 };
 
 export default function DashboardClient({ children }: Props) {
@@ -40,7 +54,6 @@ export default function DashboardClient({ children }: Props) {
               楽天銀行・明細インポート
             </Link>
 
-            {/* ★ ここを追加 */}
             <Link
               href={`/dashboard/statement?cashAccountId=${cashAccountId}`}
               className="rounded-md px-3 py-2 text-zinc-300 hover:bg-zinc-800 hover:text-white"
@@ -49,7 +62,7 @@ export default function DashboardClient({ children }: Props) {
             </Link>
 
             <Link
-              href={`/dashboard/settings`}
+              href={`/dashboard/fixed-costs?cashAccountId=${cashAccountId}`}
               className="rounded-md px-3 py-2 text-zinc-300 hover:bg-zinc-800 hover:text-white"
             >
               固定費設定
