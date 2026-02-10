@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import Encoding from "encoding-japanese";
 
 import { importRakutenCsv } from "./_actions/importRakutenCsv";
 import type { Row } from "./_actions/importRakutenCsv";
@@ -46,53 +47,51 @@ function parseCsvLine(line: string): string[] {
 }
 
 function looksLikeRakutenCsv(text: string): boolean {
-  // 楽天のヘッダ/項目名が読めているかを雑に判定（文字化け対策）
-  // 1つでも含まれれば「当たり」の可能性が高い
   const keys = ["日付", "取引日", "支払日", "入出金", "区分", "金額", "摘要", "内容", "メモ"];
   return keys.some((k) => text.includes(k));
 }
 
-function safeDecode(buf: ArrayBuffer, encoding: string): string | null {
+function safeDecodeWithTextDecoder(buf: ArrayBuffer, enc: string): string | null {
   try {
-    // TextDecoder は未対応の encoding を渡すと例外になる環境がある
-    const td = new TextDecoder(encoding as any);
-    return td.decode(buf);
+    const td = new TextDecoder(enc as any);
+    return td.decode(buf).replace(/^\uFEFF/, "");
   } catch {
     return null;
   }
 }
 
+// ✅ここが本命：Shift_JIS/UTF-8 を確実に読む
 async function readCsvText(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
 
-  // ✅ ここがポイント：環境ごとの encoder 名差を吸収する
-  // - "shift-jis" がダメな環境がある
-  // - "windows-31j" が通る環境がある
-  // - どれもダメなら utf-8
-  const candidates = [
-    "shift-jis",
-    "windows-31j",
-    "shift_jis",
-    "sjis",
-    "utf-8",
-  ];
-
-  // 1) ヘッダが読めるエンコーディングを探す
-  for (const enc of candidates) {
-    const text = safeDecode(buf, enc);
-    if (!text) continue;
-
-    // BOM除去（UTF-8 BOM対策）
-    const cleaned = text.replace(/^\uFEFF/, "");
-
-    if (looksLikeRakutenCsv(cleaned)) {
-      return cleaned;
-    }
+  // まずTextDecoderで読めるなら読む（速い）
+  for (const enc of ["shift_jis", "shift-jis", "windows-31j", "utf-8"]) {
+    const t = safeDecodeWithTextDecoder(buf, enc);
+    if (t && looksLikeRakutenCsv(t)) return t;
   }
 
-  // 2) どれも「楽天っぽく」見えなかった場合は、最後の保険で utf-8
-  const fallback = safeDecode(buf, "utf-8");
-  return (fallback ?? "").replace(/^\uFEFF/, "");
+  // TextDecoderがSJIS未対応の環境があるので、encoding-japaneseで確実に読む
+  const uint8 = new Uint8Array(buf);
+
+  // SJISとして変換
+  const sjisToUnicode = Encoding.convert(uint8, {
+    to: "UNICODE",
+    from: "SJIS",
+    type: "string",
+  }) as string;
+
+  if (looksLikeRakutenCsv(sjisToUnicode)) {
+    return sjisToUnicode.replace(/^\uFEFF/, "");
+  }
+
+  // UTF-8として変換（BOMも落とす）
+  const utf8ToUnicode = Encoding.convert(uint8, {
+    to: "UNICODE",
+    from: "UTF8",
+    type: "string",
+  }) as string;
+
+  return utf8ToUnicode.replace(/^\uFEFF/, "");
 }
 
 async function parseRakutenCsv(file: File): Promise<Row[]> {
@@ -174,10 +173,7 @@ export default function ImportClient({ cashAccountId }: Props) {
       setRows(parsed);
       setMsg(
         parsed.length
-          ? `プレビューを作成しました（全${parsed.length}件 / 表示は先頭${Math.min(
-              50,
-              parsed.length
-            )}件）`
+          ? `プレビューを作成しました（全${parsed.length}件 / 表示は先頭${Math.min(50, parsed.length)}件）`
           : "プレビュー対象がありません（CSVの形式/文字コードを確認してください）"
       );
     } catch (e: any) {
@@ -304,9 +300,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">
-          ※ Shift_JIS / Windows-31J / UTF-8 を自動判定してデコードしています
-        </div>
+        <div className="mt-3 text-xs text-white/50">※ Shift_JIS/UTF-8 を確実に判定してデコードしています</div>
       </div>
     </div>
   );
