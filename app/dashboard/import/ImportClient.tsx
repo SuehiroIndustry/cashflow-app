@@ -120,7 +120,10 @@ function parseCsvAll(text: string): string[][] {
   return rows;
 }
 
-// YYMMDD -> YYYY-MM-DD（Zengin用）
+/**
+ * YYMMDD -> YYYY-MM-DD（Zengin用）
+ * ✅楽天のZenginは「令和YY」の可能性が高いので、令和を優先して西暦に寄せる
+ */
 function yymmddToIso(v: string): string | null {
   const s = (v ?? "").trim();
   if (!/^\d{6}$/.test(s)) return null;
@@ -130,9 +133,25 @@ function yymmddToIso(v: string): string | null {
   const dd = Number(s.slice(4, 6));
   if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
 
-  // ※ここは「実データの世代」に合わせたいが、まず動かすこと優先
-  const yyyy = yy <= 79 ? 2000 + yy : 1900 + yy;
-  return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  const currentYear = new Date().getFullYear();
+
+  // 候補：令和(2018+yy) / 西暦(2000+yy) / 西暦(1900+yy)
+  const candidates = [
+    2018 + yy, // Reiwa: R1=2019
+    2000 + yy,
+    1900 + yy,
+  ];
+
+  // 未来に飛びすぎる年は除外（来年まで許容）
+  const valid = candidates.filter((y) => y <= currentYear + 1);
+
+  // 近い年を採用（なければ令和を採用）
+  const picked =
+    valid.length > 0
+      ? valid.reduce((best, y) => (Math.abs(y - currentYear) < Math.abs(best - currentYear) ? y : best), valid[0])
+      : 2018 + yy;
+
+  return `${picked}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
 }
 
 // 令和/平成など -> YYYY-MM-DD
@@ -140,10 +159,8 @@ function normalizeDateToISO(raw: string): string | null {
   const s0 = String(raw ?? "").trim();
   if (!s0) return null;
 
-  // まず西暦 yyyy/mm/dd or yyyy-mm-dd
   const s = s0.replaceAll("年", "/").replaceAll("月", "/").replaceAll("日", "").trim();
 
-  // yyyy/mm/dd
   const m1 = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
   if (m1) {
     const yyyy = Number(m1[1]);
@@ -154,7 +171,6 @@ function normalizeDateToISO(raw: string): string | null {
     }
   }
 
-  // 令和R / 平成H（例: R6/2/5, 令和6/2/5）
   const era = s.match(/^(R|令和|H|平成)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
   if (era) {
     const kind = era[1];
@@ -164,8 +180,8 @@ function normalizeDateToISO(raw: string): string | null {
     if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || y < 1) return null;
 
     let yyyy: number | null = null;
-    if (kind === "R" || kind === "令和") yyyy = 2018 + y; // R1=2019
-    if (kind === "H" || kind === "平成") yyyy = 1988 + y; // H1=1989
+    if (kind === "R" || kind === "令和") yyyy = 2018 + y;
+    if (kind === "H" || kind === "平成") yyyy = 1988 + y;
 
     if (!yyyy) return null;
     return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
@@ -426,7 +442,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">※ 和暦(令和/平成)も西暦に変換して取り込みます</div>
+        <div className="mt-3 text-xs text-white/50">※ ZenginのYYMMDDは令和年の可能性があるため、西暦へ補正します</div>
       </div>
     </div>
   );
