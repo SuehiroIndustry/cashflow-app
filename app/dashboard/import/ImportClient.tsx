@@ -1,8 +1,8 @@
+// app/dashboard/import/ImportClient.tsx
 "use client";
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import Encoding from "encoding-japanese";
 
 import { importRakutenCsv } from "./_actions/importRakutenCsv";
 import type { Row } from "./_actions/importRakutenCsv";
@@ -15,77 +15,17 @@ function yen(n: number) {
   return "¥" + Math.round(n).toLocaleString("ja-JP");
 }
 
-function looksLikeRakutenHeaderCsv(text: string): boolean {
-  const keys = ["日付", "取引日", "支払日", "入出金", "区分", "金額", "摘要", "内容", "メモ", "令和", "R"];
-  return keys.some((k) => text.includes(k));
-}
-
-function safeDecodeWithTextDecoder(buf: ArrayBuffer, enc: string): string | null {
-  try {
-    const td = new TextDecoder(enc as any);
-    return td.decode(buf).replace(/^\uFEFF/, "");
-  } catch {
-    return null;
-  }
-}
-
-async function readCsvText(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-
-  for (const enc of ["shift_jis", "shift-jis", "windows-31j", "utf-8"]) {
-    const t = safeDecodeWithTextDecoder(buf, enc);
-    if (!t) continue;
-    if (looksLikeRakutenHeaderCsv(t) || t.includes('"1","') || t.includes('"2","')) return t;
-  }
-
-  const uint8 = new Uint8Array(buf);
-
-  const sjisToUnicode = Encoding.convert(uint8, {
-    to: "UNICODE",
-    from: "SJIS",
-    type: "string",
-  }) as string;
-
-  if (sjisToUnicode && sjisToUnicode.length > 0) return sjisToUnicode.replace(/^\uFEFF/, "");
-
-  const utf8ToUnicode = Encoding.convert(uint8, {
-    to: "UNICODE",
-    from: "UTF8",
-    type: "string",
-  }) as string;
-
-  return utf8ToUnicode.replace(/^\uFEFF/, "");
-}
-
-/**
- * クォート内改行も扱える最小CSVパーサ
- */
-function parseCsvAll(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
   let inQuotes = false;
 
-  const pushField = () => {
-    row.push(field);
-    field = "";
-  };
-
-  const pushRow = () => {
-    if (row.length === 1 && row[0].trim() === "") {
-      row = [];
-      return;
-    }
-    rows.push(row);
-    row = [];
-  };
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
 
     if (ch === '"') {
-      if (inQuotes && text[i + 1] === '"') {
-        field += '"';
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
         i++;
       } else {
         inQuotes = !inQuotes;
@@ -93,75 +33,42 @@ function parseCsvAll(text: string): string[][] {
       continue;
     }
 
-    if (!inQuotes) {
-      if (ch === ",") {
-        pushField();
-        continue;
-      }
-      if (ch === "\n") {
-        pushField();
-        pushRow();
-        continue;
-      }
-      if (ch === "\r") {
-        if (text[i + 1] === "\n") i++;
-        pushField();
-        pushRow();
-        continue;
-      }
+    if (ch === "," && !inQuotes) {
+      out.push(cur);
+      cur = "";
+      continue;
     }
 
-    field += ch;
+    cur += ch;
   }
-
-  pushField();
-  if (row.length > 1 || row[0].trim() !== "") pushRow();
-
-  return rows;
+  out.push(cur);
+  return out.map((s) => s.trim());
 }
 
-/**
- * YYMMDD -> YYYY-MM-DD（Zengin用）
- * ✅楽天のZenginは「令和YY」の可能性が高いので、令和を優先して西暦に寄せる
- */
-function yymmddToIso(v: string): string | null {
-  const s = (v ?? "").trim();
-  if (!/^\d{6}$/.test(s)) return null;
+function parseCsvAll(text: string): string[][] {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
 
-  const yy = Number(s.slice(0, 2));
-  const mm = Number(s.slice(2, 4));
-  const dd = Number(s.slice(4, 6));
-  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
-
-  const currentYear = new Date().getFullYear();
-
-  // 候補：令和(2018+yy) / 西暦(2000+yy) / 西暦(1900+yy)
-  const candidates = [
-    2018 + yy, // Reiwa: R1=2019
-    2000 + yy,
-    1900 + yy,
-  ];
-
-  // 未来に飛びすぎる年は除外（来年まで許容）
-  const valid = candidates.filter((y) => y <= currentYear + 1);
-
-  // 近い年を採用（なければ令和を採用）
-  const picked =
-    valid.length > 0
-      ? valid.reduce((best, y) => (Math.abs(y - currentYear) < Math.abs(best - currentYear) ? y : best), valid[0])
-      : 2018 + yy;
-
-  return `${picked}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  return lines.map(parseCsvLine);
 }
 
-// 令和/平成など -> YYYY-MM-DD
-function normalizeDateToISO(raw: string): string | null {
-  const s0 = String(raw ?? "").trim();
-  if (!s0) return null;
+async function readCsvText(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  try {
+    return new TextDecoder("shift-jis").decode(buf);
+  } catch {
+    return new TextDecoder("utf-8").decode(buf);
+  }
+}
 
-  const s = s0.replaceAll("年", "/").replaceAll("月", "/").replaceAll("日", "").trim();
+function yymmddToIso(s: string): string | null {
+  const t = String(s ?? "").trim();
+  if (!t) return null;
 
-  const m1 = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  // YYYY/MM/DD or YYYY-MM-DD
+  const m1 = t.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
   if (m1) {
     const yyyy = Number(m1[1]);
     const mm = Number(m1[2]);
@@ -171,7 +78,8 @@ function normalizeDateToISO(raw: string): string | null {
     }
   }
 
-  const era = s.match(/^(R|令和|H|平成)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  // R/H era (R6/1/1 etc)
+  const era = t.match(/^(R|令和|H|平成)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
   if (era) {
     const kind = era[1];
     const y = Number(era[2]);
@@ -182,9 +90,21 @@ function normalizeDateToISO(raw: string): string | null {
     let yyyy: number | null = null;
     if (kind === "R" || kind === "令和") yyyy = 2018 + y;
     if (kind === "H" || kind === "平成") yyyy = 1988 + y;
-
     if (!yyyy) return null;
+
     return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+
+  // YYMMDD（Zengin）
+  const m2 = t.match(/^(\d{2})(\d{2})(\d{2})$/);
+  if (m2) {
+    // 00-99は 2000年台寄せ（必要ならここ調整）
+    const yyyy = 2000 + Number(m2[1]);
+    const mm = Number(m2[2]);
+    const dd = Number(m2[3]);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    }
   }
 
   return null;
@@ -197,10 +117,10 @@ function toIntSafeDigits(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function parseRakutenCsv(file: File): Promise<Row[]> {
+async function parseRakutenCsv(file: File): Promise<{ rows: Row[]; endingBalance: number | null }> {
   const text = await readCsvText(file);
   const table = parseCsvAll(text);
-  if (table.length === 0) return [];
+  if (table.length === 0) return { rows: [], endingBalance: null };
 
   // 1) 全銀協(Zengin) 形式
   const hasZenginDetail = table.some((r) => (r?.[0] ?? "").trim() === "2");
@@ -208,16 +128,25 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
 
   if (hasZenginDetail && (firstType === "1" || firstType === "2")) {
     const out: Row[] = [];
+    let endingBalance: number | null = null;
 
     for (const r of table) {
-      if ((r?.[0] ?? "").trim() !== "2") continue;
+      const type = (r?.[0] ?? "").trim();
+
+      // ✅ レコード8：最終残高（列は銀行で差異あるが、あなたのファイルでは r[6] が残高）
+      if (type === "8") {
+        const bal = toIntSafeDigits(String(r[6] ?? "").trim());
+        if (bal !== null) endingBalance = bal;
+        continue;
+      }
+
+      if (type !== "2") continue;
 
       const date =
         yymmddToIso(String(r[2] ?? "").trim()) ??
         yymmddToIso(String(r[3] ?? "").trim());
 
       const amountVal = toIntSafeDigits(String(r[6] ?? "").trim());
-
       if (!date || amountVal === null) continue;
 
       const inout = String(r[4] ?? "").trim();
@@ -235,23 +164,21 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
       });
     }
 
-    return out;
+    return { rows: out, endingBalance };
   }
 
   // 2) ヘッダあり通常CSV
-  if (table.length <= 1) return [];
+  if (table.length <= 1) return { rows: [], endingBalance: null };
 
   const header = table[0].map((h) => String(h ?? "").replaceAll("\uFEFF", "").trim());
-
-  const findIdx = (cands: string[]) =>
-    header.findIndex((h) => cands.some((c) => h.includes(c)));
+  const findIdx = (cands: string[]) => header.findIndex((h) => cands.some((c) => h.includes(c)));
 
   const idxDate = findIdx(["日付", "取引日", "取引日付", "支払日"]);
   const idxInOut = findIdx(["入出金", "区分", "摘要区分"]);
   const idxAmount = findIdx(["金額", "入金額", "出金額"]);
   const idxMemo = findIdx(["摘要", "内容", "メモ", "取引内容"]);
 
-  if (idxDate < 0 || idxAmount < 0) return [];
+  if (idxDate < 0 || idxAmount < 0) return { rows: [], endingBalance: null };
 
   const rows: Row[] = [];
 
@@ -263,16 +190,13 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
     const amountRaw = (idxAmount >= 0 ? cols[idxAmount] : "") ?? "";
     const memoRaw = (idxMemo >= 0 ? cols[idxMemo] : "") ?? "";
 
-    const date = normalizeDateToISO(String(dateRaw).replaceAll('"', "").trim());
-    const amount = Number(
-      String(amountRaw).replaceAll('"', "").replaceAll(",", "").replaceAll("円", "").trim() || 0
-    );
+    const date = yymmddToIso(String(dateRaw ?? "").replaceAll('"', "").trim());
+    const amount = Number(String(amountRaw).replaceAll('"', "").replaceAll(",", "").replaceAll("円", "").trim() || 0);
 
     if (!date || !Number.isFinite(amount)) continue;
 
-    const io = String(ioRaw).replaceAll('"', "").trim();
-    const section: Row["section"] =
-      io.includes("入") || io.toLowerCase().includes("in") ? "income" : "expense";
+    const io = String(ioRaw ?? "").replaceAll('"', "").trim();
+    const section: Row["section"] = io.includes("入") || io.toLowerCase().includes("in") ? "income" : "expense";
 
     rows.push({
       date,
@@ -282,12 +206,13 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
     });
   }
 
-  return rows;
+  return { rows, endingBalance: null };
 }
 
 export default function ImportClient({ cashAccountId }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  const [endingBalance, setEndingBalance] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -303,20 +228,25 @@ export default function ImportClient({ cashAccountId }: Props) {
     setErr(null);
     setFile(f);
     setRows([]);
+    setEndingBalance(null);
 
     if (!f) return;
 
     try {
       setBusy(true);
       const parsed = await parseRakutenCsv(f);
-      setRows(parsed);
+      setRows(parsed.rows);
+      setEndingBalance(parsed.endingBalance);
+
+      const balMsg =
+        typeof parsed.endingBalance === "number"
+          ? ` / 最終残高(レコード8): ${yen(parsed.endingBalance)}`
+          : "";
+
       setMsg(
-        parsed.length
-          ? `プレビューを作成しました（全${parsed.length}件 / 表示は先頭${Math.min(
-              50,
-              parsed.length
-            )}件）`
-          : "プレビュー対象がありません（CSV形式/日付形式/文字コードを確認してください）"
+        parsed.rows.length
+          ? `プレビューを作成しました（全${parsed.rows.length}件 / 表示は先頭${Math.min(50, parsed.rows.length)}件）${balMsg}`
+          : "プレビュー対象がありません（CSVの形式/文字コードを確認してください）"
       );
     } catch (e: any) {
       setErr(e?.message ?? "プレビュー作成に失敗しました");
@@ -334,14 +264,18 @@ export default function ImportClient({ cashAccountId }: Props) {
 
     try {
       setBusy(true);
-      const res = await importRakutenCsv({ cashAccountId, rows });
+      const res = await importRakutenCsv({ cashAccountId, rows, endingBalance });
 
       if (!res.ok) {
         setErr(res.error ?? "取り込みに失敗しました");
         return;
       }
 
-      setMsg(`インポートしました：${res.inserted}件（口座ID=${cashAccountId}）`);
+      setMsg(
+        `インポートしました：${res.inserted}件（既存削除: ${res.deleted}件 / 口座ID=${cashAccountId}` +
+          (typeof endingBalance === "number" ? ` / 残高更新: ${yen(endingBalance)}` : "") +
+          `）`
+      );
     } catch (e: any) {
       setErr(e?.message ?? "取り込みに失敗しました");
     } finally {
@@ -396,8 +330,9 @@ export default function ImportClient({ cashAccountId }: Props) {
         </div>
 
         <div className="mt-3 text-sm text-white/70">
-          選択: {file ? file.name : "なし"} / 全件: {rows.length}件 / 表示(プレビュー): {preview.length}件 /
-          差分: {yen(previewSum)}
+          選択: {file ? file.name : "なし"} / 全件: {rows.length}件 / 表示(プレビュー): {preview.length}件 / 差分:{" "}
+          {yen(previewSum)}
+          {typeof endingBalance === "number" ? ` / 最終残高(レコード8): ${yen(endingBalance)}` : ""}
         </div>
 
         {msg ? <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">{msg}</div> : null}
@@ -442,7 +377,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">※ ZenginのYYMMDDは令和年の可能性があるため、西暦へ補正します</div>
+        <div className="mt-3 text-xs text-white/50">※ 楽天CSVの Shift_JIS を優先してデコードしています</div>
       </div>
     </div>
   );

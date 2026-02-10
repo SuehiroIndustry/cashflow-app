@@ -23,18 +23,16 @@ export async function importCashFlowsFromRows(params: {
   const cashAccountId = params.cashAccountId;
   if (!cashAccountId) return { ok: false, error: "cashAccountId がありません" };
 
-  // 取り込み用に正規化
   const payload = (params.rows ?? [])
     .filter((r) => r && r.date && r.section && Number.isFinite(r.amount))
     .map((r) => ({
       user_id: user.id,
       cash_account_id: cashAccountId,
       date: r.date,
-      section: r.section, // 'income' | 'expense'
+      section: r.section,
       amount: Math.trunc(r.amount),
       description: r.description ?? "",
-      source_type: "import_csv",
-      // cash_category_id は今回は入れない（manual じゃないので必須制約に当たらない想定）
+      source_type: "import", // ✅ 統一
     }));
 
   if (!payload.length) return { ok: false, error: "取り込み対象が0件です" };
