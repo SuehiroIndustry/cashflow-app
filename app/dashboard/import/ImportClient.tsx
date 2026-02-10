@@ -16,36 +16,6 @@ function yen(n: number) {
   return "¥" + Math.round(n).toLocaleString("ja-JP");
 }
 
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (ch === "," && !inQuotes) {
-      out.push(cur);
-      cur = "";
-      continue;
-    }
-
-    cur += ch;
-  }
-  out.push(cur);
-  return out.map((s) => s.trim());
-}
-
 function looksLikeRakutenCsv(text: string): boolean {
   const keys = ["日付", "取引日", "支払日", "入出金", "区分", "金額", "摘要", "内容", "メモ"];
   return keys.some((k) => text.includes(k));
@@ -63,11 +33,13 @@ function safeDecodeWithTextDecoder(buf: ArrayBuffer, enc: string): string | null
 async function readCsvText(file: File): Promise<string> {
   const buf = await file.arrayBuffer();
 
+  // 速い経路：TextDecoderで当たりを引けるならそれでOK
   for (const enc of ["shift_jis", "shift-jis", "windows-31j", "utf-8"]) {
     const t = safeDecodeWithTextDecoder(buf, enc);
     if (t && looksLikeRakutenCsv(t)) return t;
   }
 
+  // 保険：Shift_JIS未対応ブラウザでも確実に読む
   const uint8 = new Uint8Array(buf);
 
   const sjisToUnicode = Encoding.convert(uint8, {
@@ -89,18 +61,90 @@ async function readCsvText(file: File): Promise<string> {
   return utf8ToUnicode.replace(/^\uFEFF/, "");
 }
 
+/**
+ * ✅ 改行を含むクォートフィールド対応のCSVパーサ（最小実装）
+ * - 区切り: ,
+ * - クォート: "
+ * - CRLF / LF / CR すべて対応
+ * - クォート内の改行は「データ」として保持
+ */
+function parseCsvAll(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+
+  const pushField = () => {
+    row.push(field);
+    field = "";
+  };
+
+  const pushRow = () => {
+    // 空行っぽいのは落とす（全部空のときだけ）
+    if (row.length === 1 && row[0].trim() === "") {
+      row = [];
+      return;
+    }
+    rows.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (ch === '"') {
+      // "" -> "
+      if (inQuotes && text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes) {
+      // delimiter
+      if (ch === ",") {
+        pushField();
+        continue;
+      }
+
+      // newline (CRLF / LF / CR)
+      if (ch === "\n") {
+        pushField();
+        pushRow();
+        continue;
+      }
+      if (ch === "\r") {
+        // CRLFの場合は次の\nを飛ばす
+        if (text[i + 1] === "\n") i++;
+        pushField();
+        pushRow();
+        continue;
+      }
+    }
+
+    // normal char (クォート内の改行もここで入る)
+    field += ch;
+  }
+
+  // last
+  pushField();
+  // 末尾が改行で終わってない場合の行を追加
+  if (row.length > 1 || row[0].trim() !== "") pushRow();
+
+  // trimは後段でやる
+  return rows;
+}
+
 async function parseRakutenCsv(file: File): Promise<Row[]> {
   const text = await readCsvText(file);
 
-  // ✅ ここだけ修正：CR(\r) 単体も改行として扱う
-  const lines = text
-    .split(/\r\n|\n|\r/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+  const table = parseCsvAll(text);
+  if (table.length <= 1) return [];
 
-  if (lines.length <= 1) return [];
-
-  const header = parseCsvLine(lines[0]).map((h) => h.replaceAll("\uFEFF", "").trim());
+  const header = table[0].map((h) => String(h ?? "").replaceAll("\uFEFF", "").trim());
 
   const findIdx = (cands: string[]) =>
     header.findIndex((h) => cands.some((c) => h.includes(c)));
@@ -110,24 +154,28 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
   const idxAmount = findIdx(["金額", "入金額", "出金額"]);
   const idxMemo = findIdx(["摘要", "内容", "メモ", "取引内容"]);
 
+  // ヘッダが取れないなら0件
+  if (idxDate < 0 || idxAmount < 0) return [];
+
   const rows: Row[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseCsvLine(lines[i]);
+  for (let i = 1; i < table.length; i++) {
+    const cols = table[i];
 
     const dateRaw = (idxDate >= 0 ? cols[idxDate] : "") ?? "";
     const ioRaw = (idxInOut >= 0 ? cols[idxInOut] : "") ?? "";
     const amountRaw = (idxAmount >= 0 ? cols[idxAmount] : "") ?? "";
     const memoRaw = (idxMemo >= 0 ? cols[idxMemo] : "") ?? "";
 
-    const date = dateRaw.replaceAll("/", "-").replaceAll('"', "").trim();
+    const date = String(dateRaw).replaceAll("/", "-").replaceAll('"', "").trim();
+
     const amount = Number(
       String(amountRaw).replaceAll('"', "").replaceAll(",", "").replaceAll("円", "").trim() || 0
     );
 
     if (!date || !Number.isFinite(amount)) continue;
 
-    const io = ioRaw.replaceAll('"', "").trim();
+    const io = String(ioRaw).replaceAll('"', "").trim();
     const section: Row["section"] =
       io.includes("入") || io.toLowerCase().includes("in") ? "income" : "expense";
 
@@ -135,7 +183,7 @@ async function parseRakutenCsv(file: File): Promise<Row[]> {
       date,
       section,
       amount: Math.abs(Math.trunc(amount)),
-      memo: memoRaw?.replaceAll('"', "").trim() || "",
+      memo: String(memoRaw ?? "").replaceAll('"', "").trim(),
     });
   }
 
@@ -169,8 +217,11 @@ export default function ImportClient({ cashAccountId }: Props) {
       setRows(parsed);
       setMsg(
         parsed.length
-          ? `プレビューを作成しました（全${parsed.length}件 / 表示は先頭${Math.min(50, parsed.length)}件）`
-          : "プレビュー対象がありません（CSVの形式/文字コード/改行コードを確認してください）"
+          ? `プレビューを作成しました（全${parsed.length}件 / 表示は先頭${Math.min(
+              50,
+              parsed.length
+            )}件）`
+          : "プレビュー対象がありません（CSVの形式/文字コードを確認してください）"
       );
     } catch (e: any) {
       setErr(e?.message ?? "プレビュー作成に失敗しました");
@@ -296,7 +347,7 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">※ Shift_JIS/UTF-8 を確実に判定してデコードしています</div>
+        <div className="mt-3 text-xs text-white/50">※ クォート内改行を含むCSVにも対応しています</div>
       </div>
     </div>
   );
