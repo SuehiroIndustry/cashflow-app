@@ -13,6 +13,8 @@ type Props = {
   manualRows: ManualCashFlowRow[];
 };
 
+const INITIAL_CATEGORY_NAME = "初期値";
+
 function clampNumberString(v: string) {
   return v.replace(/[^\d]/g, "");
 }
@@ -238,26 +240,37 @@ export default function IncomeClient({ accounts, categories, manualRows }: Props
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800 bg-neutral-950">
-                  {manualRows.map((r) => (
-                    <tr key={r.id} className="text-neutral-200">
-                      <td className="px-3 py-2">{r.date}</td>
-                      <td className="px-3 py-2">{r.section === "income" ? "収入" : "支出"}</td>
-                      <td className="px-3 py-2">{accountNameById.get(r.cash_account_id) ?? "-"}</td>
-                      <td className="px-3 py-2">{categoryNameById.get(r.cash_category_id) ?? "-"}</td>
-                      <td className="px-3 py-2 text-right">{formatJPY(r.amount)}</td>
-                      <td className="px-3 py-2">{r.description ?? ""}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button
-                          className="text-xs text-neutral-300 hover:text-white disabled:opacity-50"
-                          onClick={() => onDeleteRow(r)}
-                          disabled={isPending}
-                          title="削除"
-                        >
-                          削除
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {manualRows.map((r) => {
+                    const catName = categoryNameById.get(r.cash_category_id) ?? "-";
+                    const isInitial = catName === INITIAL_CATEGORY_NAME;
+
+                    return (
+                      <tr key={r.id} className="text-neutral-200">
+                        <td className="px-3 py-2">{r.date}</td>
+                        <td className="px-3 py-2">{r.section === "income" ? "収入" : "支出"}</td>
+                        <td className="px-3 py-2">{accountNameById.get(r.cash_account_id) ?? "-"}</td>
+                        <td className="px-3 py-2">{catName}</td>
+                        <td className="px-3 py-2 text-right">{formatJPY(r.amount)}</td>
+                        <td className="px-3 py-2">{r.description ?? ""}</td>
+
+                        <td className="px-3 py-2 text-right">
+                          {isInitial ? (
+                            <span className="text-xs text-neutral-500">-</span>
+                          ) : (
+                            <button
+                              className="text-xs text-neutral-300 hover:text-white disabled:opacity-50"
+                              onClick={() => onDeleteRow(r)}
+                              disabled={isPending}
+                              title="削除"
+                            >
+                              削除
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
                   {manualRows.length === 0 && (
                     <tr>
                       <td className="px-3 py-6 text-center text-neutral-500" colSpan={7}>

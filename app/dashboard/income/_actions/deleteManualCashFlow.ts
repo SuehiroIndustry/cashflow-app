@@ -22,6 +22,30 @@ export async function deleteManualCashFlow(input: Input): Promise<void> {
   if (!input.cashAccountId) throw new Error("cashAccountId が不正です");
   if (!input.date) throw new Error("date が不正です");
 
+  // ✅ 1) 対象行を確認（manual だけが対象）
+  const { data: row, error: rowErr } = await supabase
+    .from("cash_flows")
+    .select("id, source_type, cash_category_id")
+    .eq("id", input.cashFlowId)
+    .maybeSingle();
+
+  if (rowErr) throw new Error(rowErr.message);
+  if (!row) throw new Error("対象データが見つかりません");
+  if (row.source_type !== "manual") throw new Error("manual 以外は削除できません");
+
+  // ✅ 2) カテゴリが「初期値」なら削除禁止
+  const { data: cat, error: catErr } = await supabase
+    .from("cash_categories")
+    .select("name")
+    .eq("id", row.cash_category_id)
+    .maybeSingle();
+
+  if (catErr) throw new Error(catErr.message);
+
+  if ((cat?.name ?? "") === "初期値") {
+    throw new Error("「初期値」カテゴリは削除できません");
+  }
+
   // ✅ manual のみ削除可（インポート等は削除不可）
   const { error: delErr } = await supabase
     .from("cash_flows")
