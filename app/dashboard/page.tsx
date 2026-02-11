@@ -145,20 +145,20 @@ export default async function DashboardPage({ searchParams }: Props) {
 
                 {/* ✅ 説明（3つ） */}
                 <div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-white leading-relaxed">
-                  <div className="mb-1 font-semibold text-white/80">
-                    判定ロジック（Simulationと同じ）
+                  <div className="font-semibold text-white mb-1">
+                    判定ロジック
                   </div>
                   <ul className="list-disc space-y-1 pl-4">
                     <li>
-                      <span className="font-semibold text-red-200">CRITICAL</span>：
+                      <span className="text-red-400 font-semibold">CRITICAL</span>：
                       12ヶ月後の推定残高がマイナス
                     </li>
                     <li>
-                      <span className="font-semibold text-yellow-200">CAUTION</span>：
+                      <span className="btext-yellow-400 font-semibold">CAUTION</span>：
                       残高30万円未満 または 平均収支がマイナス
                     </li>
                     <li>
-                      <span className="font-semibold text-emerald-200">SAFE</span>：
+                      <span className="text-emerald-400 font-semibold">SAFE</span>：
                       上記に該当しない場合
                     </li>
                   </ul>
