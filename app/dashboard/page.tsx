@@ -82,11 +82,11 @@ export default async function DashboardPage({ searchParams }: Props) {
   // currentBalance は overview 側にあるなら優先、なければ当月 balance、無ければ最新行の balance
   const latestRow = monthly.length ? monthly[monthly.length - 1] : null;
   const currentBalance =
-    (overview as any)?.currentBalance ??
-    (overview as any)?.balance ??
-    thisMonthRow?.balance ??
-    latestRow?.balance ??
-    0;
+  thisMonthRow?.balance ??
+  latestRow?.balance ??
+  (overview as any)?.currentBalance ??
+  (overview as any)?.balance ??
+  0;
 
   const overviewPayload: OverviewPayload = {
     accountName,
