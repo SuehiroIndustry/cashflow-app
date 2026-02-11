@@ -4,16 +4,22 @@ export const dynamic = "force-dynamic";
 import IncomeClient from "./IncomeClient";
 import { getAccounts } from "../_actions/getAccounts";
 import { getCategories } from "./_actions/getCategories";
-
-import type { AccountRow } from "@/app/dashboard/_types";
+import { getRecentManualCashFlows } from "./_actions/getRecentManualCashFlows";
 
 export default async function IncomePage() {
-  const accounts = (await getAccounts()) as AccountRow[];
+  const accounts = await getAccounts();
   const categories = await getCategories();
 
+  // ✅ 手入力（manual）の直近一覧を取得して渡す
+  const manualRows = await getRecentManualCashFlows({ limit: 30 });
+
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 text-white">
-      <IncomeClient accounts={accounts} categories={categories} />
+    <div>
+      <IncomeClient
+        accounts={accounts}
+        categories={categories}
+        manualRows={manualRows}
+      />
     </div>
   );
 }

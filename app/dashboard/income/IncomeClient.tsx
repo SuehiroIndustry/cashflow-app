@@ -1,13 +1,15 @@
-// app/dashboard/income/IncomeClient.tsx
 "use client";
 
 import React, { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createManualCashFlow } from "./_actions/createManualCashFlow";
+import { deleteManualCashFlow } from "./_actions/deleteManualCashFlow";
+import type { ManualCashFlowRow } from "./_actions/getRecentManualCashFlows";
 
 type Props = {
   accounts: Array<{ id: number; name: string }>;
   categories: Array<{ id: number; name: string }>;
+  manualRows: ManualCashFlowRow[]; // ✅ 追加：手入力一覧
 };
 
 function clampNumberString(v: string) {
@@ -22,7 +24,12 @@ function todayISO() {
   return `${y}-${m}-${day}`;
 }
 
-export default function IncomeClient({ accounts, categories }: Props) {
+function formatJPY(n: number) {
+  if (!Number.isFinite(n)) return "-";
+  return new Intl.NumberFormat("ja-JP").format(Math.round(n)) + " 円";
+}
+
+export default function IncomeClient({ accounts, categories, manualRows }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -32,8 +39,12 @@ export default function IncomeClient({ accounts, categories }: Props) {
   const [section, setSection] = useState<"income" | "expense">("expense");
   const [amount, setAmount] = useState<string>("");
   const [description, setDescription] = useState<string>("");
-  const [cashAccountId, setCashAccountId] = useState<number | null>(defaultAccountId);
-  const [cashCategoryId, setCashCategoryId] = useState<number | null>(categories?.[0]?.id ?? null);
+  const [cashAccountId, setCashAccountId] = useState<number | null>(
+    defaultAccountId
+  );
+  const [cashCategoryId, setCashCategoryId] = useState<number | null>(
+    categories?.[0]?.id ?? null
+  );
 
   const amountNum = useMemo(() => Number(amount || 0), [amount]);
 
@@ -58,6 +69,18 @@ export default function IncomeClient({ accounts, categories }: Props) {
     Number.isFinite(amountNum) &&
     amountNum > 0;
 
+  const accountNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const a of accounts) m.set(a.id, a.name);
+    return m;
+  }, [accounts]);
+
+  const categoryNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const c of categories) m.set(c.id, c.name);
+    return m;
+  }, [categories]);
+
   async function onSubmit() {
     if (!canSubmit) return;
 
@@ -72,11 +95,9 @@ export default function IncomeClient({ accounts, categories }: Props) {
           cashCategoryId: cashCategoryId!,
         });
 
-        // 入力を軽くリセット（口座/カテゴリは維持）
         setAmount("");
         setDescription("");
 
-        // 画面の最新化（Dashboard/明細にも反映させたいので refresh）
         router.refresh();
         alert("登録しました");
       } catch (e: any) {
@@ -85,28 +106,54 @@ export default function IncomeClient({ accounts, categories }: Props) {
     });
   }
 
+  function onDelete(id: number) {
+    const ok = confirm("この手入力を削除しますか？（取り消し不可）");
+    if (!ok) return;
+
+    startTransition(async () => {
+      try {
+        await deleteManualCashFlow({ cashFlowId: id });
+        router.refresh();
+      } catch (e: any) {
+        alert(e?.message ?? "削除に失敗しました");
+      }
+    });
+  }
+
   return (
     <div className={pageBase}>
       <div className="mx-auto w-full max-w-6xl px-4 py-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold tracking-tight text-white">収支入力</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white">
+            収支入力
+          </h1>
           <div className="mt-1 text-sm text-neutral-400">
-            手入力（manual）として登録します。カテゴリは必須です。
+            手入力で登録するページです。カテゴリは必須です。
           </div>
         </div>
 
+        {/* 入力 */}
         <div className={card}>
           <div className={cardHead}>入力</div>
           <div className={cardBody}>
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <div className={label}>日付</div>
-                <input className={inputBase} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                <input
+                  className={inputBase}
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
               </div>
 
               <div>
                 <div className={label}>区分</div>
-                <select className={selectBase} value={section} onChange={(e) => setSection(e.target.value as any)}>
+                <select
+                  className={selectBase}
+                  value={section}
+                  onChange={(e) => setSection(e.target.value as any)}
+                >
                   <option value="income">収入</option>
                   <option value="expense">支出</option>
                 </select>
@@ -165,9 +212,85 @@ export default function IncomeClient({ accounts, categories }: Props) {
             </div>
 
             <div className="mt-5 flex justify-end">
-              <button className={buttonBase} onClick={onSubmit} disabled={!canSubmit || isPending}>
+              <button
+                className={buttonBase}
+                onClick={onSubmit}
+                disabled={!canSubmit || isPending}
+              >
                 登録
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 手入力一覧（削除） */}
+        <div className={`${card} mt-4`}>
+          <div className={cardHead}>手入力（直近）</div>
+          <div className="px-5 pb-5 pt-3">
+            <div className="overflow-hidden rounded-lg border border-neutral-800">
+              <table className="w-full text-sm">
+                <thead className="bg-neutral-950">
+                  <tr className="text-left text-xs text-neutral-400">
+                    <th className="px-3 py-2">日付</th>
+                    <th className="px-3 py-2">区分</th>
+                    <th className="px-3 py-2">口座</th>
+                    <th className="px-3 py-2">カテゴリ</th>
+                    <th className="px-3 py-2 text-right">金額</th>
+                    <th className="px-3 py-2">摘要</th>
+                    <th className="px-3 py-2 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-800 bg-neutral-950">
+                  {manualRows.map((r) => {
+                    const accName =
+                      accountNameById.get(r.cash_account_id) ?? "—";
+                    const catName =
+                      categoryNameById.get(r.cash_category_id) ?? "—";
+
+                    return (
+                      <tr key={r.id} className="text-neutral-200">
+                        <td className="px-3 py-2">{String(r.date).slice(0, 10)}</td>
+                        <td className="px-3 py-2">
+                          {r.section === "income" ? "収入" : "支出"}
+                        </td>
+                        <td className="px-3 py-2">{accName}</td>
+                        <td className="px-3 py-2">{catName}</td>
+                        <td className="px-3 py-2 text-right">
+                          {formatJPY(r.amount)}
+                        </td>
+                        <td className="px-3 py-2">
+                          {r.description ? r.description : <span className="text-neutral-500">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            className="text-xs text-neutral-300 hover:text-white"
+                            onClick={() => onDelete(r.id)}
+                            disabled={isPending}
+                            title="削除（手入力のみ）"
+                          >
+                            削除
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {manualRows.length === 0 && (
+                    <tr>
+                      <td
+                        className="px-3 py-6 text-center text-neutral-500"
+                        colSpan={7}
+                      >
+                        まだ手入力がありません
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-2 text-xs text-neutral-500">
+              ※ 削除できるのは「手入力（manual）」のみです（インポート明細は削除不可）
             </div>
           </div>
         </div>
