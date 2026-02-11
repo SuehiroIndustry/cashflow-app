@@ -308,7 +308,7 @@ export default function ImportClient({ cashAccountId }: Props) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-8 text-white">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 text-white">
       <div className="mb-6 rounded-2xl border border-white/10 bg-white/5 p-6 shadow">
         <div className="flex items-start justify-between gap-4">
           <div>

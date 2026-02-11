@@ -34,7 +34,7 @@ export default async function StatementPage({ searchParams }: Props) {
   });
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-6">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-white">楽天銀行 明細ビュー</h1>

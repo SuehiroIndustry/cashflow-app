@@ -35,7 +35,7 @@ export default async function FixedCostsPage() {
   const items = await listFixedCosts();
 
   return (
-    <div className="mx-auto w-full max-w-4xl px-4 py-8 text-white">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 text-white">
     <DashboardClient
       cashStatus={cashStatus}
       alertCards={alertCards}
