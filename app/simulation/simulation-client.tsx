@@ -7,7 +7,10 @@ import { useRouter } from "next/navigation";
 import type { AccountRow } from "@/app/dashboard/_types";
 import type { SimulationResult } from "./_actions/getSimulation";
 import type { SimulationScenarioRow } from "./_actions/scenarios";
-import { createSimulationScenario, deleteSimulationScenario } from "./_actions/scenarios";
+import {
+  createSimulationScenario,
+  deleteSimulationScenario,
+} from "./_actions/scenarios";
 
 type Props = {
   accounts: AccountRow[];
@@ -43,6 +46,42 @@ function buildFallbackMonths(count = 12) {
   });
 }
 
+type Judge = {
+  level: "safe" | "warn" | "danger" | "short";
+  message: string;
+};
+
+function judgeByAssumption(params: {
+  currentBalance: number;
+  assumedNet: number;
+  horizonMonths: number;
+}): Judge {
+  const horizon = Math.max(1, params.horizonMonths);
+  const projectedEnd = params.currentBalance + params.assumedNet * horizon;
+
+  if (projectedEnd < 0) {
+    return {
+      level: "short",
+      message:
+        "このままの想定（入力した収支）だと、12ヶ月以内に資金ショートする可能性が高いです。",
+    };
+  }
+
+  if (params.currentBalance < 300_000 || params.assumedNet < 0) {
+    return {
+      level: "warn",
+      message:
+        "残高が薄いか、想定収支がマイナス寄りです。支出の固定費・季節要因を点検してください。",
+    };
+  }
+
+  return {
+    level: "safe",
+    message:
+      "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。",
+  };
+}
+
 export default function SimulationClient({
   accounts,
   selectedAccountId,
@@ -64,9 +103,18 @@ export default function SimulationClient({
 
   const [scenarioName, setScenarioName] = useState<string>("");
 
-  const assumedIncomeNum = useMemo(() => Number(assumedIncome || 0), [assumedIncome]);
-  const assumedExpenseNum = useMemo(() => Number(assumedExpense || 0), [assumedExpense]);
-  const assumedNet = useMemo(() => assumedIncomeNum - assumedExpenseNum, [assumedIncomeNum, assumedExpenseNum]);
+  const assumedIncomeNum = useMemo(
+    () => Number(assumedIncome || 0),
+    [assumedIncome]
+  );
+  const assumedExpenseNum = useMemo(
+    () => Number(assumedExpense || 0),
+    [assumedExpense]
+  );
+  const assumedNet = useMemo(
+    () => assumedIncomeNum - assumedExpenseNum,
+    [assumedIncomeNum, assumedExpenseNum]
+  );
 
   const months = useMemo(() => {
     if (!simulation) return [];
@@ -87,8 +135,21 @@ export default function SimulationClient({
     });
   }, [simulation, assumedNet]);
 
-  const level = (simulation as any)?.level ?? "safe";
+  // ✅ ここが本命：判定を「今の入力値(assumedNet)」で再計算する
+  const judged = useMemo(() => {
+    const currentBalance = Number((simulation as any)?.currentBalance ?? 0);
+    const horizonMonths = months.length > 0 ? months.length : 12;
+
+    return judgeByAssumption({
+      currentBalance,
+      assumedNet: Number(assumedNet ?? 0),
+      horizonMonths,
+    });
+  }, [simulation, assumedNet, months.length]);
+
   const badge = useMemo(() => {
+    const level = judged.level;
+
     if (level === "danger" || level === "short") {
       return {
         label: "CRITICAL",
@@ -107,8 +168,8 @@ export default function SimulationClient({
       label: "SAFE",
       className:
         "inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950 px-2.5 py-1 text-xs font-semibold text-emerald-200",
-      };
-  }, [level]);
+    };
+  }, [judged.level]);
 
   const pageBase = "min-h-screen bg-black text-white";
   const shell = "mx-auto w-full max-w-6xl px-4 py-6";
@@ -166,10 +227,10 @@ export default function SimulationClient({
       <div className={shell}>
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
-             <h1 className="text-2xl font-bold tracking-tight text-white">Simulation</h1>
-        </div>
-
-          
+            <h1 className="text-2xl font-bold tracking-tight text-white">
+              Simulation
+            </h1>
+          </div>
         </div>
 
         {/* Selected */}
@@ -180,7 +241,9 @@ export default function SimulationClient({
                 <div className="text-lg font-semibold text-white">
                   現在残高:{" "}
                   <span className="font-semibold text-white">
-                    {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
+                    {formatJPY(
+                      Number((simulation as any)?.currentBalance ?? 0)
+                    )}
                   </span>
                 </div>
               </div>
@@ -196,15 +259,21 @@ export default function SimulationClient({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className={label}>収入</span>
-                  <span className={value}>{formatJPY(Number((simulation as any)?.avgIncome ?? 0))}</span>
+                  <span className={value}>
+                    {formatJPY(Number((simulation as any)?.avgIncome ?? 0))}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>支出</span>
-                  <span className={value}>{formatJPY(Number((simulation as any)?.avgExpense ?? 0))}</span>
+                  <span className={value}>
+                    {formatJPY(Number((simulation as any)?.avgExpense ?? 0))}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className={label}>差額</span>
-                  <span className={value}>{formatJPY(Number((simulation as any)?.avgNet ?? 0))}</span>
+                  <span className={value}>
+                    {formatJPY(Number((simulation as any)?.avgNet ?? 0))}
+                  </span>
                 </div>
               </div>
             </div>
@@ -221,7 +290,9 @@ export default function SimulationClient({
                     className={inputBase}
                     inputMode="numeric"
                     value={assumedIncome}
-                    onChange={(e) => setAssumedIncome(clampNumberString(e.target.value))}
+                    onChange={(e) =>
+                      setAssumedIncome(clampNumberString(e.target.value))
+                    }
                     placeholder="例）1200000"
                   />
                 </div>
@@ -231,13 +302,18 @@ export default function SimulationClient({
                     className={inputBase}
                     inputMode="numeric"
                     value={assumedExpense}
-                    onChange={(e) => setAssumedExpense(clampNumberString(e.target.value))}
+                    onChange={(e) =>
+                      setAssumedExpense(clampNumberString(e.target.value))
+                    }
                     placeholder="例）900000"
                   />
                 </div>
 
                 <div className="pt-1 text-sm text-neutral-300">
-                  想定差額： <span className="font-semibold text-white">{formatJPY(assumedNet)}</span>
+                  想定差額：{" "}
+                  <span className="font-semibold text-white">
+                    {formatJPY(assumedNet)}
+                  </span>
                 </div>
 
                 {/* Save scenario */}
@@ -273,15 +349,14 @@ export default function SimulationClient({
             <div className={cardBody}>
               <div className="flex items-start gap-3">
                 <span className={badge.className}>{badge.label}</span>
-                <div className="text-sm text-neutral-200">
-                  {(simulation as any)?.message ??
-                    "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。"}
-                </div>
+                <div className="text-sm text-neutral-200">{judged.message}</div>
               </div>
 
               {/* scenarios list */}
               <div className="mt-4 border-t border-neutral-800 pt-4">
-                <div className="text-sm font-semibold text-white">保存済みシナリオ</div>
+                <div className="text-sm font-semibold text-white">
+                  保存済みシナリオ
+                </div>
                 <div className="mt-2 space-y-2">
                   {scenarios.map((s) => (
                     <div
@@ -295,8 +370,15 @@ export default function SimulationClient({
                       >
                         {s.name}
                         <span className="ml-2 text-xs text-neutral-500">
-                          （収入 {new Intl.NumberFormat("ja-JP").format(s.assumed_income)} / 支出{" "}
-                          {new Intl.NumberFormat("ja-JP").format(s.assumed_expense)}）
+                          （収入{" "}
+                          {new Intl.NumberFormat("ja-JP").format(
+                            s.assumed_income
+                          )}{" "}
+                          / 支出{" "}
+                          {new Intl.NumberFormat("ja-JP").format(
+                            s.assumed_expense
+                          )}
+                          ）
                         </span>
                       </button>
                       <button
@@ -310,7 +392,9 @@ export default function SimulationClient({
                     </div>
                   ))}
                   {scenarios.length === 0 && (
-                    <div className="text-xs text-neutral-500">まだ保存されたシナリオがありません</div>
+                    <div className="text-xs text-neutral-500">
+                      まだ保存されたシナリオがありません
+                    </div>
                   )}
                 </div>
               </div>
@@ -339,13 +423,18 @@ export default function SimulationClient({
                         {new Intl.NumberFormat("ja-JP").format(m.assumedNet)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {new Intl.NumberFormat("ja-JP").format(m.projectedBalance)}
+                        {new Intl.NumberFormat("ja-JP").format(
+                          m.projectedBalance
+                        )}
                       </td>
                     </tr>
                   ))}
                   {months.length === 0 && (
                     <tr>
-                      <td className="px-3 py-6 text-center text-neutral-500" colSpan={3}>
+                      <td
+                        className="px-3 py-6 text-center text-neutral-500"
+                        colSpan={3}
+                      >
                         データがありません
                       </td>
                     </tr>
