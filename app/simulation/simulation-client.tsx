@@ -181,8 +181,7 @@ export default function SimulationClient({
           <div className={cardBody}>
             <div className="flex items-center justify-between gap-4">
               <div>
-                                <div className="text-lg font-semibold text-white">{selectedName}</div>
-                <div className="mt-1 text-sm text-neutral-300">
+                <div className="text-lg font-semibold text-white">
                   現在残高:{" "}
                   <span className="font-semibold text-white">
                     {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
