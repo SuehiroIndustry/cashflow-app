@@ -1,7 +1,6 @@
 // app/dashboard/import/ImportClient.tsx
 "use client";
 
-import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { importRakutenCsv } from "./_actions/importRakutenCsv";
@@ -79,7 +78,9 @@ function yymmddToIso(s: string): string | null {
   }
 
   // R/H era (R6/1/1 etc)
-  const era = t.match(/^(R|令和|H|平成)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+  const era = t.match(
+    /^(R|令和|H|平成)\s*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/
+  );
   if (era) {
     const kind = era[1];
     const y = Number(era[2]);
@@ -117,7 +118,10 @@ function toIntSafeDigits(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function parseRakutenCsv(file: File): Promise<{ rows: Row[]; endingBalance: number | null }> {
+async function parseRakutenCsv(file: File): Promise<{
+  rows: Row[];
+  endingBalance: number | null;
+}> {
   const text = await readCsvText(file);
   const table = parseCsvAll(text);
   if (table.length === 0) return { rows: [], endingBalance: null };
@@ -170,8 +174,11 @@ async function parseRakutenCsv(file: File): Promise<{ rows: Row[]; endingBalance
   // 2) ヘッダあり通常CSV
   if (table.length <= 1) return { rows: [], endingBalance: null };
 
-  const header = table[0].map((h) => String(h ?? "").replaceAll("\uFEFF", "").trim());
-  const findIdx = (cands: string[]) => header.findIndex((h) => cands.some((c) => h.includes(c)));
+  const header = table[0].map((h) =>
+    String(h ?? "").replaceAll("\uFEFF", "").trim()
+  );
+  const findIdx = (cands: string[]) =>
+    header.findIndex((h) => cands.some((c) => h.includes(c)));
 
   const idxDate = findIdx(["日付", "取引日", "取引日付", "支払日"]);
   const idxInOut = findIdx(["入出金", "区分", "摘要区分"]);
@@ -191,12 +198,19 @@ async function parseRakutenCsv(file: File): Promise<{ rows: Row[]; endingBalance
     const memoRaw = (idxMemo >= 0 ? cols[idxMemo] : "") ?? "";
 
     const date = yymmddToIso(String(dateRaw ?? "").replaceAll('"', "").trim());
-    const amount = Number(String(amountRaw).replaceAll('"', "").replaceAll(",", "").replaceAll("円", "").trim() || 0);
+    const amount = Number(
+      String(amountRaw)
+        .replaceAll('"', "")
+        .replaceAll(",", "")
+        .replaceAll("円", "")
+        .trim() || 0
+    );
 
     if (!date || !Number.isFinite(amount)) continue;
 
     const io = String(ioRaw ?? "").replaceAll('"', "").trim();
-    const section: Row["section"] = io.includes("入") || io.toLowerCase().includes("in") ? "income" : "expense";
+    const section: Row["section"] =
+      io.includes("入") || io.toLowerCase().includes("in") ? "income" : "expense";
 
     rows.push({
       date,
@@ -220,7 +234,10 @@ export default function ImportClient({ cashAccountId }: Props) {
   const preview = useMemo(() => rows.slice(0, 50), [rows]);
 
   const previewSum = useMemo(() => {
-    return preview.reduce((s, r) => s + (r.section === "income" ? r.amount : -r.amount), 0);
+    return preview.reduce(
+      (s, r) => s + (r.section === "income" ? r.amount : -r.amount),
+      0
+    );
   }, [preview]);
 
   async function onPick(f: File | null) {
@@ -245,7 +262,10 @@ export default function ImportClient({ cashAccountId }: Props) {
 
       setMsg(
         parsed.rows.length
-          ? `プレビューを作成しました（全${parsed.rows.length}件 / 表示は先頭${Math.min(50, parsed.rows.length)}件）${balMsg}`
+          ? `プレビューを作成しました（全${parsed.rows.length}件 / 表示は先頭${Math.min(
+              50,
+              parsed.rows.length
+            )}件）${balMsg}`
           : "プレビュー対象がありません（CSVの形式/文字コードを確認してください）"
       );
     } catch (e: any) {
@@ -260,7 +280,8 @@ export default function ImportClient({ cashAccountId }: Props) {
     setErr(null);
 
     if (!file) return setErr("CSVファイルを選択してください");
-    if (rows.length === 0) return setErr("取り込み対象が0件です（まずプレビューが出る状態にしてください）");
+    if (rows.length === 0)
+      return setErr("取り込み対象が0件です（まずプレビューが出る状態にしてください）");
 
     try {
       setBusy(true);
@@ -271,9 +292,12 @@ export default function ImportClient({ cashAccountId }: Props) {
         return;
       }
 
+      // ✅ 口座ID 表記は削除（見た目のみ）
       setMsg(
-        `インポートしました：${res.inserted}件（既存削除: ${res.deleted}件 / 口座ID=${cashAccountId}` +
-          (typeof endingBalance === "number" ? ` / 残高更新: ${yen(endingBalance)}` : "") +
+        `インポートしました：${res.inserted}件（既存削除: ${res.deleted}件` +
+          (typeof endingBalance === "number"
+            ? ` / 残高更新: ${yen(endingBalance)}`
+            : "") +
           `）`
       );
     } catch (e: any) {
@@ -289,18 +313,13 @@ export default function ImportClient({ cashAccountId }: Props) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-lg font-semibold">楽天銀行・明細インポート</div>
-            <div className="mt-1 text-sm text-white/70">CSVを読み込み → 内容プレビュー → 取り込み</div>
+            <div className="mt-1 text-sm text-white/70">
+              CSVを読み込み → 内容プレビュー → 取り込み
+            </div>
             <div className="mt-3 text-sm text-white/70">
-              口座：<span className="font-semibold text-white">楽天銀行（ID: {cashAccountId}）</span>
+              口座：<span className="font-semibold text-white">楽天銀行</span>
             </div>
           </div>
-
-          <Link
-            href={`/dashboard?cashAccountId=${cashAccountId}`}
-            className="rounded-lg border border-white/10 bg-white/10 px-4 py-2 text-sm hover:bg-white/15"
-          >
-            Dashboardへ戻る
-          </Link>
         </div>
       </div>
 
@@ -330,12 +349,18 @@ export default function ImportClient({ cashAccountId }: Props) {
         </div>
 
         <div className="mt-3 text-sm text-white/70">
-          選択: {file ? file.name : "なし"} / 全件: {rows.length}件 / 表示(プレビュー): {preview.length}件 / 差分:{" "}
-          {yen(previewSum)}
-          {typeof endingBalance === "number" ? ` / 最終残高(レコード8): ${yen(endingBalance)}` : ""}
+          選択: {file ? file.name : "なし"} / 全件: {rows.length}件 / 表示(プレビュー):{" "}
+          {preview.length}件 / 差分: {yen(previewSum)}
+          {typeof endingBalance === "number"
+            ? ` / 最終残高(レコード8): ${yen(endingBalance)}`
+            : ""}
         </div>
 
-        {msg ? <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">{msg}</div> : null}
+        {msg ? (
+          <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
+            {msg}
+          </div>
+        ) : null}
         {err ? (
           <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
             {err}
@@ -367,7 +392,9 @@ export default function ImportClient({ cashAccountId }: Props) {
                 preview.map((r, i) => (
                   <tr key={i} className="border-t border-white/10">
                     <td className="px-3 py-2">{r.date}</td>
-                    <td className="px-3 py-2">{r.section === "income" ? "収入" : "支出"}</td>
+                    <td className="px-3 py-2">
+                      {r.section === "income" ? "収入" : "支出"}
+                    </td>
                     <td className="px-3 py-2 text-right">{yen(r.amount)}</td>
                     <td className="px-3 py-2 text-white/70">{r.memo ?? ""}</td>
                   </tr>
@@ -377,7 +404,9 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">※ 楽天CSVの Shift_JIS を優先してデコードしています</div>
+        <div className="mt-3 text-xs text-white/50">
+          ※ 楽天CSVの Shift_JIS を優先してデコードしています
+        </div>
       </div>
     </div>
   );
