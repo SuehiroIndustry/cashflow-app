@@ -402,9 +402,6 @@ export default function ImportClient({ cashAccountId }: Props) {
           </table>
         </div>
 
-        <div className="mt-3 text-xs text-white/50">
-          ※ 楽天CSVの Shift_JIS を優先してデコードしています
-        </div>
       </div>
     </div>
   );
