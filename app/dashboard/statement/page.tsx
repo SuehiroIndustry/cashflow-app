@@ -99,10 +99,6 @@ export default async function StatementPage({ searchParams }: Props) {
           </table>
         </div>
       </div>
-
-      <p className="mt-3 text-xs text-zinc-400">
-        ※ 表示は「読むだけ」。インポート/残高/集計ロジックには一切触ってない。
-      </p>
     </div>
   );
 }
