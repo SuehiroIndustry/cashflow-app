@@ -6,6 +6,7 @@ import DashboardClient from "./DashboardClient";
 import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
+import { getDashboardJudge } from "./_actions/getDashboardJudge";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
@@ -49,9 +50,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const month = monthStartISO();
 
   // 4) Overview（危険信号など）
-  const overview = cashAccountId
-    ? await getOverview({ cashAccountId, month })
-    : null;
+  const overview = cashAccountId ? await getOverview({ cashAccountId, month }) : null;
 
   const cashStatus = (overview as any)?.cashStatus ?? null;
   const alertCards = ((overview as any)?.alertCards ?? []) as AlertCard[];
@@ -97,20 +96,82 @@ export default async function DashboardPage({ searchParams }: Props) {
     net,
   } as OverviewPayload;
 
+  // ✅ Dashboardに「実績判定」を追加（Simulationと同じロジック）
+  const judge = cashAccountId ? await getDashboardJudge({ cashAccountId }) : null;
+
+  const badge =
+    judge?.level === "short"
+      ? {
+          label: "CRITICAL",
+          className:
+            "inline-flex items-center rounded-full border border-red-800 bg-red-950 px-2.5 py-1 text-xs font-semibold text-red-200",
+        }
+      : judge?.level === "warn"
+      ? {
+          label: "CAUTION",
+          className:
+            "inline-flex items-center rounded-full border border-yellow-800 bg-yellow-950 px-2.5 py-1 text-xs font-semibold text-yellow-200",
+        }
+      : {
+          label: "SAFE",
+          className:
+            "inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950 px-2.5 py-1 text-xs font-semibold text-emerald-200",
+        };
+
   return (
-     <div className="mx-auto w-full max-w-6xl px-4 py-6 text-white">
-    <DashboardClient
-      cashStatus={cashStatus as CashStatus}
-      alertCards={alertCards}
-      accounts={accounts}
-      monthly={monthly}
-    >
-      <div className="flex flex-col gap-4">
-  <OverviewCard payload={overviewPayload} />
-  <BalanceCard rows={monthly} />
-  <EcoCharts rows={monthly} />
-</div>
-    </DashboardClient>
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 text-white">
+      <DashboardClient
+        cashStatus={cashStatus as CashStatus}
+        alertCards={alertCards}
+        accounts={accounts}
+        monthly={monthly}
+      >
+        <div className="flex flex-col gap-4">
+          {/* ✅ Overviewの右側に「実績判定」を追加（枠は別） */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <OverviewCard payload={overviewPayload} />
+
+            <div className="rounded-xl border border-neutral-800 bg-neutral-950 shadow-sm">
+              <div className="px-5 pt-4 text-sm font-semibold text-white">
+                実績判定（直近6ヶ月平均）
+              </div>
+              <div className="px-5 pb-5 pt-3 text-sm text-neutral-200">
+                <div className="flex items-start gap-3">
+                  <span className={badge.className}>{badge.label}</span>
+                  <div className="text-sm text-neutral-200">
+                    {judge?.message ?? "判定データがありません"}
+                  </div>
+                </div>
+
+                {/* ✅ 説明（3つ） */}
+                <div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-white leading-relaxed">
+                  <div className="mb-1 font-semibold text-white/80">
+                    判定ロジック（Simulationと同じ）
+                  </div>
+                  <ul className="list-disc space-y-1 pl-4">
+                    <li>
+                      <span className="font-semibold text-red-200">CRITICAL</span>：
+                      12ヶ月後の推定残高がマイナス
+                    </li>
+                    <li>
+                      <span className="font-semibold text-yellow-200">CAUTION</span>：
+                      残高30万円未満 または 平均収支がマイナス
+                    </li>
+                    <li>
+                      <span className="font-semibold text-emerald-200">SAFE</span>：
+                      上記に該当しない場合
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ここから下は今のまま */}
+          <BalanceCard rows={monthly} />
+          <EcoCharts rows={monthly} />
+        </div>
+      </DashboardClient>
     </div>
   );
 }
