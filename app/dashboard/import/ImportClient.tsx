@@ -73,7 +73,10 @@ function yymmddToIso(s: string): string | null {
     const mm = Number(m1[2]);
     const dd = Number(m1[3]);
     if (yyyy >= 1900 && mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(
+        2,
+        "0"
+      )}`;
     }
   }
 
@@ -93,18 +96,29 @@ function yymmddToIso(s: string): string | null {
     if (kind === "H" || kind === "平成") yyyy = 1988 + y;
     if (!yyyy) return null;
 
-    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+    return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(
+      2,
+      "0"
+    )}`;
   }
 
   // YYMMDD（Zengin）
   const m2 = t.match(/^(\d{2})(\d{2})(\d{2})$/);
   if (m2) {
-    // 00-99は 2000年台寄せ（必要ならここ調整）
-    const yyyy = 2000 + Number(m2[1]);
+    const yy = Number(m2[1]);
     const mm = Number(m2[2]);
     const dd = Number(m2[3]);
+
     if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
-      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+      // ✅ ここだけ修正
+      // 今回の楽天(Zengin)は YY が「令和YY」として入っている（例: 08 = 令和8年 = 2026）
+      // 令和YY → 西暦は 2018 + YY（令和1年=2019）
+      const yyyy = 2018 + yy;
+
+      return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(
+        2,
+        "0"
+      )}`;
     }
   }
 
@@ -281,7 +295,9 @@ export default function ImportClient({ cashAccountId }: Props) {
 
     if (!file) return setErr("CSVファイルを選択してください");
     if (rows.length === 0)
-      return setErr("取り込み対象が0件です（まずプレビューが出る状態にしてください）");
+      return setErr(
+        "取り込み対象が0件です（まずプレビューが出る状態にしてください）"
+      );
 
     try {
       setBusy(true);
@@ -316,7 +332,6 @@ export default function ImportClient({ cashAccountId }: Props) {
             <div className="mt-1 text-sm text-white/70">
               CSVを読み込み → 内容プレビュー → 取り込み
             </div>
-            
           </div>
         </div>
       </div>
@@ -382,7 +397,10 @@ export default function ImportClient({ cashAccountId }: Props) {
             <tbody>
               {preview.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-3 py-6 text-center text-white/60">
+                  <td
+                    colSpan={4}
+                    className="px-3 py-6 text-center text-white/60"
+                  >
                     まだデータがありません（CSVを選択してください）
                   </td>
                 </tr>
@@ -401,7 +419,6 @@ export default function ImportClient({ cashAccountId }: Props) {
             </tbody>
           </table>
         </div>
-
       </div>
     </div>
   );
