@@ -181,17 +181,13 @@ export default function SimulationClient({
           <div className={cardBody}>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <div className="text-xs text-neutral-400">Selected</div>
-                <div className="text-lg font-semibold text-white">{selectedName}</div>
+                                <div className="text-lg font-semibold text-white">{selectedName}</div>
                 <div className="mt-1 text-sm text-neutral-300">
                   Current Balance:{" "}
                   <span className="font-semibold text-white">
                     {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
                   </span>
                 </div>
-              </div>
-              <div className="text-xs text-neutral-500">
-                ※ Simulationは「全口座」固定（Dashboardで口座切替）
               </div>
             </div>
           </div>
