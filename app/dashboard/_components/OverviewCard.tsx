@@ -24,7 +24,7 @@ export default function OverviewCard({ payload }: Props) {
 
   return (
     <div className="rounded-xl border p-4 space-y-2">
-      <div className="px-5 pt-4 text-sm font-semibold text-white">Overview</div>
+      <div className="font-semibold mb-2">今月の概要</div>
 
       <div className="text-sm">
         現在残高: <span className="font-medium">{yen(currentBalance)}</span>
