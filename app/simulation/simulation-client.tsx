@@ -1,7 +1,7 @@
+// app/simulation/simulation-client.tsx
 "use client";
 
 import React, { useMemo, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import type { AccountRow } from "@/app/dashboard/_types";
@@ -46,41 +46,7 @@ function buildFallbackMonths(count = 12) {
   });
 }
 
-type Judge = {
-  level: "safe" | "warn" | "danger" | "short";
-  message: string;
-};
-
-function judgeByAssumption(params: {
-  currentBalance: number;
-  assumedNet: number;
-  horizonMonths: number;
-}): Judge {
-  const horizon = Math.max(1, params.horizonMonths);
-  const projectedEnd = params.currentBalance + params.assumedNet * horizon;
-
-  if (projectedEnd < 0) {
-    return {
-      level: "short",
-      message:
-        "このままの想定（入力した収支）だと、12ヶ月以内に資金ショートする可能性が高いです。",
-    };
-  }
-
-  if (params.currentBalance < 300_000 || params.assumedNet < 0) {
-    return {
-      level: "warn",
-      message:
-        "残高が薄いか、想定収支がマイナス寄りです。支出の固定費・季節要因を点検してください。",
-    };
-  }
-
-  return {
-    level: "safe",
-    message:
-      "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。",
-  };
-}
+type JudgeLevel = "safe" | "warn" | "danger" | "short";
 
 export default function SimulationClient({
   accounts,
@@ -135,29 +101,39 @@ export default function SimulationClient({
     });
   }, [simulation, assumedNet]);
 
-  // ✅ ここが本命：判定を「今の入力値(assumedNet)」で再計算する
-  const judged = useMemo(() => {
+  // ✅ Step2: 判定は「入力した想定（assumedNet）」でリアルタイム計算する
+  const judge = useMemo(() => {
     const currentBalance = Number((simulation as any)?.currentBalance ?? 0);
-    const horizonMonths = months.length > 0 ? months.length : 12;
+    const horizon = 12;
 
-    return judgeByAssumption({
-      currentBalance,
-      assumedNet: Number(assumedNet ?? 0),
-      horizonMonths,
-    });
-  }, [simulation, assumedNet, months.length]);
+    const projectedMin = currentBalance + Number(assumedNet) * horizon;
+
+    let level: JudgeLevel = "safe";
+    let message =
+      "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。";
+
+    if (projectedMin < 0) {
+      level = "short";
+      message =
+        "このままの想定（入力した収支）だと、12ヶ月以内に資金ショートする可能性が高いです。";
+    } else if (currentBalance < 300_000 || Number(assumedNet) < 0) {
+      level = "warn";
+      message =
+        "残高が薄いか、想定収支がマイナス寄りです。支出の固定費・季節要因を点検してください。";
+    }
+
+    return { level, message };
+  }, [simulation, assumedNet]);
 
   const badge = useMemo(() => {
-    const level = judged.level;
-
-    if (level === "danger" || level === "short") {
+    if (judge.level === "short") {
       return {
         label: "CRITICAL",
         className:
           "inline-flex items-center rounded-full border border-red-800 bg-red-950 px-2.5 py-1 text-xs font-semibold text-red-200",
       };
     }
-    if (level === "warn") {
+    if (judge.level === "warn") {
       return {
         label: "CAUTION",
         className:
@@ -169,7 +145,7 @@ export default function SimulationClient({
       className:
         "inline-flex items-center rounded-full border border-emerald-800 bg-emerald-950 px-2.5 py-1 text-xs font-semibold text-emerald-200",
     };
-  }, [judged.level]);
+  }, [judge.level]);
 
   const pageBase = "min-h-screen bg-black text-white";
   const shell = "mx-auto w-full max-w-6xl px-4 py-6";
@@ -241,9 +217,7 @@ export default function SimulationClient({
                 <div className="text-lg font-semibold text-white">
                   現在残高:{" "}
                   <span className="font-semibold text-white">
-                    {formatJPY(
-                      Number((simulation as any)?.currentBalance ?? 0)
-                    )}
+                    {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
                   </span>
                 </div>
               </div>
@@ -349,7 +323,7 @@ export default function SimulationClient({
             <div className={cardBody}>
               <div className="flex items-start gap-3">
                 <span className={badge.className}>{badge.label}</span>
-                <div className="text-sm text-neutral-200">{judged.message}</div>
+                <div className="text-sm text-neutral-200">{judge.message}</div>
               </div>
 
               {/* scenarios list */}
