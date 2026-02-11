@@ -1,6 +1,7 @@
 // app/dashboard/statement/page.tsx
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { getCashFlows } from "./_actions/getCashFlows";
 
 type Props = {
@@ -19,25 +20,54 @@ function yen(n: number): string {
   return new Intl.NumberFormat("ja-JP").format(n);
 }
 
-function sectionLabel(v: string | null | undefined): "収入" | "支出" {
-  const s = String(v ?? "").toLowerCase();
-  if (s === "income" || v === "収入") return "収入";
-  return "支出";
+/**
+ * 令和YYを 2000+YY として保存/表示してしまったバグ補正用。
+ * 例: 2007 -> 2025（+18年）, 2008 -> 2026（+18年）
+ *
+ * "YYYY-MM-DD" / "YYYY-MM-01" 形式だけを補正する。
+ */
+function fixReiwaYearBug(isoDate: string): string {
+  const m = String(isoDate ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return String(isoDate ?? "");
+
+  const y = Number(m[1]);
+  const mm = m[2];
+  const dd = m[3];
+
+  // 2000〜2018 を「令和年の誤変換」とみなして +18年補正
+  if (Number.isFinite(y) && y >= 2000 && y <= 2018) {
+    return `${y + 18}-${mm}-${dd}`;
+  }
+  return `${y}-${mm}-${dd}`;
 }
 
 export default async function StatementPage({ searchParams }: Props) {
-  const cashAccountId = toInt(searchParams?.cashAccountId) ?? 2; // デフォルトは内部的に維持（表示しない）
-  const rows = await getCashFlows({
-    cashAccountId,
-    sourceType: "import",
-    limit: 200,
-  });
+  const cashAccountId = toInt(searchParams?.cashAccountId) ?? 2; // ひとまず楽天銀行ID=2をデフォルト
+  const rows = await getCashFlows({ cashAccountId, sourceType: "import", limit: 200 });
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6">
+    <div className="mx-auto w-full max-w-5xl px-4 py-6">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-white">楽天銀行 明細ビュー</h1>
+          <p className="text-sm text-zinc-300">
+            口座ID: <span className="font-mono text-zinc-200">{cashAccountId}</span> / source_type=import / 最新200件
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/dashboard?cashAccountId=${cashAccountId}`}
+            className="rounded-md bg-zinc-800 px-3 py-2 text-sm text-white hover:bg-zinc-700"
+          >
+            Dashboardへ戻る
+          </Link>
+          <Link
+            href={`/dashboard/import?cashAccountId=${cashAccountId}`}
+            className="rounded-md bg-zinc-800 px-3 py-2 text-sm text-white hover:bg-zinc-700"
+          >
+            インポートへ
+          </Link>
         </div>
       </div>
 
@@ -58,33 +88,21 @@ export default async function StatementPage({ searchParams }: Props) {
               {rows.length === 0 ? (
                 <tr>
                   <td className="px-4 py-6 text-zinc-300" colSpan={5}>
-                    データがありません
+                    データがありません（または権限/RLSで取得できていません）
                   </td>
                 </tr>
               ) : (
                 rows.map((r) => {
-                  const label = sectionLabel(r.section);
-                  const isIncome = label === "収入";
-
+                  const isIncome = r.section === "収入" || r.section === "income";
+                  const displayDate = fixReiwaYearBug(String(r.date ?? ""));
                   return (
-                    <tr
-                      key={r.id}
-                      className="border-b border-zinc-800 last:border-b-0"
-                    >
-                      <td className="px-4 py-3 font-mono text-zinc-200">
-                        {r.date}
-                      </td>
-                      <td className="px-4 py-3">{label}</td>
-                      <td
-                        className={`px-4 py-3 text-right font-mono ${
-                          isIncome ? "text-emerald-300" : "text-rose-300"
-                        }`}
-                      >
+                    <tr key={r.id} className="border-b border-zinc-800 last:border-b-0">
+                      <td className="px-4 py-3 font-mono text-zinc-200">{displayDate}</td>
+                      <td className="px-4 py-3">{r.section}</td>
+                      <td className={`px-4 py-3 text-right font-mono ${isIncome ? "text-emerald-300" : "text-rose-300"}`}>
                         {isIncome ? "" : "-"}¥{yen(Math.abs(r.amount))}
                       </td>
-                      <td className="px-4 py-3 text-zinc-100">
-                        {r.description ?? ""}
-                      </td>
+                      <td className="px-4 py-3 text-zinc-100">{r.description ?? ""}</td>
                       <td className="px-4 py-3 font-mono text-zinc-400">
                         {r.created_at?.slice(0, 19).replace("T", " ") ?? ""}
                       </td>
@@ -96,6 +114,10 @@ export default async function StatementPage({ searchParams }: Props) {
           </table>
         </div>
       </div>
+
+      <p className="mt-3 text-xs text-zinc-400">
+        ※ 表示は「読むだけ」。インポート/残高/集計ロジックには一切触ってない。
+      </p>
     </div>
   );
 }
