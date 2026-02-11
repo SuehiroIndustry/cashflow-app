@@ -17,8 +17,8 @@ export default function EcoCharts(props: { rows: MonthlyBalanceRow[] }) {
   }, [rows]);
 
   return (
-    <div className="space-y-4">
-      {/* Summary */}
+    <div className="grid gap-4 md:grid-cols-2">
+      {/* ✅ 左：推移（サマリ） */}
       <div className="border border-white/15 bg-white/5 rounded p-4">
         <div className="font-semibold mb-2 text-white">推移（サマリ）</div>
         {latest ? (
@@ -45,7 +45,7 @@ export default function EcoCharts(props: { rows: MonthlyBalanceRow[] }) {
         )}
       </div>
 
-      {/* “Charts” (simple list) */}
+      {/* ✅ 右：月次（一覧） */}
       <div className="border border-white/15 bg-white/5 rounded p-4">
         <div className="font-semibold mb-3 text-white">月次（一覧）</div>
 
@@ -53,12 +53,26 @@ export default function EcoCharts(props: { rows: MonthlyBalanceRow[] }) {
           {rows.map((r) => {
             const neg = r.balance < 0;
             return (
-              <div key={r.month} className="flex items-center justify-between text-sm">
+              <div
+                key={r.month}
+                className="flex items-center justify-between text-sm"
+              >
                 <span className="text-white/70">{r.month}</span>
+
                 <span className="flex gap-3">
-                  <span className="tabular-nums text-white">{yen(r.income)}</span>
-                  <span className="tabular-nums text-white/70">{yen(r.expense)}</span>
-                  <span className={neg ? "tabular-nums font-semibold text-red-400" : "tabular-nums font-semibold text-white"}>
+                  <span className="tabular-nums text-white">
+                    {yen(r.income)}
+                  </span>
+                  <span className="tabular-nums text-white/70">
+                    {yen(r.expense)}
+                  </span>
+                  <span
+                    className={
+                      neg
+                        ? "tabular-nums font-semibold text-red-400"
+                        : "tabular-nums font-semibold text-white"
+                    }
+                  >
                     {yen(r.balance)}
                   </span>
                 </span>
@@ -66,7 +80,9 @@ export default function EcoCharts(props: { rows: MonthlyBalanceRow[] }) {
             );
           })}
 
-          {!rows.length && <div className="text-sm text-white/60">No rows</div>}
+          {!rows.length && (
+            <div className="text-sm text-white/60">No rows</div>
+          )}
         </div>
       </div>
     </div>
