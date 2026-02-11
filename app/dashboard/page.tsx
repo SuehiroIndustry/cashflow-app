@@ -106,8 +106,8 @@ export default async function DashboardPage({ searchParams }: Props) {
       monthly={monthly}
     >
       <div className="grid gap-4 md:grid-cols-3">
-        <OverviewCard payload={overviewPayload} />
-        <BalanceCard rows={monthly} />
+        <OverviewCard payload={overviewPayload} /><br></br>
+        <BalanceCard rows={monthly} /><br></br>
         <EcoCharts rows={monthly} />
       </div>
     </DashboardClient>
