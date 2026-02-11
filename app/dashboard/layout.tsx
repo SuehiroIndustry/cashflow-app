@@ -54,7 +54,7 @@ export default function DashboardLayout({
 
               <span className="mx-1 text-white/30">|</span>
 
-              <Link className="hover:text-white" href="/dashboard/entry">
+              <Link className="hover:text-white" href="/dashboard/income">
                 収支入力
               </Link>
             </nav>
