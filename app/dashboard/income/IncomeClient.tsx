@@ -13,8 +13,6 @@ type Props = {
   manualRows: ManualCashFlowRow[];
 };
 
-const INITIAL_CATEGORY_NAME = "初期値";
-
 function clampNumberString(v: string) {
   return v.replace(/[^\d]/g, "");
 }
@@ -43,7 +41,9 @@ export default function IncomeClient({ accounts, categories, manualRows }: Props
   const [amount, setAmount] = useState<string>("");
   const [description, setDescription] = useState<string>("");
   const [cashAccountId, setCashAccountId] = useState<number | null>(defaultAccountId);
-  const [cashCategoryId, setCashCategoryId] = useState<number | null>(categories?.[0]?.id ?? null);
+  const [cashCategoryId, setCashCategoryId] = useState<number | null>(
+    categories?.[0]?.id ?? null
+  );
 
   const amountNum = useMemo(() => Number(amount || 0), [amount]);
 
@@ -58,6 +58,17 @@ export default function IncomeClient({ accounts, categories, manualRows }: Props
     categories.forEach((c) => m.set(c.id, c.name));
     return m;
   }, [categories]);
+
+  // ✅ 「初期値」カテゴリID（見つからなければ null）
+  const initialCategoryId = useMemo(() => {
+    const found = categories.find((c) => c.name === "初期値");
+    return found?.id ?? null;
+  }, [categories]);
+
+  function isInitialRow(row: ManualCashFlowRow) {
+    if (!initialCategoryId) return false;
+    return row.cash_category_id === initialCategoryId;
+  }
 
   const pageBase = "min-h-screen bg-black text-white";
   const card = "rounded-xl border border-neutral-800 bg-neutral-950 shadow-sm";
@@ -106,6 +117,12 @@ export default function IncomeClient({ accounts, categories, manualRows }: Props
   }
 
   async function onDeleteRow(row: ManualCashFlowRow) {
+    // ✅ 念のため UI 側でもブロック
+    if (isInitialRow(row)) {
+      alert("この行は「初期値」カテゴリのため削除できません");
+      return;
+    }
+
     const ok = confirm(`削除しますか？\n${row.date} / ${row.section} / ${formatJPY(row.amount)} 円`);
     if (!ok) return;
 
@@ -241,21 +258,22 @@ export default function IncomeClient({ accounts, categories, manualRows }: Props
                 </thead>
                 <tbody className="divide-y divide-neutral-800 bg-neutral-950">
                   {manualRows.map((r) => {
-                    const catName = categoryNameById.get(r.cash_category_id) ?? "-";
-                    const isInitial = catName === INITIAL_CATEGORY_NAME;
+                    const initial = isInitialRow(r);
 
                     return (
                       <tr key={r.id} className="text-neutral-200">
                         <td className="px-3 py-2">{r.date}</td>
                         <td className="px-3 py-2">{r.section === "income" ? "収入" : "支出"}</td>
                         <td className="px-3 py-2">{accountNameById.get(r.cash_account_id) ?? "-"}</td>
-                        <td className="px-3 py-2">{catName}</td>
+                        <td className="px-3 py-2">{categoryNameById.get(r.cash_category_id) ?? "-"}</td>
                         <td className="px-3 py-2 text-right">{formatJPY(r.amount)}</td>
                         <td className="px-3 py-2">{r.description ?? ""}</td>
 
                         <td className="px-3 py-2 text-right">
-                          {isInitial ? (
-                            <span className="text-xs text-neutral-500">-</span>
+                          {initial ? (
+                            <span className="text-xs text-neutral-500" title="初期値は削除不可">
+                              -
+                            </span>
                           ) : (
                             <button
                               className="text-xs text-neutral-300 hover:text-white disabled:opacity-50"
