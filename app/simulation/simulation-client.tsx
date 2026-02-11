@@ -166,8 +166,7 @@ export default function SimulationClient({
       <div className={shell}>
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
-            <div className="text-xs text-neutral-400">Cashflow Dashboard</div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Simulation</h1>
+             <h1 className="text-2xl font-bold tracking-tight text-white">Simulation</h1>
           </div>
 
           <div className="flex items-center gap-2">
