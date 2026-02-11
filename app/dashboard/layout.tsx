@@ -28,17 +28,25 @@ export default function DashboardLayout({
                 Dashboard
               </Link>
 
+              <span className="mx-1 text-white/30">|</span>
+
               <Link className="hover:text-white" href="/dashboard/simulation">
                 Simulation
               </Link>
+
+              <span className="mx-1 text-white/30">|</span>
 
               <Link className="hover:text-white" href="/dashboard/import">
                 楽天銀行・明細インポート
               </Link>
 
+              <span className="mx-1 text-white/30">|</span>
+
               <Link className="hover:text-white" href="/dashboard/statement">
                 楽天銀行・明細ビュー
               </Link>
+
+              <span className="mx-1 text-white/30">|</span>
 
               <Link className="hover:text-white" href="/dashboard/fixed-costs">
                 固定費設定
