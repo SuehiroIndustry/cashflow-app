@@ -183,7 +183,7 @@ export default function SimulationClient({
               <div>
                                 <div className="text-lg font-semibold text-white">{selectedName}</div>
                 <div className="mt-1 text-sm text-neutral-300">
-                  Current Balance:{" "}
+                  現在残高:{" "}
                   <span className="font-semibold text-white">
                     {formatJPY(Number((simulation as any)?.currentBalance ?? 0))}
                   </span>
