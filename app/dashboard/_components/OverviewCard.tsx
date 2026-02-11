@@ -24,16 +24,14 @@ export default function OverviewCard({ payload }: Props) {
 
   return (
     <div className="rounded-xl border p-4 space-y-2">
-      <h3 className="text-sm font-semibold">Overview</h3>
-
-      <div className="text-sm">Account: {accountName}</div>
+      <h3 className="px-5 pt-4 text-sm font-semibold text-white">Overview</h3>
 
       <div className="text-sm">
-        Current Balance: <span className="font-medium">{yen(currentBalance)}</span>
+        現在残高: <span className="font-medium">{yen(currentBalance)}</span>
       </div>
 
-      <div className="text-sm">This Month Income: {yen(thisMonthIncome)}</div>
-      <div className="text-sm">This Month Expense: {yen(thisMonthExpense)}</div>
+      <div className="text-sm">今月の収入: {yen(thisMonthIncome)}</div>
+      <div className="text-sm">今月の支出: {yen(thisMonthExpense)}</div>
 
       <div
         className={
@@ -42,7 +40,7 @@ export default function OverviewCard({ payload }: Props) {
             : "text-sm font-medium text-red-600"
         }
       >
-        Net: {yen(net)}
+        今月の収支: {yen(net)}
       </div>
     </div>
   );
