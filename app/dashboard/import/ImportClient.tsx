@@ -316,9 +316,7 @@ export default function ImportClient({ cashAccountId }: Props) {
             <div className="mt-1 text-sm text-white/70">
               CSVを読み込み → 内容プレビュー → 取り込み
             </div>
-            <div className="mt-3 text-sm text-white/70">
-              口座：<span className="font-semibold text-white">楽天銀行</span>
-            </div>
+            
           </div>
         </div>
       </div>
