@@ -33,6 +33,11 @@ export async function deleteManualCashFlow(input: Input): Promise<void> {
   if (!row) throw new Error("対象データが見つかりません");
   if (row.source_type !== "manual") throw new Error("manual 以外は削除できません");
 
+  // ✅ カテゴリ未設定は想定外（保険）
+  if (!row.cash_category_id) {
+    throw new Error("カテゴリ未設定のため削除できません");
+  }
+
   // ✅ 2) カテゴリが「初期値」なら削除禁止
   const { data: cat, error: catErr } = await supabase
     .from("cash_categories")
