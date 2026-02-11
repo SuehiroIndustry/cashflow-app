@@ -98,7 +98,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   } as OverviewPayload;
 
   return (
-     <div className="mx-auto w-full max-w-4xl px-4 py-8 text-white">
+     <div className="mx-auto w-full max-w-5xl px-4 py-8 text-white">
     <DashboardClient
       cashStatus={cashStatus as CashStatus}
       alertCards={alertCards}
