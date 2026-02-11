@@ -1,4 +1,3 @@
-// app/simulation/simulation-client.tsx
 "use client";
 
 import React, { useMemo, useState, useTransition } from "react";
@@ -225,40 +224,42 @@ export default function SimulationClient({
           </div>
         </div>
 
+        {/* 3 columns */}
         <div className="grid gap-4 md:grid-cols-3">
-          {/* Average */}
-          <div className={card}>
-            <div className={cardHead}>平均（直近 6ヶ月）</div>
-            <div className={cardBody}>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className={label}>収入</span>
-                  <span className={value}>
-                    {formatJPY(Number((simulation as any)?.avgIncome ?? 0))}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={label}>支出</span>
-                  <span className={value}>
-                    {formatJPY(Number((simulation as any)?.avgExpense ?? 0))}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={label}>差額</span>
-                  <span className={value}>
-                    {formatJPY(Number((simulation as any)?.avgNet ?? 0))}
-                  </span>
+          {/* LEFT: Average + Scenarios */}
+          <div className="space-y-4">
+            {/* Average */}
+            <div className={card}>
+              <div className={cardHead}>平均（直近 6ヶ月）</div>
+              <div className={cardBody}>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className={label}>収入</span>
+                    <span className={value}>
+                      {formatJPY(Number((simulation as any)?.avgIncome ?? 0))}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={label}>支出</span>
+                    <span className={value}>
+                      {formatJPY(Number((simulation as any)?.avgExpense ?? 0))}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={label}>差額</span>
+                    <span className={value}>
+                      {formatJPY(Number((simulation as any)?.avgNet ?? 0))}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* scenarios list */}
-              <div className="mt-4 border-t border-neutral-800 pt-4">
-                <div className="text-sm font-semibold text-white">
-                  保存済みシナリオ
-                </div>
-                <div className="mt-2 space-y-2">
+            {/* Scenarios (under Average) */}
+            <div className={card}>
+              <div className={cardHead}>保存済みシナリオ</div>
+              <div className={cardBody}>
+                <div className="space-y-2">
                   {scenarios.map((s) => (
                     <div
                       key={s.id}
@@ -299,8 +300,10 @@ export default function SimulationClient({
                   )}
                 </div>
               </div>
+            </div>
+          </div>
 
-          {/* Inputs + Save */}
+          {/* MIDDLE: Inputs + Save */}
           <div className={card}>
             <div className={cardHead}>予測（12ヶ月）</div>
             <div className={cardBody}>
@@ -364,7 +367,7 @@ export default function SimulationClient({
             </div>
           </div>
 
-          {/* Judge */}
+          {/* RIGHT: Judge + Logic */}
           <div className={card}>
             <div className={cardHead}>判定</div>
             <div className={cardBody}>
@@ -373,24 +376,24 @@ export default function SimulationClient({
                 <div className="text-sm text-neutral-200">{judge.message}</div>
               </div>
 
-              {/* 判定ロジック説明 */}
-<div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-500 leading-relaxed">
-  <div className="font-semibold text-neutral-400 mb-1">判定ロジック</div>
-  <ul className="list-disc pl-4 space-y-1">
-    <li>
-      <span className="text-red-400 font-semibold">CRITICAL</span>：
-      12ヶ月後の推定残高がマイナス
-    </li>
-    <li>
-      <span className="text-yellow-400 font-semibold">CAUTION</span>：
-      残高30万円未満 または 平均収支がマイナス
-    </li>
-    <li>
-      <span className="text-emerald-400 font-semibold">SAFE</span>：
-      上記に該当しない場合
-    </li>
-  </ul>
-</div>
+              {/* 判定ロジック説明（見出しは白字） */}
+              <div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-500 leading-relaxed">
+                <div className="font-semibold text-white mb-1">判定ロジック</div>
+                <ul className="list-disc pl-4 space-y-1">
+                  <li>
+                    <span className="text-red-400 font-semibold">CRITICAL</span>：
+                    12ヶ月後の推定残高がマイナス
+                  </li>
+                  <li>
+                    <span className="text-yellow-400 font-semibold">CAUTION</span>：
+                    残高30万円未満 または 平均収支がマイナス
+                  </li>
+                  <li>
+                    <span className="text-emerald-400 font-semibold">SAFE</span>：
+                    上記に該当しない場合
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>
