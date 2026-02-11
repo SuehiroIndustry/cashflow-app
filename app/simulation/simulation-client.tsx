@@ -167,13 +167,9 @@ export default function SimulationClient({
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
              <h1 className="text-2xl font-bold tracking-tight text-white">Simulation</h1>
-          </div>
+        </div>
 
-          <div className="flex items-center gap-2">
-            <Link href="/dashboard" className={buttonBase}>
-              Dashboardへ
-            </Link>
-          </div>
+          
         </div>
 
         {/* Selected */}
