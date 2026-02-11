@@ -51,23 +51,8 @@ export default async function StatementPage({ searchParams }: Props) {
         <div>
           <h1 className="text-xl font-semibold text-white">楽天銀行 明細ビュー</h1>
           <p className="text-sm text-zinc-300">
-            口座ID: <span className="font-mono text-zinc-200">{cashAccountId}</span> / source_type=import / 最新200件
+            最新200件
           </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/dashboard?cashAccountId=${cashAccountId}`}
-            className="rounded-md bg-zinc-800 px-3 py-2 text-sm text-white hover:bg-zinc-700"
-          >
-            Dashboardへ戻る
-          </Link>
-          <Link
-            href={`/dashboard/import?cashAccountId=${cashAccountId}`}
-            className="rounded-md bg-zinc-800 px-3 py-2 text-sm text-white hover:bg-zinc-700"
-          >
-            インポートへ
-          </Link>
         </div>
       </div>
 
