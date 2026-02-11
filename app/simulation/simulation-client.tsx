@@ -251,25 +251,54 @@ export default function SimulationClient({
                 </div>
               </div>
             </div>
-            {/* 判定ロジック説明 */}
-<div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-500 leading-relaxed">
-  <div className="font-semibold text-neutral-400 mb-1">判定ロジック</div>
-  <ul className="list-disc pl-4 space-y-1">
-    <li>
-      <span className="text-red-400 font-semibold">CRITICAL</span>：
-      12ヶ月後の推定残高がマイナス
-    </li>
-    <li>
-      <span className="text-yellow-400 font-semibold">CAUTION</span>：
-      残高30万円未満 または 平均収支がマイナス
-    </li>
-    <li>
-      <span className="text-emerald-400 font-semibold">SAFE</span>：
-      上記に該当しない場合
-    </li>
-  </ul>
-</div>
           </div>
+
+          {/* scenarios list */}
+              <div className="mt-4 border-t border-neutral-800 pt-4">
+                <div className="text-sm font-semibold text-white">
+                  保存済みシナリオ
+                </div>
+                <div className="mt-2 space-y-2">
+                  {scenarios.map((s) => (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2"
+                    >
+                      <button
+                        className="text-left text-sm text-white hover:underline"
+                        onClick={() => applyScenario(s)}
+                        title="クリックで反映"
+                      >
+                        {s.name}
+                        <span className="ml-2 text-xs text-neutral-500">
+                          （収入{" "}
+                          {new Intl.NumberFormat("ja-JP").format(
+                            s.assumed_income
+                          )}{" "}
+                          / 支出{" "}
+                          {new Intl.NumberFormat("ja-JP").format(
+                            s.assumed_expense
+                          )}
+                          ）
+                        </span>
+                      </button>
+                      <button
+                        className="text-xs text-neutral-300 hover:text-white"
+                        onClick={() => onDeleteScenario(s.id)}
+                        disabled={isPending}
+                        title="削除"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ))}
+                  {scenarios.length === 0 && (
+                    <div className="text-xs text-neutral-500">
+                      まだ保存されたシナリオがありません
+                    </div>
+                  )}
+                </div>
+              </div>
 
           {/* Inputs + Save */}
           <div className={card}>
@@ -344,52 +373,24 @@ export default function SimulationClient({
                 <div className="text-sm text-neutral-200">{judge.message}</div>
               </div>
 
-              {/* scenarios list */}
-              <div className="mt-4 border-t border-neutral-800 pt-4">
-                <div className="text-sm font-semibold text-white">
-                  保存済みシナリオ
-                </div>
-                <div className="mt-2 space-y-2">
-                  {scenarios.map((s) => (
-                    <div
-                      key={s.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-neutral-800 bg-neutral-950 px-3 py-2"
-                    >
-                      <button
-                        className="text-left text-sm text-white hover:underline"
-                        onClick={() => applyScenario(s)}
-                        title="クリックで反映"
-                      >
-                        {s.name}
-                        <span className="ml-2 text-xs text-neutral-500">
-                          （収入{" "}
-                          {new Intl.NumberFormat("ja-JP").format(
-                            s.assumed_income
-                          )}{" "}
-                          / 支出{" "}
-                          {new Intl.NumberFormat("ja-JP").format(
-                            s.assumed_expense
-                          )}
-                          ）
-                        </span>
-                      </button>
-                      <button
-                        className="text-xs text-neutral-300 hover:text-white"
-                        onClick={() => onDeleteScenario(s.id)}
-                        disabled={isPending}
-                        title="削除"
-                      >
-                        削除
-                      </button>
-                    </div>
-                  ))}
-                  {scenarios.length === 0 && (
-                    <div className="text-xs text-neutral-500">
-                      まだ保存されたシナリオがありません
-                    </div>
-                  )}
-                </div>
-              </div>
+              {/* 判定ロジック説明 */}
+<div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-500 leading-relaxed">
+  <div className="font-semibold text-neutral-400 mb-1">判定ロジック</div>
+  <ul className="list-disc pl-4 space-y-1">
+    <li>
+      <span className="text-red-400 font-semibold">CRITICAL</span>：
+      12ヶ月後の推定残高がマイナス
+    </li>
+    <li>
+      <span className="text-yellow-400 font-semibold">CAUTION</span>：
+      残高30万円未満 または 平均収支がマイナス
+    </li>
+    <li>
+      <span className="text-emerald-400 font-semibold">SAFE</span>：
+      上記に該当しない場合
+    </li>
+  </ul>
+</div>
             </div>
           </div>
         </div>
