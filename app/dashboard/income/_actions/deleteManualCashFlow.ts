@@ -1,6 +1,13 @@
+// app/dashboard/income/_actions/deleteManualCashFlow.ts
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+type Input = {
+  cashFlowId: number;
+  cashAccountId: number;
+  date: string; // YYYY-MM-DD
+};
 
 function monthStart(d: string) {
   const y = d.slice(0, 4);
@@ -8,54 +15,26 @@ function monthStart(d: string) {
   return `${y}-${m}-01`;
 }
 
-type Input = {
-  cashFlowId: number;
-};
-
 export async function deleteManualCashFlow(input: Input): Promise<void> {
   const supabase = await createSupabaseServerClient();
 
-  if (!Number.isFinite(input.cashFlowId) || input.cashFlowId <= 0) {
-    throw new Error("cashFlowId が不正です");
-  }
+  if (!input.cashFlowId) throw new Error("cashFlowId が不正です");
+  if (!input.cashAccountId) throw new Error("cashAccountId が不正です");
+  if (!input.date) throw new Error("date が不正です");
 
-  // 削除前に行を取得（recalc とガード用）
-  const { data: row, error: selErr } = await supabase
-    .from("cash_flows")
-    .select("id, user_id, cash_account_id, date, source_type")
-    .eq("id", input.cashFlowId)
-    .maybeSingle();
-
-  if (selErr) throw new Error(selErr.message);
-  if (!row) throw new Error("対象データが見つかりません");
-
-  // 手入力だけ削除可（事故防止）
-  if (row.source_type !== "manual") {
-    throw new Error("このデータは削除できません（手入力のみ削除可）");
-  }
-
-  // 本人のデータだけ削除可
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw new Error(userErr.message);
-  const uid = userRes.user?.id;
-  if (!uid) throw new Error("ログイン情報が取得できません");
-
-  if (row.user_id !== uid) {
-    throw new Error("このデータは削除できません");
-  }
-
+  // ✅ manual のみ削除可（インポート等は削除不可）
   const { error: delErr } = await supabase
     .from("cash_flows")
     .delete()
-    .eq("id", input.cashFlowId);
+    .eq("id", input.cashFlowId)
+    .eq("source_type", "manual");
 
   if (delErr) throw new Error(delErr.message);
 
-  // 月次再計算
-  const date10 = String(row.date).slice(0, 10);
+  // ✅ 月次再計算
   const { error: rpcErr } = await supabase.rpc("recalc_monthly_cash_balance", {
-    p_cash_account_id: row.cash_account_id,
-    p_month: monthStart(date10),
+    p_cash_account_id: input.cashAccountId,
+    p_month: monthStart(input.date),
   });
 
   if (rpcErr) throw new Error(rpcErr.message);
