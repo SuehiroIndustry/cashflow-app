@@ -8,18 +8,20 @@ export default function DashboardLayout({
 }) {
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* ✅ 常に表示される上のバー（ここだけに統一） */}
       <header className="border-b border-white/10 bg-black">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="text-lg font-semibold">Cashflow Dashboard</div>
 
-            <Link
-              href="/auth/signout"
-              className="rounded border border-white/15 bg-white/5 px-3 py-1 text-sm hover:bg-white/10"
-            >
-              Logout
-            </Link>
+            {/* ✅ LinkでGETしない。POSTで明示ログアウト */}
+            <form action="/auth/signout" method="post">
+              <button
+                type="submit"
+                className="rounded border border-white/15 bg-white/5 px-3 py-1 text-sm hover:bg-white/10"
+              >
+                Logout
+              </button>
+            </form>
           </div>
 
           <div className="mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
@@ -62,7 +64,6 @@ export default function DashboardLayout({
         </div>
       </header>
 
-      {/* ✅ 各ページの表示領域 */}
       <main className="px-6 pb-10">{children}</main>
     </div>
   );
