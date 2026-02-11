@@ -15,7 +15,7 @@ export default function DashboardLayout({
             <div className="text-lg font-semibold">Cashflow Dashboard</div>
 
             <Link
-              href="/auth/logout"
+              href="/auth/signout"
               className="rounded border border-white/15 bg-white/5 px-3 py-1 text-sm hover:bg-white/10"
             >
               Logout
