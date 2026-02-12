@@ -152,10 +152,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-gradient-to-b from-white/10 to-black p-6 text-white shadow-xl">
-        <div className="text-2xl font-semibold text-white">Login</div>
-        <div className="mt-2 text-sm text-white/70">Email + Password でログインします。</div>
+        <div className="text-2xl font-semibold text-white">ログイン画面</div>
+        <div className="mt-2 text-sm text-white/70">メールアドレスとパスワードでログインします。</div>
 
-        <label className="mt-5 block text-sm text-white/80">Email</label>
+        <label className="mt-5 block text-sm text-white/80">メールアドレス</label>
         <input
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -164,7 +164,7 @@ export default function LoginPage() {
           className={inputClass}
         />
 
-        <label className="mt-3 block text-sm text-white/80">Password</label>
+        <label className="mt-3 block text-sm text-white/80">パスワード</label>
         <input
           type="password"
           value={password}
@@ -179,11 +179,11 @@ export default function LoginPage() {
         </button>
 
         <button onClick={signup} disabled={loading || !email || !password} className={`mt-3 ${btnClass}`}>
-          Sign up
+          初期登録
         </button>
 
         <button onClick={forgot} disabled={loading || !email} className={`mt-3 ${btnClass}`}>
-          Forgot password
+          パスワードを忘れたらこちら
         </button>
 
         {message && <div className={infoClass}>{message}</div>}
