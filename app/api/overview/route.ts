@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 type RiskLevel = string;
 
 type ViewRow = {
-  user_id: string;
+  org_id?: number | string | null; // ✅ 追加（viewにある前提。無いならview側に足して）
+  user_id?: string;
   cash_account_id: number | string;
   current_balance: number | string | null;
   month_income: number | string | null;
@@ -51,7 +52,12 @@ function toViewRowArray(data: unknown): ViewRow[] {
   const rows: ViewRow[] = [];
   for (const item of data) {
     if (!isObjectRecord(item)) continue;
-    if (!("current_balance" in item) || !("month_income" in item) || !("month_expense" in item)) continue;
+    if (
+      !("current_balance" in item) ||
+      !("month_income" in item) ||
+      !("month_expense" in item)
+    )
+      continue;
     rows.push(item as unknown as ViewRow);
   }
   return rows;
@@ -69,6 +75,29 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // ✅ 1) 自分の org_id を取る（法人対応の肝）
+  const { data: memberRow, error: memberErr } = await supabase
+    .from("org_members")
+    .select("org_id")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (memberErr) {
+    return NextResponse.json(
+      { error: `org_members 取得失敗: ${memberErr.message}` },
+      { status: 500 }
+    );
+  }
+
+  const orgId = memberRow?.org_id;
+  if (!orgId) {
+    return NextResponse.json(
+      { error: "このユーザーは organization に所属していません（org_members が空です）" },
+      { status: 400 }
+    );
+  }
+
   const url = new URL(req.url);
 
   // ✅ 両対応：古いフロントは accountId、新しいのは cash_account_id
@@ -78,10 +107,12 @@ export async function GET(req: Request) {
   const debug = url.searchParams.get("debug") === "1";
   const accountIdNum = accountIdParam ? Number(accountIdParam) : NaN;
 
+  // ✅ 2) viewは org_id で絞る（user_id で絞らない）
   let q = supabase
-    .from("v_dashboard_overview_user_v2") // public は supabase 側で解決
+    .from("v_dashboard_overview_user_v2")
     .select(
       [
+        "org_id",
         "user_id",
         "cash_account_id",
         "current_balance",
@@ -95,7 +126,7 @@ export async function GET(req: Request) {
         "computed_at",
       ].join(",")
     )
-    .eq("user_id", user.id);
+    .eq("org_id", orgId);
 
   if (Number.isFinite(accountIdNum)) {
     q = q.eq("cash_account_id", accountIdNum);
@@ -127,7 +158,8 @@ export async function GET(req: Request) {
       if (ms > acc._latestMs) {
         acc._latestMs = ms;
         acc.risk_level = r.risk_level ?? acc.risk_level;
-        acc.risk_score = typeof r.risk_score === "number" ? r.risk_score : acc.risk_score;
+        acc.risk_score =
+          typeof r.risk_score === "number" ? r.risk_score : acc.risk_score;
         acc.computed_at = r.computed_at ?? acc.computed_at;
       }
       return acc;
