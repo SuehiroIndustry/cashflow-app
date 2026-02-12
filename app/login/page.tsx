@@ -154,6 +154,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-gradient-to-b from-white/10 to-black p-6 text-white shadow-xl">
         <div className="text-2xl font-semibold text-white">ログイン画面</div>
         <div className="mt-2 text-sm text-white/70">メールアドレスとパスワードでログインします。</div>
+        <div className="mt-2 text-sm text-white/70">初回はメールアドレスとパスワードを入力して「初回登録」をクリックください</div>
 
         <label className="mt-5 block text-sm text-white/80">メールアドレス</label>
         <input
@@ -175,11 +176,11 @@ export default function LoginPage() {
         />
 
         <button onClick={login} disabled={loading || !email || !password} className={`mt-5 ${btnClass}`}>
-          {loading ? 'Loading...' : 'Login'}
+          {loading ? '処理中…' : 'ログイン'}
         </button>
 
         <button onClick={signup} disabled={loading || !email || !password} className={`mt-3 ${btnClass}`}>
-          初期登録
+          初回登録
         </button>
 
         <button onClick={forgot} disabled={loading || !email} className={`mt-3 ${btnClass}`}>
