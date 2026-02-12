@@ -66,6 +66,11 @@ export default function SimulationClient({
     simulation ? String(Math.round((simulation as any).avgExpense ?? 0)) : ""
   );
 
+  // ✅ 未来12ヶ月の「月別 支出上書き」(YYYY-MM -> 数字文字列)
+  const [expenseOverrides, setExpenseOverrides] = useState<
+    Record<string, string>
+  >({});
+
   const [scenarioName, setScenarioName] = useState<string>("");
 
   const assumedIncomeNum = useMemo(
@@ -76,11 +81,34 @@ export default function SimulationClient({
     () => Number(assumedExpense || 0),
     [assumedExpense]
   );
-  const assumedNet = useMemo(
+
+  // ✅ 旧：assumedNet（月一定）
+  // ✅ 新：月別支出があるので、テーブル側で月ごとのnetを計算する（ここは参考表示として平均値だけ）
+  const assumedNetAvg = useMemo(
     () => assumedIncomeNum - assumedExpenseNum,
     [assumedIncomeNum, assumedExpenseNum]
   );
 
+  // 未来月一覧（YYYY-MM）
+  const monthKeys = useMemo(() => {
+    if (!simulation) return [];
+    const src =
+      (simulation as any).months && Array.isArray((simulation as any).months)
+        ? ((simulation as any).months as Array<{ month: string }>)
+        : buildFallbackMonths(12);
+    return src.map((m) => m.month);
+  }, [simulation]);
+
+  // ✅ 月別に「支出」を決める（overrideがあればそれ、なければ assumedExpense）
+  const getExpenseForMonth = (month: string) => {
+    const raw = expenseOverrides[month];
+    const n = Number(raw || 0);
+    // rawが空なら assumedExpense を使う（0入力と区別するため）
+    if (!raw) return assumedExpenseNum;
+    return Number.isFinite(n) ? n : assumedExpenseNum;
+  };
+
+  // ✅ 月別の予測（支出overrideを反映）
   const months = useMemo(() => {
     if (!simulation) return [];
 
@@ -90,39 +118,54 @@ export default function SimulationClient({
         : buildFallbackMonths(12);
 
     let running = Number((simulation as any).currentBalance ?? 0);
+
     return src.map((m) => {
-      running += assumedNet;
+      const expense = getExpenseForMonth(m.month);
+      const net = assumedIncomeNum - expense;
+      running += net;
+
       return {
         month: m.month,
-        assumedNet: Math.round(assumedNet),
+        assumedIncome: Math.round(assumedIncomeNum),
+        assumedExpense: Math.round(expense),
+        assumedNet: Math.round(net),
         projectedBalance: Math.round(running),
       };
     });
-  }, [simulation, assumedNet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulation, assumedIncomeNum, assumedExpenseNum, expenseOverrides]);
 
-  // ✅ Step2: 判定は「入力した想定（assumedNet）」でリアルタイム計算する
+  // ✅ Step2: 判定も「月別支出override反映」で見る
   const judge = useMemo(() => {
     const currentBalance = Number((simulation as any)?.currentBalance ?? 0);
-    const horizon = 12;
 
-    const projectedMin = currentBalance + Number(assumedNet) * horizon;
+    // 12ヶ月の中で最小残高を拾う（どこかでマイナスになれば short）
+    const minBalance = months.reduce((min, m) => {
+      return Math.min(min, Number(m.projectedBalance ?? 0));
+    }, Number.POSITIVE_INFINITY);
+
+    // 参考：月別netの平均（CAUTION判定用）
+    const avgNet =
+      months.length === 0
+        ? 0
+        : months.reduce((s, m) => s + Number(m.assumedNet ?? 0), 0) / months.length;
 
     let level: JudgeLevel = "safe";
     let message =
       "現状の想定では、直近12ヶ月で資金ショートの兆候は強くありません。";
 
-    if (projectedMin < 0) {
+    if (months.length > 0 && minBalance < 0) {
       level = "short";
       message =
-        "このままの想定（入力した収支）だと、12ヶ月以内に資金ショートする可能性が高いです。";
-    } else if (currentBalance < 300_000 || Number(assumedNet) < 0) {
+        "このままの想定（入力した月別支出）だと、12ヶ月以内に資金ショートする可能性が高いです。";
+    } else if (currentBalance < 300_000 || avgNet < 0) {
       level = "warn";
       message =
         "残高が薄いか、想定収支がマイナス寄りです。支出の固定費・季節要因を点検してください。";
     }
 
     return { level, message };
-  }, [simulation, assumedNet]);
+  }, [simulation, months]);
 
   const badge = useMemo(() => {
     if (judge.level === "short") {
@@ -161,6 +204,10 @@ export default function SimulationClient({
   const buttonBase =
     "inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 px-3 text-sm text-white hover:bg-neutral-900 disabled:opacity-50 disabled:hover:bg-neutral-950";
 
+  // ✅ テーブル用の小さめ input（見た目維持）
+  const tableInput =
+    "h-8 w-28 rounded-md border border-neutral-800 bg-neutral-900 px-2 text-right text-sm text-white placeholder:text-neutral-600 outline-none focus:border-neutral-500 focus:ring-2 focus:ring-white/10";
+
   async function onSaveScenario() {
     const name = scenarioName.trim();
     if (!name) return;
@@ -184,6 +231,9 @@ export default function SimulationClient({
   function applyScenario(s: SimulationScenarioRow) {
     setAssumedIncome(String(Number(s.assumed_income ?? 0)));
     setAssumedExpense(String(Number(s.assumed_expense ?? 0)));
+
+    // ✅ シナリオ反映時は月別上書きをクリア（意図しない混在を防ぐ）
+    setExpenseOverrides({});
   }
 
   async function onDeleteScenario(id: number) {
@@ -196,6 +246,23 @@ export default function SimulationClient({
       }
     });
   }
+
+  const onChangeExpenseOverride = (month: string, v: string) => {
+    const cleaned = clampNumberString(v);
+
+    setExpenseOverrides((prev) => {
+      // 空に戻したら override 解除（= assumedExpenseに戻る）
+      if (!cleaned) {
+        const { [month]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [month]: cleaned };
+    });
+  };
+
+  const clearOverrides = () => {
+    setExpenseOverrides({});
+  };
 
   return (
     <div className={pageBase}>
@@ -321,7 +388,7 @@ export default function SimulationClient({
                   />
                 </div>
                 <div>
-                  <div className={label}>想定 支出（月 / 月）</div>
+                  <div className={label}>想定 支出（基準：月 / 月）</div>
                   <input
                     className={inputBase}
                     inputMode="numeric"
@@ -331,12 +398,15 @@ export default function SimulationClient({
                     }
                     placeholder="例）900000"
                   />
+                  <div className="mt-1 text-xs text-neutral-500">
+                    ※下の表で「月別の支出」を上書きできます（空欄に戻すと基準に戻る）
+                  </div>
                 </div>
 
                 <div className="pt-1 text-sm text-neutral-300">
-                  想定差額：{" "}
+                  想定差額（基準）：{" "}
                   <span className="font-semibold text-white">
-                    {formatJPY(assumedNet)}
+                    {formatJPY(assumedNetAvg)}
                   </span>
                 </div>
 
@@ -360,7 +430,19 @@ export default function SimulationClient({
                     </button>
                   </div>
                   <div className="text-xs text-neutral-500">
-                    ※保存すると、クリックで即時反映できます
+                    ※保存すると、クリックで即時反映できます（基準の収入/支出のみ）
+                  </div>
+
+                  {/* 月別上書きクリア */}
+                  <div className="pt-2">
+                    <button
+                      className={buttonBase}
+                      onClick={clearOverrides}
+                      disabled={Object.keys(expenseOverrides).length === 0}
+                      title="月別の支出上書きをすべて解除"
+                    >
+                      月別支出の上書きを解除
+                    </button>
                   </div>
                 </div>
               </div>
@@ -382,11 +464,11 @@ export default function SimulationClient({
                 <ul className="list-disc pl-4 space-y-1">
                   <li>
                     <span className="text-red-400 font-semibold">CRITICAL</span>：
-                    12ヶ月後の推定残高がマイナス
+                    12ヶ月のどこかで推定残高がマイナス
                   </li>
                   <li>
                     <span className="text-yellow-400 font-semibold">CAUTION</span>：
-                    残高30万円未満 または 平均収支がマイナス
+                    残高30万円未満 または 12ヶ月平均の想定収支がマイナス
                   </li>
                   <li>
                     <span className="text-emerald-400 font-semibold">SAFE</span>：
@@ -407,7 +489,9 @@ export default function SimulationClient({
                 <thead className="bg-neutral-950">
                   <tr className="text-left text-xs text-neutral-400">
                     <th className="px-3 py-2">month</th>
-                    <th className="px-3 py-2 text-right">assumed net</th>
+                    <th className="px-3 py-2 text-right">income</th>
+                    <th className="px-3 py-2 text-right">expense（月別）</th>
+                    <th className="px-3 py-2 text-right">net</th>
                     <th className="px-3 py-2 text-right">projected balance</th>
                   </tr>
                 </thead>
@@ -415,9 +499,30 @@ export default function SimulationClient({
                   {months.map((m) => (
                     <tr key={m.month} className="text-neutral-200">
                       <td className="px-3 py-2">{m.month}</td>
+
+                      <td className="px-3 py-2 text-right">
+                        {new Intl.NumberFormat("ja-JP").format(m.assumedIncome)}
+                      </td>
+
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <input
+                            className={tableInput}
+                            inputMode="numeric"
+                            value={expenseOverrides[m.month] ?? ""}
+                            onChange={(e) =>
+                              onChangeExpenseOverride(m.month, e.target.value)
+                            }
+                            placeholder={String(m.assumedExpense)}
+                            title="空欄に戻すと基準支出に戻ります"
+                          />
+                        </div>
+                      </td>
+
                       <td className="px-3 py-2 text-right">
                         {new Intl.NumberFormat("ja-JP").format(m.assumedNet)}
                       </td>
+
                       <td className="px-3 py-2 text-right">
                         {new Intl.NumberFormat("ja-JP").format(
                           m.projectedBalance
@@ -425,11 +530,12 @@ export default function SimulationClient({
                       </td>
                     </tr>
                   ))}
+
                   {months.length === 0 && (
                     <tr>
                       <td
                         className="px-3 py-6 text-center text-neutral-500"
-                        colSpan={3}
+                        colSpan={5}
                       >
                         データがありません
                       </td>
@@ -437,6 +543,10 @@ export default function SimulationClient({
                   )}
                 </tbody>
               </table>
+            </div>
+
+            <div className="mt-2 text-xs text-neutral-500">
+              ※ expense（月別）は「その月だけ」上書きします。空欄に戻すと基準支出（想定 支出）に戻ります。
             </div>
           </div>
         </div>
