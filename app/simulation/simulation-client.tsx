@@ -632,14 +632,7 @@ export default function SimulationClient({
                 </tbody>
               </table>
             </div>
-
-            {mode === "monthly" && (
-              <div className="mt-2 text-xs text-neutral-500">
-                ※月別入力の<strong className="text-neutral-300">空欄</strong>は「0」ではなく
-                「基準に戻す」です（事故防止のため）
-              </div>
-            )}
-          </div>
+           </div>
         </div>
 
         <div className="h-10" />
