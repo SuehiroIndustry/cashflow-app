@@ -113,7 +113,7 @@ export default function LoginPage() {
         console.error(error)
         setMessage(`登録失敗: ${error.message}`)
       } else {
-        setMessage('登録OK。Confirm email がONならメール確認が必要。OFFならそのままログインして。')
+        setMessage('登録を認証します。確認メールが送付されていますのでご確認ください')
       }
     } finally {
       setLoading(false)
