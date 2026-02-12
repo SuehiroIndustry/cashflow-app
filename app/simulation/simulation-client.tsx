@@ -531,7 +531,12 @@ export default function SimulationClient({
 
         {/* Table */}
         <div className={`${card} mt-4`}>
-          <div className={cardHead}>月別 着地（予測）</div>
+          <div className="flex items-baseline justify-between">
+  <h2 className="text-lg font-semibold">月別 着地（予測）</h2>
+  <span className="text-xs text-gray-400">
+    ※空欄＝基準に戻す（0ではありません）
+  </span>
+</div>
           <div className="px-5 pb-5 pt-3">
             <div className="overflow-hidden rounded-lg border border-neutral-800">
               <table className="w-full text-sm">
