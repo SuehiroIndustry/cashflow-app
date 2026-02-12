@@ -46,6 +46,7 @@ function buildFallbackMonths(count = 12) {
 }
 
 type JudgeLevel = "safe" | "warn" | "danger" | "short";
+type InputMode = "base" | "monthly";
 
 export default function SimulationClient({
   accounts,
@@ -58,6 +59,9 @@ export default function SimulationClient({
 
   // ✅ 全口座固定
   const selectedName = "全口座";
+
+  // ✅ 入力モード：基準 or 月別上書き（A方式：どちらか一方だけ有効）
+  const [inputMode, setInputMode] = useState<InputMode>("base");
 
   const [assumedIncome, setAssumedIncome] = useState<string>(() =>
     simulation ? String(Math.round((simulation as any).avgIncome ?? 0)) : ""
@@ -100,25 +104,29 @@ export default function SimulationClient({
     return src.map((m) => m.month);
   }, [simulation]);
 
-  // ✅ 月別に「収入」を決める（overrideがあればそれ、なければ assumedIncome）
+  // ✅ 月別に「収入」を決める（モードで分岐）
   const getIncomeForMonth = (month: string) => {
+    // baseモード：月別上書きは無視
+    if (inputMode === "base") return assumedIncomeNum;
+
+    // monthlyモード：overrideがあればそれ、なければ基準
     const raw = incomeOverrides[month];
-    const n = Number(raw || 0);
-    // rawが空なら assumedIncome を使う（0入力と区別するため）
     if (!raw) return assumedIncomeNum;
+    const n = Number(raw || 0);
     return Number.isFinite(n) ? n : assumedIncomeNum;
   };
 
-  // ✅ 月別に「支出」を決める（overrideがあればそれ、なければ assumedExpense）
+  // ✅ 月別に「支出」を決める（モードで分岐）
   const getExpenseForMonth = (month: string) => {
+    if (inputMode === "base") return assumedExpenseNum;
+
     const raw = expenseOverrides[month];
-    const n = Number(raw || 0);
-    // rawが空なら assumedExpense を使う（0入力と区別するため）
     if (!raw) return assumedExpenseNum;
+    const n = Number(raw || 0);
     return Number.isFinite(n) ? n : assumedExpenseNum;
   };
 
-  // ✅ 月別の予測（収入/支出overrideを反映）
+  // ✅ 月別の予測（モードを反映）
   const months = useMemo(() => {
     if (!simulation) return [];
 
@@ -144,9 +152,16 @@ export default function SimulationClient({
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [simulation, assumedIncomeNum, assumedExpenseNum, incomeOverrides, expenseOverrides]);
+  }, [
+    simulation,
+    inputMode,
+    assumedIncomeNum,
+    assumedExpenseNum,
+    incomeOverrides,
+    expenseOverrides,
+  ]);
 
-  // ✅ 判定も「月別override反映」で見る
+  // ✅ 判定も「months（=モード反映済み）」から作る
   const judge = useMemo(() => {
     const currentBalance = Number((simulation as any)?.currentBalance ?? 0);
 
@@ -166,7 +181,7 @@ export default function SimulationClient({
     if (months.length > 0 && minBalance < 0) {
       level = "short";
       message =
-        "このままの想定（入力した月別の収入/支出）だと、12ヶ月以内に資金ショートする可能性が高いです。";
+        "このままの想定（入力した収入/支出）だと、12ヶ月以内に資金ショートする可能性が高いです。";
     } else if (currentBalance < 300_000 || avgNet < 0) {
       level = "warn";
       message =
@@ -210,11 +225,21 @@ export default function SimulationClient({
   const inputBase =
     "h-10 w-full rounded-md border border-neutral-800 bg-neutral-900 px-3 text-sm text-white placeholder:text-neutral-500 outline-none focus:border-neutral-500 focus:ring-2 focus:ring-white/10";
 
+  const inputDisabled =
+    "opacity-50 cursor-not-allowed";
+
   const buttonBase =
     "inline-flex h-9 items-center justify-center rounded-md border border-neutral-800 bg-neutral-950 px-3 text-sm text-white hover:bg-neutral-900 disabled:opacity-50 disabled:hover:bg-neutral-950";
 
   const tableInput =
     "h-8 w-28 rounded-md border border-neutral-800 bg-neutral-900 px-2 text-right text-sm text-white placeholder:text-neutral-600 outline-none focus:border-neutral-500 focus:ring-2 focus:ring-white/10";
+
+  const tabBtn =
+    "inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm";
+  const tabOn =
+    "border-neutral-600 bg-neutral-900 text-white";
+  const tabOff =
+    "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900 hover:text-white";
 
   async function onSaveScenario() {
     const name = scenarioName.trim();
@@ -240,9 +265,10 @@ export default function SimulationClient({
     setAssumedIncome(String(Number(s.assumed_income ?? 0)));
     setAssumedExpense(String(Number(s.assumed_expense ?? 0)));
 
-    // ✅ シナリオ反映時は月別上書きをクリア（混在防止）
+    // ✅ 混在事故を防ぐ：シナリオ適用時は月別上書きをクリア
     setIncomeOverrides({});
     setExpenseOverrides({});
+    setInputMode("base");
   }
 
   async function onDeleteScenario(id: number) {
@@ -258,7 +284,6 @@ export default function SimulationClient({
 
   const onChangeIncomeOverride = (month: string, v: string) => {
     const cleaned = clampNumberString(v);
-
     setIncomeOverrides((prev) => {
       if (!cleaned) {
         const { [month]: _, ...rest } = prev;
@@ -270,7 +295,6 @@ export default function SimulationClient({
 
   const onChangeExpenseOverride = (month: string, v: string) => {
     const cleaned = clampNumberString(v);
-
     setExpenseOverrides((prev) => {
       if (!cleaned) {
         const { [month]: _, ...rest } = prev;
@@ -283,6 +307,18 @@ export default function SimulationClient({
   const clearOverrides = () => {
     setIncomeOverrides({});
     setExpenseOverrides({});
+  };
+
+  const hasAnyOverrides =
+    Object.keys(incomeOverrides).length > 0 || Object.keys(expenseOverrides).length > 0;
+
+  const switchToBase = () => {
+    setInputMode("base");
+    // ✅ 上書き値は保持してOK（ただし計算には使わない）。混乱が嫌なら解除ボタンで消せる
+  };
+
+  const switchToMonthly = () => {
+    setInputMode("monthly");
   };
 
   return (
@@ -391,36 +427,65 @@ export default function SimulationClient({
           <div className={card}>
             <div className={cardHead}>予測（12ヶ月）</div>
             <div className={cardBody}>
+              {/* ✅ 入力モード切替（A方式） */}
+              <div className="mb-3 flex items-center gap-2">
+                <button
+                  className={`${tabBtn} ${inputMode === "base" ? tabOn : tabOff}`}
+                  onClick={switchToBase}
+                  type="button"
+                  title="基準（月次一定）で計算"
+                >
+                  基準入力
+                </button>
+                <button
+                  className={`${tabBtn} ${inputMode === "monthly" ? tabOn : tabOff}`}
+                  onClick={switchToMonthly}
+                  type="button"
+                  title="月別上書きで計算"
+                >
+                  月別上書き
+                </button>
+              </div>
+
+              {inputMode === "base" && hasAnyOverrides && (
+                <div className="mb-3 rounded-md border border-yellow-900/40 bg-yellow-950/30 px-3 py-2 text-xs text-yellow-200/90">
+                  月別の上書き値が入っていますが、現在は <b>基準入力モード</b> のため計算には使っていません。
+                  必要なら「月別上書き」に切り替えるか、下のボタンで解除してください。
+                </div>
+              )}
+
               <div className="space-y-3">
                 <div>
                   <div className={label}>想定 収入（基準：月 / 月）</div>
                   <input
-                    className={inputBase}
+                    className={`${inputBase} ${inputMode === "monthly" ? inputDisabled : ""}`}
                     inputMode="numeric"
                     value={assumedIncome}
                     onChange={(e) =>
                       setAssumedIncome(clampNumberString(e.target.value))
                     }
                     placeholder="例）1200000"
+                    disabled={inputMode === "monthly"}
                   />
                   <div className="mt-1 text-xs text-neutral-500">
-                    ※下の表で「月別の収入」を上書きできます（空欄に戻すと基準に戻る）
+                    ※「基準入力」モードで有効（「月別上書き」ではロック）
                   </div>
                 </div>
 
                 <div>
                   <div className={label}>想定 支出（基準：月 / 月）</div>
                   <input
-                    className={inputBase}
+                    className={`${inputBase} ${inputMode === "monthly" ? inputDisabled : ""}`}
                     inputMode="numeric"
                     value={assumedExpense}
                     onChange={(e) =>
                       setAssumedExpense(clampNumberString(e.target.value))
                     }
                     placeholder="例）900000"
+                    disabled={inputMode === "monthly"}
                   />
                   <div className="mt-1 text-xs text-neutral-500">
-                    ※下の表で「月別の支出」を上書きできます（空欄に戻すと基準に戻る）
+                    ※「基準入力」モードで有効（「月別上書き」ではロック）
                   </div>
                 </div>
 
@@ -451,17 +516,14 @@ export default function SimulationClient({
                     </button>
                   </div>
                   <div className="text-xs text-neutral-500">
-                    ※保存すると、クリックで即時反映できます（基準の収入/支出のみ）
+                    ※保存は「基準の収入/支出」のみ（※月別上書きは保存しない）
                   </div>
 
                   <div className="pt-2">
                     <button
                       className={buttonBase}
                       onClick={clearOverrides}
-                      disabled={
-                        Object.keys(incomeOverrides).length === 0 &&
-                        Object.keys(expenseOverrides).length === 0
-                      }
+                      disabled={!hasAnyOverrides}
                       title="月別の収入/支出上書きをすべて解除"
                     >
                       月別の上書きを解除
@@ -524,27 +586,37 @@ export default function SimulationClient({
 
                       <td className="px-3 py-2 text-right">
                         <input
-                          className={tableInput}
+                          className={`${tableInput} ${inputMode === "base" ? inputDisabled : ""}`}
                           inputMode="numeric"
                           value={incomeOverrides[m.month] ?? ""}
                           onChange={(e) =>
                             onChangeIncomeOverride(m.month, e.target.value)
                           }
                           placeholder={String(m.assumedIncome)}
-                          title="空欄に戻すと基準収入に戻ります"
+                          title={
+                            inputMode === "base"
+                              ? "基準入力モードでは月別上書きは無効です"
+                              : "空欄に戻すと基準収入に戻ります"
+                          }
+                          disabled={inputMode === "base"}
                         />
                       </td>
 
                       <td className="px-3 py-2 text-right">
                         <input
-                          className={tableInput}
+                          className={`${tableInput} ${inputMode === "base" ? inputDisabled : ""}`}
                           inputMode="numeric"
                           value={expenseOverrides[m.month] ?? ""}
                           onChange={(e) =>
                             onChangeExpenseOverride(m.month, e.target.value)
                           }
                           placeholder={String(m.assumedExpense)}
-                          title="空欄に戻すと基準支出に戻ります"
+                          title={
+                            inputMode === "base"
+                              ? "基準入力モードでは月別上書きは無効です"
+                              : "空欄に戻すと基準支出に戻ります"
+                          }
+                          disabled={inputMode === "base"}
                         />
                       </td>
 
@@ -575,7 +647,7 @@ export default function SimulationClient({
             </div>
 
             <div className="mt-2 text-xs text-neutral-500">
-              ※ income/expense（月別）は「その月だけ」上書きします。空欄に戻すと基準（想定 収入/支出）に戻ります。
+              ※「基準入力」モードでは月別入力は無効です。「月別上書き」モードに切り替えると、その月だけ上書きできます（空欄に戻すと基準に戻る）。
             </div>
           </div>
         </div>
