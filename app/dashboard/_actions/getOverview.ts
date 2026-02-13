@@ -29,10 +29,6 @@ function toNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/**
- * 返す payload は OverviewCard が参照する項目＋固定費（月額合計）を含める。
- * ※ OverviewPayload 側に fixedMonthlyCost を追加しておくこと（後述）
- */
 export async function getOverview(input: Input): Promise<OverviewPayload> {
   const supabase = await createClient();
 
@@ -47,25 +43,54 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   const toExclusive = nextMonth.toISOString().slice(0, 10);
 
   // -----------------------------
-  // 0) 固定費（月額合計）を取得
+  // 0) 対象 org_id を確定
   // -----------------------------
-  // fixed_cost_totals view がある前提（なければ fixed_cost_items をsumしてもOK）
+  let orgId: number | null = null;
+
+  if (cashAccountId !== 0) {
+    // 口座から org_id を引く（RLS で通る想定）
+    const { data, error } = await supabase
+      .from("cash_accounts")
+      .select("org_id")
+      .eq("id", cashAccountId)
+      .maybeSingle();
+
+    if (error) throw error;
+    orgId = (data as any)?.org_id ?? null;
+  } else {
+    // 全口座：自分の所属 org を 1つ取る（基本1組織運用前提）
+    const { data, error } = await supabase
+      .from("org_members")
+      .select("org_id")
+      .order("org_id", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    orgId = (data as any)?.org_id ?? null;
+  }
+
+  // -----------------------------
+  // 1) 固定費（月額合計）を org 単位で取得
+  // -----------------------------
   let fixedMonthlyCost = 0;
 
-  {
+  if (orgId != null) {
     const { data, error } = await supabase
       .from("fixed_cost_totals")
       .select("total_monthly_fixed_cost")
+      .eq("org_id", orgId)
       .maybeSingle();
 
-    // view がまだ無い / 権限不足などでも overview 自体は落とさない
+    // view がまだ無い / 権限不足でも overview 自体は落とさない
     if (!error) {
       fixedMonthlyCost = toNumber((data as any)?.total_monthly_fixed_cost);
     } else {
-      // フォールバック：view が無い場合は items から合算（view作ってない場合に備える）
+      // フォールバック：items から合算（org_id で絞る）
       const { data: items, error: itemsErr } = await supabase
         .from("fixed_cost_items")
-        .select("monthly_amount, enabled");
+        .select("monthly_amount, enabled, org_id")
+        .eq("org_id", orgId);
 
       if (!itemsErr) {
         fixedMonthlyCost = (items ?? []).reduce((sum: number, r: any) => {
@@ -74,14 +99,13 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
           return sum + (enabled ? amt : 0);
         }, 0);
       } else {
-        // どっちもダメなら 0 扱い（落とさない）
         fixedMonthlyCost = 0;
       }
     }
   }
 
   // -----------------------------
-  // 1) 口座名・残高
+  // 2) 口座名・残高
   // -----------------------------
   let accountName = "全口座";
   let currentBalance = 0;
@@ -104,11 +128,11 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     if (error) throw error;
 
     accountName = data?.name ?? `口座ID:${cashAccountId}`;
-    currentBalance = toNumber(data?.current_balance);
+    currentBalance = toNumber((data as any)?.current_balance);
   }
 
   // -----------------------------
-  // 2) 今月の in/out（type/section どっちで入ってても拾う）
+  // 3) 今月の in/out
   // -----------------------------
   let q = supabase
     .from("cash_flows")
@@ -142,7 +166,6 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     thisMonthExpense: Math.round(thisMonthExpense),
     net: Math.round(net),
 
-    // ✅ 追加：警告判定に使う固定費（月額）
     fixedMonthlyCost: Math.round(fixedMonthlyCost),
   } as OverviewPayload;
 }
