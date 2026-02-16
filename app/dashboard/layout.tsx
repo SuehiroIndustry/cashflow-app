@@ -1,11 +1,40 @@
 // app/dashboard/layout.tsx
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default function DashboardLayout({
+export const dynamic = "force-dynamic";
+
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // ✅ ここが無いと「招待リンク踏んだだけ」で中身が見える
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr || !user) {
+    redirect("/login");
+  }
+
+  const { data: profile, error: profErr } = await supabase
+    .from("profiles")
+    .select("must_set_password")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  // 読めない/無い = 安全側に倒す（set-passwordへ）
+  const mustSet = profErr ? true : (profile?.must_set_password ?? true);
+  if (mustSet) {
+    redirect("/set-password");
+  }
+
+  // --- ここから下は今のレイアウト（そのまま） ---
   return (
     <div className="min-h-screen bg-black text-white">
       <header className="border-b border-white/10 bg-black">
