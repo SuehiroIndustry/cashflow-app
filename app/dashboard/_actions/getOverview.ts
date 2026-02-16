@@ -48,7 +48,6 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
   let orgId: number | null = null;
 
   if (cashAccountId !== 0) {
-    // 口座から org_id を引く（RLS で通る想定）
     const { data, error } = await supabase
       .from("cash_accounts")
       .select("org_id")
@@ -58,7 +57,6 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     if (error) throw error;
     orgId = (data as any)?.org_id ?? null;
   } else {
-    // 全口座：自分の所属 org を 1つ取る（基本1組織運用前提）
     const { data, error } = await supabase
       .from("org_members")
       .select("org_id")
@@ -82,11 +80,9 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
       .eq("org_id", orgId)
       .maybeSingle();
 
-    // view がまだ無い / 権限不足でも overview 自体は落とさない
     if (!error) {
       fixedMonthlyCost = toNumber((data as any)?.total_monthly_fixed_cost);
     } else {
-      // フォールバック：items から合算（org_id で絞る）
       const { data: items, error: itemsErr } = await supabase
         .from("fixed_cost_items")
         .select("monthly_amount, enabled, org_id")
@@ -153,8 +149,11 @@ export async function getOverview(input: Input): Promise<OverviewPayload> {
     const s = (r as any).section;
     const amount = toNumber((r as any).amount);
 
+    // 収入はそのまま加算（通常プラスで保存される想定）
     if (isIncome(s) || isIncome(t)) thisMonthIncome += amount;
-    if (isExpense(s) || isExpense(t)) thisMonthExpense += amount;
+
+    // 支出は符号に依存しないよう abs で加算
+    if (isExpense(s) || isExpense(t)) thisMonthExpense += Math.abs(amount);
   }
 
   const net = thisMonthIncome - thisMonthExpense;
