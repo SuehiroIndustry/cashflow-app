@@ -1,95 +1,97 @@
 // app/api/monthly-summary/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export const dynamic = "force-dynamic";
-
-type MonthlyUserRow = {
-  user_id: string;
-  month: string; // YYYY-MM-01
-  income: number | null;
-  expense: number | null;
-  balance: number | null;
-};
-
-type MonthlyAccountRow = {
-  user_id: string;
-  account_id: string;
-  month: string; // YYYY-MM-01
-  income: number | null;
-  expense: number | null;
-  balance: number | null;
-};
-
-function normalizeMonthParam(monthParam: string | null) {
-  // "YYYY-MM" -> "YYYY-MM-01"
-  const m = (monthParam ?? "").trim();
-  if (!m) return null;
-  if (/^\d{4}-\d{2}$/.test(m)) return `${m}-01`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(m)) return m; // 直接来てもOK
-  return null;
+function toNumber(v: unknown, fallback = 0): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
 }
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const account = url.searchParams.get("account"); // "all" | uuid
-  const monthParam = url.searchParams.get("month"); // "YYYY-MM" 推奨
-  const month = normalizeMonthParam(monthParam);
+export async function GET(req: Request) {
+  const supabase = await createSupabaseServerClient();
 
-  if (!month) {
-    return NextResponse.json({ error: "month is required (YYYY-MM)" }, { status: 400 });
-  }
-
-  const supabase = await createClient();
   const {
     data: { user },
+    error: userErr,
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (userErr || !user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const account = searchParams.get("account"); // "all" or number
+  const month = searchParams.get("month"); // "YYYY-MM-01"
+
+  if (!month) {
+    return NextResponse.json({ error: "month is required" }, { status: 400 });
   }
 
   const isAll = !account || account === "all";
+  const accountId = isAll ? null : Number(account);
 
-  if (isAll) {
-    const { data, error } = await supabase
-      .from("monthly_user_balances")
-      .select("user_id,month,income,expense,balance")
-      .eq("user_id", user.id)
-      .eq("month", month)
-      .limit(1);
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-    const row = (data?.[0] ?? null) as MonthlyUserRow | null;
-
-    return NextResponse.json({
-      account: "all",
-      month,
-      income: Number(row?.income ?? 0),
-      expense: Number(row?.expense ?? 0),
-      balance: Number(row?.balance ?? 0),
-    });
+  if (!isAll && (!Number.isFinite(accountId!) || accountId! <= 0)) {
+    return NextResponse.json({ error: "account is invalid" }, { status: 400 });
   }
 
-  // account 指定（月次口座別VIEW）
+  // ✅ 全口座の場合、まず所属orgの口座ID一覧を取る（RLS前提）
+  let targetAccountIds: number[] = [];
+
+  if (isAll) {
+    const { data: member, error: memErr } = await supabase
+      .from("org_members")
+      .select("org_id")
+      .eq("user_id", user.id)
+      .order("org_id", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (memErr) return NextResponse.json({ error: memErr.message }, { status: 500 });
+
+    const orgId = (member as any)?.org_id ?? null;
+    if (orgId == null) {
+      return NextResponse.json({ income: 0, expense: 0, balance: 0, month }, { status: 200 });
+    }
+
+    const { data: accs, error: accErr } = await supabase
+      .from("cash_accounts")
+      .select("id")
+      .eq("org_id", orgId)
+      .order("id", { ascending: true });
+
+    if (accErr) return NextResponse.json({ error: accErr.message }, { status: 500 });
+
+    targetAccountIds = (accs ?? []).map((r: any) => Number(r.id)).filter((n) => Number.isFinite(n));
+  } else {
+    targetAccountIds = [accountId!];
+  }
+
+  if (!targetAccountIds.length) {
+    return NextResponse.json({ income: 0, expense: 0, balance: 0, month }, { status: 200 });
+  }
+
+  // ✅ user_idで絞らない（月次は口座単位で共有）
   const { data, error } = await supabase
-    .from("monthly_account_balances")
-    .select("user_id,account_id,month,income,expense,balance")
-    .eq("user_id", user.id)
-    .eq("account_id", account)
-    .eq("month", month)
-    .limit(1);
+    .from("monthly_cash_account_balances")
+    .select("income, expense, balance")
+    .in("cash_account_id", targetAccountIds)
+    .eq("month", month);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const row = (data?.[0] ?? null) as MonthlyAccountRow | null;
+  const income = (data ?? []).reduce((s: number, r: any) => s + toNumber(r.income, 0), 0);
+  const expense = (data ?? []).reduce((s: number, r: any) => s + toNumber(r.expense, 0), 0);
+  const balance = (data ?? []).reduce((s: number, r: any) => s + toNumber(r.balance, 0), 0);
 
   return NextResponse.json({
-    account,
+    account: isAll ? "all" : String(accountId),
     month,
-    income: Number(row?.income ?? 0),
-    expense: Number(row?.expense ?? 0),
-    balance: Number(row?.balance ?? 0),
+    income,
+    expense,
+    balance,
   });
 }
