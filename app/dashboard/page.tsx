@@ -79,14 +79,29 @@ export default async function DashboardPage({ searchParams }: Props) {
   const thisMonthExpense = thisMonthRow?.expense ?? 0;
   const net = thisMonthIncome - thisMonthExpense;
 
-  // currentBalance は overview 側にあるなら優先、なければ当月 balance、無ければ最新行の balance
+  // ✅ 現在残高は「口座の current_balance / overview.currentBalance」を最優先にする
+  //    monthly.balance は当月net等の可能性があるので最後の保険扱い
   const latestRow = monthly.length ? monthly[monthly.length - 1] : null;
+
+  const accountCurrentBalance =
+    typeof account?.current_balance === "number" && Number.isFinite(account.current_balance)
+      ? account.current_balance
+      : null;
+
+  const overviewCurrentBalance =
+    typeof (overview as any)?.currentBalance === "number" &&
+    Number.isFinite((overview as any).currentBalance)
+      ? (overview as any).currentBalance
+      : typeof (overview as any)?.balance === "number" && Number.isFinite((overview as any).balance)
+      ? (overview as any).balance
+      : null;
+
   const currentBalance =
-  thisMonthRow?.balance ??
-  latestRow?.balance ??
-  (overview as any)?.currentBalance ??
-  (overview as any)?.balance ??
-  0;
+    accountCurrentBalance ??
+    overviewCurrentBalance ??
+    (typeof latestRow?.balance === "number" && Number.isFinite(latestRow.balance)
+      ? latestRow.balance
+      : 0);
 
   const overviewPayload: OverviewPayload = {
     accountName,
@@ -145,22 +160,22 @@ export default async function DashboardPage({ searchParams }: Props) {
 
                 {/* ✅ 説明（3つ） */}
                 <div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-500 leading-relaxed">
-                <div className="font-semibold text-white mb-1">判定ロジック</div>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li>
-                    <span className="text-red-400 font-semibold">CRITICAL</span>：
-                    12ヶ月後の推定残高がマイナス
-                  </li>
-                  <li>
-                    <span className="text-yellow-400 font-semibold">CAUTION</span>：
-                    残高30万円未満 または 平均収支がマイナス
-                  </li>
-                  <li>
-                    <span className="text-emerald-400 font-semibold">SAFE</span>：
-                    上記に該当しない場合
-                  </li>
-                </ul>
-              </div>
+                  <div className="font-semibold text-white mb-1">判定ロジック</div>
+                  <ul className="list-disc pl-4 space-y-1">
+                    <li>
+                      <span className="text-red-400 font-semibold">CRITICAL</span>：
+                      12ヶ月後の推定残高がマイナス
+                    </li>
+                    <li>
+                      <span className="text-yellow-400 font-semibold">CAUTION</span>：
+                      残高30万円未満 または 平均収支がマイナス
+                    </li>
+                    <li>
+                      <span className="text-emerald-400 font-semibold">SAFE</span>：
+                      上記に該当しない場合
+                    </li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
