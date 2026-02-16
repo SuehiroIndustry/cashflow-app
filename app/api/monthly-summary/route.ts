@@ -45,7 +45,6 @@ export async function GET(req: Request) {
     const { data: member, error: memErr } = await supabase
       .from("org_members")
       .select("org_id")
-      .eq("user_id", user.id)
       .order("org_id", { ascending: true })
       .limit(1)
       .maybeSingle();

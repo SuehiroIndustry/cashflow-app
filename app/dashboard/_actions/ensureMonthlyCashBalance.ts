@@ -25,9 +25,8 @@ export async function ensureMonthlyCashBalance(args: {
   const { data: existing, error: selErr } = await supabase
     .from("monthly_cash_account_balances")
     .select("cash_account_id, month")
-    .eq("user_id", user.id)
-    .eq("cash_account_id", cash_account_id)
-    .eq("month", month)
+.eq("cash_account_id", cash_account_id)
+.eq("month", month)
     .maybeSingle();
 
   if (selErr) throw selErr;

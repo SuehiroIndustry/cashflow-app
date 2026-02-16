@@ -79,7 +79,6 @@ export async function GET(req: Request) {
   const { data: memberRow, error: memberErr } = await supabase
     .from("org_members")
     .select("org_id")
-    .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
 
