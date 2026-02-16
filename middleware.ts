@@ -21,9 +21,8 @@ export async function middleware(req: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
 
   const pathname = req.nextUrl.pathname;
 
@@ -31,7 +30,7 @@ export async function middleware(req: NextRequest) {
   const isPublic =
     pathname === "/login" ||
     pathname === "/reset-password" ||
-    pathname === "/set-password" ||
+    pathname === "/set-password" || // ✅ 初回パスワード設定ページは公開扱い
     pathname.startsWith("/auth") ||
     pathname.startsWith("/api");
 
@@ -49,44 +48,51 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // ログイン済みで /login に来たらダッシュボードへ（next優先）
-  if (user && pathname === "/login") {
-    const next = req.nextUrl.searchParams.get("next");
-    const url = req.nextUrl.clone();
-    url.pathname = next && next.startsWith("/") ? next : "/dashboard";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
-  // ログイン済みの場合：初回パスワード設定の強制
-  if (user && !isPublic) {
-    const { data: profile, error: profErr } = await supabase
+  // ここから先は「ログイン済み」の場合のみ、追加の制御をかける
+  if (user) {
+    // ✅ must_set_password を見て、初回ユーザーは必ず /set-password を通す
+    // （profiles は「自分の行だけ select 可能」な RLS がある前提）
+    const { data: prof, error: profErr } = await supabase
       .from("profiles")
       .select("must_set_password")
       .eq("id", user.id)
       .maybeSingle();
 
-    // profilesが読めない/無いなら、ここでは無理に弾かず素通し（事故防止）
-    if (!profErr && profile?.must_set_password === true) {
-      // /set-password 以外に来たら強制リダイレクト
+    // profiles が読めない/無い場合は「強制しない」で安全側（ループ回避）
+    const mustSetPassword =
+      !profErr && prof?.must_set_password === true ? true : false;
+
+    // ① 初回パスワード未設定なのに、set-password 以外へ行こうとしたら強制転送
+    if (mustSetPassword && !isPublic && pathname !== "/set-password") {
       const url = req.nextUrl.clone();
       url.pathname = "/set-password";
+      url.searchParams.set("next", pathname + req.nextUrl.search);
+      return NextResponse.redirect(url);
+    }
+
+    // ② 既にパスワード設定済みなのに /set-password に来たら、next か /dashboard へ
+    if (!mustSetPassword && pathname === "/set-password") {
+      const next = req.nextUrl.searchParams.get("next");
+      const url = req.nextUrl.clone();
+      url.pathname = next && next.startsWith("/") ? next : "/dashboard";
       url.search = "";
       return NextResponse.redirect(url);
     }
-  }
 
-  // 逆に、must_set_password=false なのに /set-password に来たら /dashboard へ戻す
-  if (user && pathname === "/set-password") {
-    const { data: profile, error: profErr } = await supabase
-      .from("profiles")
-      .select("must_set_password")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (!profErr && profile?.must_set_password === false) {
+    // ③ ログイン済みで /login に来たら…
+    //    - 初回未設定なら /set-password
+    //    - そうでなければ next or /dashboard
+    if (pathname === "/login") {
+      const next = req.nextUrl.searchParams.get("next");
       const url = req.nextUrl.clone();
-      url.pathname = "/dashboard";
+
+      if (mustSetPassword) {
+        url.pathname = "/set-password";
+        url.searchParams.set("next", next && next.startsWith("/") ? next : "/dashboard");
+        return NextResponse.redirect(url);
+      }
+
+      url.pathname = next && next.startsWith("/") ? next : "/dashboard";
       url.search = "";
       return NextResponse.redirect(url);
     }
