@@ -5,10 +5,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-type Input = {
-  newPassword: string;
-};
-
 function assertEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -17,8 +13,9 @@ function assertEnv() {
   return { url, service };
 }
 
-export async function updatePassword(input: Input) {
-  const newPassword = (input?.newPassword ?? "").trim();
+export async function updatePassword(formData: FormData): Promise<void> {
+  const newPassword = String(formData.get("newPassword") ?? "").trim();
+
   if (newPassword.length < 8) {
     throw new Error("パスワードは8文字以上にしてください");
   }
@@ -40,11 +37,10 @@ export async function updatePassword(input: Input) {
   });
 
   if (pwErr) {
-    // 例：New password should be different... を含む
     throw new Error(`パスワード更新に失敗しました: ${pwErr.message}`);
   }
 
-  // 2) profiles の must_set_password を service role で false に落とす（RLS回避）
+  // 2) profiles.must_set_password を service role で false（RLS回避）
   const { url, service } = assertEnv();
   const admin = createClient(url, service, { auth: { persistSession: false } });
 
@@ -57,6 +53,5 @@ export async function updatePassword(input: Input) {
     throw new Error(`profiles 更新に失敗しました: ${profErr.message}`);
   }
 
-  // 3) ここまで来たら dashboard へ
   redirect("/dashboard");
 }
