@@ -15,34 +15,13 @@ export default function HomePage() {
 
   useEffect(() => {
     (async () => {
-      // 1) セッション確認（未ログインなら login）
+      // ✅ まずは「ログインしてるか」だけ判定する（DBは触らない）
       const {
         data: { user },
-        error: userErr,
       } = await supabase.auth.getUser();
 
-      if (userErr || !user) {
+      if (!user) {
         router.replace("/login");
-        return;
-      }
-
-      // 2) profiles.must_set_password を確認
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("must_set_password")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      // profiles が取れない時は安全側で login に戻す
-      if (profErr) {
-        console.error("[/] profiles fetch error:", profErr);
-        router.replace("/login");
-        return;
-      }
-
-      // 3) 初回PW未設定なら set-password、済なら dashboard
-      if (prof?.must_set_password === true) {
-        router.replace("/set-password");
         return;
       }
 

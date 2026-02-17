@@ -3,8 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(req: NextRequest) {
-  // ここを let にして、後で redirect response に差し替えても
-  // cookies.setAll が “最新の response” に書き込めるようにする
   let res = NextResponse.next();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -31,6 +29,7 @@ export async function middleware(req: NextRequest) {
 
   // ✅ 認証フロー・公開ページ（ここは絶対に弾かない）
   const isPublic =
+    pathname === "/" ||
     pathname === "/login" ||
     pathname === "/reset-password" ||
     pathname === "/set-password" ||
@@ -49,21 +48,11 @@ export async function middleware(req: NextRequest) {
     url.pathname = "/login";
     url.searchParams.set("next", pathname + req.nextUrl.search);
     res = NextResponse.redirect(url);
-  }
-
-  // ログイン済みで /login に来たら next 優先で遷移
-  if (user && pathname === "/login") {
-    const next = req.nextUrl.searchParams.get("next");
-    const url = req.nextUrl.clone();
-    url.pathname = next && next.startsWith("/") ? next : "/dashboard";
-    url.search = "";
-    res = NextResponse.redirect(url);
-  }
-
-  // 公開ページは素通し（明示）
-  if (isPublic) {
     return res;
   }
+
+  // 公開ページは素通し
+  if (isPublic) return res;
 
   return res;
 }
