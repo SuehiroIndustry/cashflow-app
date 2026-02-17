@@ -1,58 +1,60 @@
-// app/set-password/page.tsx
-import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { updatePassword } from "./_actions/updatePassword";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useActionState } from "react";
+import { updatePassword } from "./_actions/updatePassword"; // 置き場所に合わせて調整
 
-export default async function SetPasswordPage() {
-  const supabase = await createSupabaseServerClient();
+type State = { error: string | null };
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+const initialState: State = { error: null };
 
-  if (!user) redirect("/login");
+export default function SetPasswordPage() {
+  const [state, formAction, pending] = useActionState(updatePassword, initialState);
 
   return (
-    <div className="mx-auto w-full max-w-md px-4 py-10 text-white">
-      <h1 className="text-xl font-semibold mb-6">初回パスワード設定</h1>
-
-      <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-5">
-        <p className="text-sm text-neutral-300 mb-4">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow">
+        <h1 className="text-xl font-semibold">パスワード設定</h1>
+        <p className="mt-2 text-sm text-neutral-300">
           初回ログインのため、パスワードを設定してください。
         </p>
 
-        <form action={updatePassword} className="space-y-4">
+        {state.error && (
+          <div className="mt-4 rounded-lg border border-red-900 bg-red-950 px-4 py-3 text-sm text-red-200">
+            {state.error}
+          </div>
+        )}
+
+        <form action={formAction} className="mt-5 space-y-4">
           <div>
             <label className="block text-sm mb-1">新しいパスワード</label>
             <input
-              name="password"
+              name="newPassword"
               type="password"
+              className="w-full rounded-md bg-neutral-950 border border-neutral-700 px-3 py-2 text-neutral-100 placeholder:text-neutral-500"
+              placeholder="8文字以上"
               required
               minLength={8}
-              className="w-full rounded-md bg-black border border-neutral-700 px-3 py-2 text-white placeholder:text-neutral-500"
-              placeholder="8文字以上"
             />
           </div>
 
           <div>
-            <label className="block text-sm mb-1">新しいパスワード（確認）</label>
+            <label className="block text-sm mb-1">確認（もう一度）</label>
             <input
-              name="passwordConfirm"
+              name="confirmPassword"
               type="password"
+              className="w-full rounded-md bg-neutral-950 border border-neutral-700 px-3 py-2 text-neutral-100 placeholder:text-neutral-500"
+              placeholder="同じパスワードを入力"
               required
               minLength={8}
-              className="w-full rounded-md bg-black border border-neutral-700 px-3 py-2 text-white placeholder:text-neutral-500"
-              placeholder="もう一度入力"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full rounded-md bg-white text-black font-semibold py-2"
+            disabled={pending}
+            className="w-full rounded-md bg-neutral-100 text-neutral-900 font-semibold py-2 disabled:opacity-50"
           >
-            設定して続行
+            {pending ? "更新中..." : "パスワードを更新"}
           </button>
         </form>
       </div>
