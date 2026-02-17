@@ -8,6 +8,10 @@ function safeString(v: FormDataEntryValue | null) {
   return typeof v === "string" ? v : "";
 }
 
+function isSamePasswordError(msg: string) {
+  return msg.toLowerCase().includes("new password should be different");
+}
+
 export async function updatePassword(formData: FormData): Promise<void> {
   const supabase = await createSupabaseServerClient();
 
@@ -30,12 +34,16 @@ export async function updatePassword(formData: FormData): Promise<void> {
     throw new Error("パスワード確認が一致しません");
   }
 
+  // 1) パスワード更新
   const { error: updErr } = await supabase.auth.updateUser({ password });
   if (updErr) {
+    if (isSamePasswordError(updErr.message)) {
+      throw new Error("前と違うパスワードにしてください（同じパスワードは使えません）");
+    }
     throw new Error(`パスワード更新に失敗しました: ${updErr.message}`);
   }
 
-  // must_set_password を解除
+  // 2) must_set_password を解除（RLSを上で直していれば通る）
   const { error: profErr } = await supabase
     .from("profiles")
     .update({ must_set_password: false })
