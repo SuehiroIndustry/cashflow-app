@@ -2,61 +2,61 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-function safeString(v: FormDataEntryValue | null) {
-  return typeof v === "string" ? v : "";
+type Input = {
+  newPassword: string;
+};
+
+function assertEnv() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url) throw new Error("NEXT_PUBLIC_SUPABASE_URL が未設定です");
+  if (!service) throw new Error("SUPABASE_SERVICE_ROLE_KEY が未設定です");
+  return { url, service };
 }
 
-function isSamePasswordErrorMessage(msg: string) {
-  const m = (msg ?? "").toLowerCase();
-  return m.includes("new password should be different");
-}
+export async function updatePassword(input: Input) {
+  const newPassword = (input?.newPassword ?? "").trim();
+  if (newPassword.length < 8) {
+    throw new Error("パスワードは8文字以上にしてください");
+  }
 
-export async function updatePassword(formData: FormData): Promise<void> {
+  // 1) 本人セッション（cookie付き）で auth のパスワードを更新
   const supabase = await createSupabaseServerClient();
 
-  // 認証チェック
   const {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
 
   if (userErr || !user) {
-    redirect("/login");
+    throw new Error("ログイン状態を確認できません。ログインし直してください。");
   }
 
-  // 入力取得
-  const password = safeString(formData.get("password")).trim();
-  const passwordConfirm = safeString(formData.get("passwordConfirm")).trim();
+  const { error: pwErr } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
 
-  // バリデーション
-  if (password.length < 8) {
-    throw new Error("パスワードは8文字以上にしてください");
-  }
-  if (password !== passwordConfirm) {
-    throw new Error("パスワード確認が一致しません");
+  if (pwErr) {
+    // 例：New password should be different... を含む
+    throw new Error(`パスワード更新に失敗しました: ${pwErr.message}`);
   }
 
-  // 1) Supabase Auth のパスワード更新
-  const { error: updErr } = await supabase.auth.updateUser({ password });
+  // 2) profiles の must_set_password を service role で false に落とす（RLS回避）
+  const { url, service } = assertEnv();
+  const admin = createClient(url, service, { auth: { persistSession: false } });
 
-  if (updErr) {
-    if (isSamePasswordErrorMessage(updErr.message)) {
-      throw new Error(
-        "前と違うパスワードにしてください（同じパスワードは使えません）"
-      );
-    }
-    throw new Error(`パスワード更新に失敗しました: ${updErr.message}`);
+  const { error: profErr } = await admin
+    .from("profiles")
+    .update({ must_set_password: false })
+    .eq("id", user.id);
+
+  if (profErr) {
+    throw new Error(`profiles 更新に失敗しました: ${profErr.message}`);
   }
 
-  // 2) must_set_password を解除（RLS再帰を避けるためRPCで実行）
-  const { error: rpcErr } = await supabase.rpc("clear_must_set_password");
-
-  if (rpcErr) {
-    throw new Error(`profiles 更新に失敗しました: ${rpcErr.message}`);
-  }
-
-  // 3) 完了
+  // 3) ここまで来たら dashboard へ
   redirect("/dashboard");
 }
