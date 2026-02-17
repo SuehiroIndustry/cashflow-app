@@ -3,24 +3,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(req: NextRequest) {
+  // ここを let にして、後で redirect response に差し替えても
+  // cookies.setAll が “最新の response” に書き込めるようにする
+  let res = NextResponse.next();
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
-  const pathname = req.nextUrl.pathname;
-
-  // 公開（認証フロー含む）
-  const isPublic =
-    pathname === "/login" ||
-    pathname === "/reset-password" ||
-    pathname === "/set-password" ||
-    pathname.startsWith("/auth") ||
-    pathname.startsWith("/api");
-
-  // 保護（今は /dashboard 配下だけ守ればOK）
-  const isProtected = pathname.startsWith("/dashboard");
-
-  // まず next を作る（ここにcookieが積まれる）
-  const res = NextResponse.next();
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -35,23 +23,47 @@ export async function middleware(req: NextRequest) {
     },
   });
 
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  // 未ログインで保護領域に来たら /login
+  const pathname = req.nextUrl.pathname;
+
+  // ✅ 認証フロー・公開ページ（ここは絶対に弾かない）
+  const isPublic =
+    pathname === "/login" ||
+    pathname === "/reset-password" ||
+    pathname === "/set-password" ||
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/api");
+
+  // ✅ 保護したい領域（必要なら増やす）
+  const isProtected =
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/simulation") ||
+    pathname.startsWith("/inventory");
+
+  // 未ログインで保護領域に来たら /login へ
   if (!user && isProtected) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname + req.nextUrl.search);
-
-    const redirectRes = NextResponse.redirect(url);
-    // res に積んだcookieを引き継ぐ
-    res.cookies.getAll().forEach((c) => redirectRes.cookies.set(c));
-    return redirectRes;
+    res = NextResponse.redirect(url);
   }
 
-  // 公開ページは通す
-  if (isPublic) return res;
+  // ログイン済みで /login に来たら next 優先で遷移
+  if (user && pathname === "/login") {
+    const next = req.nextUrl.searchParams.get("next");
+    const url = req.nextUrl.clone();
+    url.pathname = next && next.startsWith("/") ? next : "/dashboard";
+    url.search = "";
+    res = NextResponse.redirect(url);
+  }
+
+  // 公開ページは素通し（明示）
+  if (isPublic) {
+    return res;
+  }
 
   return res;
 }
