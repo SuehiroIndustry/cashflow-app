@@ -54,11 +54,6 @@ export default function LoginPage() {
     []
   )
 
-  const callbackBase = useMemo(() => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-    return `${origin}/auth/callback`
-  }, [])
-
   const hardGo = (path: string) => {
     window.location.href = path
   }
@@ -101,11 +96,15 @@ export default function LoginPage() {
     setMessage(null)
 
     try {
+      // サインアップ後は通常ログインフローへ（ここは今のまま）
+      const origin = typeof window !== 'undefined' ? window.location.origin : ''
+      const emailRedirectTo = `${origin}/auth/callback?next=/dashboard`
+
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
-          emailRedirectTo: `${callbackBase}?next=/dashboard`,
+          emailRedirectTo,
         },
       })
 
@@ -126,17 +125,33 @@ export default function LoginPage() {
     setMessage(null)
 
     try {
-      if (!email) {
+      const trimmed = email.trim()
+      if (!trimmed) {
         setMessage('Email を入れて。')
         return
       }
 
-      // ✅ B案：recovery は「クライアントページ」に直接戻す
-      // /reset-password は detectSessionInUrl: true で #access_token を拾える
-      const origin = typeof window !== 'undefined' ? window.location.origin : ''
+      // ✅ Recovery は /reset-password に直接戻す（#access_token を拾える前提）
+      // ここで origin を「確実に」作る（万一 window.location.origin が空でも壊れない）
+      const origin = (() => {
+        try {
+          return new URL(window.location.href).origin
+        } catch {
+          return ''
+        }
+      })()
+
+      if (!origin) {
+        setMessage('origin の取得に失敗。URLが変。')
+        return
+      }
+
       const redirectTo = `${origin}/reset-password`
 
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      // デバッグ用（今だけ）
+      console.log('resetPasswordForEmail redirectTo:', redirectTo)
+
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
         redirectTo,
       })
 
@@ -156,7 +171,9 @@ export default function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-gradient-to-b from-white/10 to-black p-6 text-white shadow-xl">
         <div className="text-2xl font-semibold text-white">ログイン画面</div>
         <div className="mt-2 text-sm text-white/70">メールアドレスとパスワードでログインします。</div>
-        <div className="mt-2 text-sm text-white/70">初回はメールアドレスとパスワードを入力して「初回登録」をクリックください</div>
+        <div className="mt-2 text-sm text-white/70">
+          初回はメールアドレスとパスワードを入力して「初回登録」をクリックください
+        </div>
 
         <label className="mt-5 block text-sm text-white/80">メールアドレス</label>
         <input
