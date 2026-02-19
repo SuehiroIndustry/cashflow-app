@@ -131,8 +131,10 @@ export default function LoginPage() {
         return
       }
 
-      // ✅ 固定：verify → /auth/callback → /reset-password
-      const redirectTo = `${callbackBase}?next=/reset-password`
+      // ✅ B案：recovery は「クライアントページ」に直接戻す
+      // /reset-password は detectSessionInUrl: true で #access_token を拾える
+      const origin = typeof window !== 'undefined' ? window.location.origin : ''
+      const redirectTo = `${origin}/reset-password`
 
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo,

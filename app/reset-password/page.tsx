@@ -48,6 +48,7 @@ export default function ResetPasswordPage() {
   )
 
   const submit = async () => {
+    if (loading) return
     setLoading(true)
     setMessage(null)
 
@@ -62,7 +63,7 @@ export default function ResetPasswordPage() {
       return
     }
 
-    // ✅ ここが本命：recovery セッションで updateUser が通る
+    // ✅ recovery セッションで updateUser が通る
     const { data, error } = await supabase.auth.updateUser({ password })
 
     if (error) {
@@ -76,10 +77,37 @@ export default function ResetPasswordPage() {
     const { data: s } = await supabase.auth.getSession()
     console.log('updateUser ok', { data, session: s?.session })
 
-    setMessage('パスワード更新OK。ログイン画面に戻る。')
-    setLoading(false)
+    // ✅ must_set_password を落とす（Dashboardが /set-password 強制するのを止める）
+    try {
+      const { data: userData, error: userErr } = await supabase.auth.getUser()
+      if (userErr) {
+        console.error('getUser after update error:', userErr)
+      } else if (userData.user) {
+        const { error: profUpErr } = await supabase
+          .from('profiles')
+          .update({ must_set_password: false })
+          .eq('id', userData.user.id)
 
-    // ✅ reset-password は一度きりでOK。login に戻して新PWでログイン
+        if (profUpErr) {
+          console.error('profiles update error:', profUpErr)
+          // ここで止めない。パスワード変更は成功してるので、ログインに戻す
+        }
+      }
+    } catch (e) {
+      console.error('profiles update exception:', e)
+      // ここで止めない
+    }
+
+    setMessage('パスワード更新OK。ログイン画面に戻る。')
+
+    // ✅ reset-password は一度きりでOK。ログアウトして login に戻す（状態を綺麗に）
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      // 無視
+    }
+
+    setLoading(false)
     window.location.href = '/login'
   }
 
