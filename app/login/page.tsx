@@ -17,7 +17,30 @@ export default function LoginPage() {
   // ✅ /login?next=... を client でだけ読む（useSearchParams禁止）
   const [nextPath, setNextPath] = useState<string>('/dashboard')
 
+  const hardGo = (path: string) => {
+    window.location.href = path
+  }
+
   useEffect(() => {
+    // ✅ (最重要) パスワードリセットのリンクを踏むと
+    // /login#access_token=...&type=recovery みたいに来ることがある。
+    // その場合は reset-password が hash を拾う必要があるので、hash ごと転送する。
+    try {
+      const hash = window.location.hash || ''
+      const isRecovery =
+        hash.includes('type=recovery') ||
+        (hash.includes('access_token=') && hash.includes('refresh_token='))
+
+      if (isRecovery) {
+        // hash を保持して /reset-password へ（detectSessionInUrl が働く）
+        hardGo(`/reset-password${hash}`)
+        return
+      }
+    } catch {
+      // 何もしない
+    }
+
+    // ✅ next を読む（通常ログイン遷移用）
     try {
       const sp = new URLSearchParams(window.location.search)
       const next = sp.get('next')
@@ -53,10 +76,6 @@ export default function LoginPage() {
     () => 'mt-3 rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/80',
     []
   )
-
-  const hardGo = (path: string) => {
-    window.location.href = path
-  }
 
   const login = async () => {
     if (loading) return
@@ -96,7 +115,6 @@ export default function LoginPage() {
     setMessage(null)
 
     try {
-      // サインアップ後は通常ログインフローへ（ここは今のまま）
       const origin = typeof window !== 'undefined' ? window.location.origin : ''
       const emailRedirectTo = `${origin}/auth/callback?next=/dashboard`
 
@@ -125,33 +143,17 @@ export default function LoginPage() {
     setMessage(null)
 
     try {
-      const trimmed = email.trim()
-      if (!trimmed) {
+      if (!email) {
         setMessage('Email を入れて。')
         return
       }
 
-      // ✅ Recovery は /reset-password に直接戻す（#access_token を拾える前提）
-      // ここで origin を「確実に」作る（万一 window.location.origin が空でも壊れない）
-      const origin = (() => {
-        try {
-          return new URL(window.location.href).origin
-        } catch {
-          return ''
-        }
-      })()
-
-      if (!origin) {
-        setMessage('origin の取得に失敗。URLが変。')
-        return
-      }
-
+      // ✅ B案：recovery は「クライアントページ」に直接戻す
+      // /reset-password は detectSessionInUrl: true で #access_token を拾える
+      const origin = typeof window !== 'undefined' ? window.location.origin : ''
       const redirectTo = `${origin}/reset-password`
 
-      // デバッグ用（今だけ）
-      console.log('resetPasswordForEmail redirectTo:', redirectTo)
-
-      const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo,
       })
 
