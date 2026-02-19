@@ -17,30 +17,15 @@ export default function LoginPage() {
   // ✅ /login?next=... を client でだけ読む（useSearchParams禁止）
   const [nextPath, setNextPath] = useState<string>('/dashboard')
 
-  const hardGo = (path: string) => {
-    window.location.href = path
-  }
-
   useEffect(() => {
-    // ✅ (最重要) パスワードリセットのリンクを踏むと
-    // /login#access_token=...&type=recovery みたいに来ることがある。
-    // その場合は reset-password が hash を拾う必要があるので、hash ごと転送する。
-    try {
-      const hash = window.location.hash || ''
-      const isRecovery =
-        hash.includes('type=recovery') ||
-        (hash.includes('access_token=') && hash.includes('refresh_token='))
-
-      if (isRecovery) {
-        // hash を保持して /reset-password へ（detectSessionInUrl が働く）
-        hardGo(`/reset-password${hash}`)
-        return
-      }
-    } catch {
-      // 何もしない
+    // ✅ 保険：recoveryリンクが「/」や「/login」に落ちても、/reset-password に運ぶ
+    // 例: /login#access_token=...&type=recovery
+    const hash = window.location.hash || ''
+    if (hash.includes('type=recovery') && hash.includes('access_token=')) {
+      window.location.replace(`/reset-password${hash}`)
+      return
     }
 
-    // ✅ next を読む（通常ログイン遷移用）
     try {
       const sp = new URLSearchParams(window.location.search)
       const next = sp.get('next')
@@ -77,6 +62,15 @@ export default function LoginPage() {
     []
   )
 
+  const callbackBase = useMemo(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}/auth/callback`
+  }, [])
+
+  const hardGo = (path: string) => {
+    window.location.href = path
+  }
+
   const login = async () => {
     if (loading) return
     setLoading(true)
@@ -94,12 +88,10 @@ export default function LoginPage() {
         return
       }
 
-      // ✅ cookie/セッション反映を一回確認（なくても遷移はする）
       const { data, error: uErr } = await supabase.auth.getUser()
       if (uErr) console.error('getUser after login error:', uErr)
 
       setMessage(`ログイン成功。session=${data.user ? 'OK' : 'NG'}。遷移します…`)
-
       hardGo(nextPath || '/dashboard')
     } catch (e) {
       console.error(e)
@@ -115,14 +107,11 @@ export default function LoginPage() {
     setMessage(null)
 
     try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : ''
-      const emailRedirectTo = `${origin}/auth/callback?next=/dashboard`
-
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
-          emailRedirectTo,
+          emailRedirectTo: `${callbackBase}?next=/dashboard`,
         },
       })
 
@@ -148,8 +137,7 @@ export default function LoginPage() {
         return
       }
 
-      // ✅ B案：recovery は「クライアントページ」に直接戻す
-      // /reset-password は detectSessionInUrl: true で #access_token を拾える
+      // ✅ recoveryはクライアントページに直接戻す（#access_token を拾う）
       const origin = typeof window !== 'undefined' ? window.location.origin : ''
       const redirectTo = `${origin}/reset-password`
 
@@ -173,9 +161,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-gradient-to-b from-white/10 to-black p-6 text-white shadow-xl">
         <div className="text-2xl font-semibold text-white">ログイン画面</div>
         <div className="mt-2 text-sm text-white/70">メールアドレスとパスワードでログインします。</div>
-        <div className="mt-2 text-sm text-white/70">
-          初回はメールアドレスとパスワードを入力して「初回登録」をクリックください
-        </div>
+        <div className="mt-2 text-sm text-white/70">初回はテンプレの案内に従ってください。</div>
 
         <label className="mt-5 block text-sm text-white/80">メールアドレス</label>
         <input
