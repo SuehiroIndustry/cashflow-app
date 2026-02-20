@@ -1,55 +1,36 @@
-// app/set-password/_actions/updatePassword.ts
 "use server";
 
-import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-type State = { error: string | null };
+type State = { error: string | null; ok?: boolean };
 
 export async function updatePassword(
-  _prevState: State,
+  _prev: State,
   formData: FormData
 ): Promise<State> {
+  const supabase = await createSupabaseServerClient();
+
   const newPassword = String(formData.get("newPassword") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
-  // 入力チェック（ここで throw しない）
-  if (!newPassword || newPassword.length < 8) {
-    return { error: "パスワードは8文字以上にしてください" };
-  }
-  if (newPassword !== confirmPassword) {
-    return { error: "確認用パスワードが一致しません" };
-  }
+  if (newPassword.length < 8) return { error: "パスワードは8文字以上にしてください。" };
+  if (newPassword !== confirmPassword) return { error: "確認用パスワードが一致しません。" };
 
-  const supabase = await createSupabaseServerClient();
-
-  // セッション確認
+  // セッションが無いなら招待リンクが無効/期限切れなど
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  const user = userRes?.user;
-
-  if (userErr || !user) {
-    return { error: "セッションが切れています。ログインし直してください。" };
+  if (userErr || !userRes.user) {
+    return { error: "セッションが確認できません。招待メールのリンクから再度アクセスしてください。" };
   }
 
-  // 1) auth のパスワード更新
-  const { error: pwErr } = await supabase.auth.updateUser({
+  // パスワード更新 + 初回設定済みフラグ
+  const { error } = await supabase.auth.updateUser({
     password: newPassword,
+    data: { password_set: true },
   });
-  if (pwErr) {
-    return { error: pwErr.message || "パスワード更新に失敗しました" };
+
+  if (error) {
+    return { error: `更新に失敗しました: ${error.message}` };
   }
 
-  // 2) profiles のフラグ更新（must_set_password を false）
-  const { error: profErr } = await supabase
-    .from("profiles")
-    .update({ must_set_password: false })
-    .eq("id", user.id);
-
-  if (profErr) {
-    // ここも throw しない。画面に出す。
-    return { error: `profiles 更新に失敗しました: ${profErr.message}` };
-  }
-
-  // 成功したらダッシュボードへ
-  redirect("/dashboard");
+  return { error: null, ok: true };
 }

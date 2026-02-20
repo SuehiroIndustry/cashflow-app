@@ -1,14 +1,27 @@
 "use client";
 
-import { useActionState } from "react";
-import { updatePassword } from "./_actions/updatePassword"; // 置き場所に合わせて調整
+import { useActionState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { updatePassword } from "./_actions/updatePassword";
 
-type State = { error: string | null };
+type State = { error: string | null; ok?: boolean };
 
 const initialState: State = { error: null };
 
 export default function SetPasswordPage() {
   const [state, formAction, pending] = useActionState(updatePassword, initialState);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!state.ok) return;
+
+    (async () => {
+      const supabase = createSupabaseBrowserClient();
+      await supabase.auth.signOut(); // ← 次回以降はログイン画面から、を強制
+      router.replace("/login?pw_set=1");
+    })();
+  }, [state.ok, router]);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">
