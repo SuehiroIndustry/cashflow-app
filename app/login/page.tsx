@@ -186,10 +186,6 @@ export default function LoginPage() {
           {loading ? '処理中…' : 'ログイン'}
         </button>
 
-        <button onClick={signup} disabled={loading || !email || !password} className={`mt-3 ${btnClass}`}>
-          初回登録
-        </button>
-
         <button onClick={forgot} disabled={loading || !email} className={`mt-3 ${btnClass}`}>
           パスワードを忘れたらこちら
         </button>
