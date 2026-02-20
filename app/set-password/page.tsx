@@ -2,7 +2,6 @@
 
 import { useActionState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { updatePassword } from "./_actions/updatePassword";
 
 type State = { error: string | null; ok?: boolean };
@@ -15,12 +14,8 @@ export default function SetPasswordPage() {
 
   useEffect(() => {
     if (!state.ok) return;
-
-    (async () => {
-      const supabase = createSupabaseBrowserClient();
-      await supabase.auth.signOut(); // ← 次回以降はログイン画面から、を強制
-      router.replace("/login?pw_set=1");
-    })();
+    // ✅ サインアウトしない。更新後はそのままDashboardへ。
+    router.replace("/dashboard");
   }, [state.ok, router]);
 
   return (
