@@ -29,27 +29,43 @@ export default function SetPasswordPage() {
     try {
       const supabase = createSupabaseBrowserClient();
 
-      // セッション確認（直打ち対策）
-      const { data: userRes } = await supabase.auth.getUser();
-      if (!userRes.user) {
+      // 1) セッション確認
+      const { data: userRes, error: userErr } = await supabase.auth.getUser();
+      const user = userRes.user;
+      if (userErr || !user) {
         setError("セッションが確認できません。ログインし直してください。");
         return;
       }
 
-      // ✅ パスワード更新 + 初回フラグを同時に立てる
+      // 2) パスワード更新（＋任意で user_metadata も立てる）
       const { error: updErr } = await supabase.auth.updateUser({
         password: newPassword,
         data: { password_set: true },
       });
-
       if (updErr) {
         setError(`更新に失敗しました: ${updErr.message}`);
         return;
       }
 
-      // ✅ これを入れないと dashboard 側が古い user_metadata を見ることがある
+      // 3) profiles.must_set_password を false にする（無いなら作って false）
+      const { error: upsertErr } = await supabase
+        .from("profiles")
+        .upsert(
+          { id: user.id, must_set_password: false },
+          { onConflict: "id" }
+        );
+
+      if (upsertErr) {
+        setError(
+          `プロフィール更新に失敗しました: ${upsertErr.message}\n（管理者にRLS/権限設定の確認が必要です）`
+        );
+        return;
+      }
+
+      // 4) 念のためセッション更新
       await supabase.auth.refreshSession();
 
+      // 5) ダッシュボードへ
       router.replace("/dashboard");
     } finally {
       setPending(false);
@@ -65,7 +81,7 @@ export default function SetPasswordPage() {
         </p>
 
         {error && (
-          <div className="mt-4 rounded-lg border border-red-900 bg-red-950 px-4 py-3 text-sm text-red-200">
+          <div className="mt-4 rounded-lg border border-red-900 bg-red-950 px-4 py-3 text-sm text-red-200 whitespace-pre-line">
             {error}
           </div>
         )}
