@@ -9,7 +9,7 @@ export async function updatePassword(
   _prev: State,
   formData: FormData
 ): Promise<State> {
-  const cookieStore = cookies();
+  const cookieStore = await cookies(); // ✅ Next.js 16 は await 必要
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,23 +29,21 @@ export async function updatePassword(
   const newPassword = String(formData.get("newPassword") ?? "");
   const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
-  if (newPassword.length < 8)
+  if (newPassword.length < 8) {
     return { error: "パスワードは8文字以上にしてください。" };
-
-  if (newPassword !== confirmPassword)
+  }
+  if (newPassword !== confirmPassword) {
     return { error: "確認用パスワードが一致しません。" };
+  }
 
   const { data: userRes } = await supabase.auth.getUser();
   if (!userRes.user) {
-    return { error: "セッションが確認できません。" };
+    return { error: "セッションが確認できません。招待メールのリンクから再度アクセスしてください。" };
   }
 
-  const { error } = await supabase.auth.updateUser({
-    password: newPassword,
-  });
-
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) {
-    return { error: error.message };
+    return { error: `更新に失敗しました: ${error.message}` };
   }
 
   return { error: null, ok: true };
