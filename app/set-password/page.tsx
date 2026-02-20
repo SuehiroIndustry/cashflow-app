@@ -36,19 +36,20 @@ export default function SetPasswordPage() {
         return;
       }
 
-      // パスワード更新
+      // ✅ パスワード更新 + 初回フラグを同時に立てる
       const { error: updErr } = await supabase.auth.updateUser({
         password: newPassword,
+        data: { password_set: true },
       });
+
       if (updErr) {
         setError(`更新に失敗しました: ${updErr.message}`);
         return;
       }
 
-      // 念のためセッション更新（環境によって効く）
+      // ✅ これを入れないと dashboard 側が古い user_metadata を見ることがある
       await supabase.auth.refreshSession();
 
-      // ✅ ここは確実に dashboard に行く
       router.replace("/dashboard");
     } finally {
       setPending(false);
