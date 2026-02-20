@@ -1,22 +1,16 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState } from "react";
 import { updatePassword } from "./_actions/updatePassword";
 
-type State = { error: string | null; ok?: boolean };
+type State = { error: string | null };
 
 const initialState: State = { error: null };
 
 export default function SetPasswordPage() {
+  // Server Action が成功すると redirect("/dashboard") で遷移するので
+  // クライアント側の useEffect/router は不要
   const [state, formAction, pending] = useActionState(updatePassword, initialState);
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!state.ok) return;
-    // ✅ サインアウトしない。更新後はそのままDashboardへ。
-    router.replace("/dashboard");
-  }, [state.ok, router]);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">

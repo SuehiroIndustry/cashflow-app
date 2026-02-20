@@ -2,14 +2,15 @@
 
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { redirect } from "next/navigation";
 
-type State = { error: string | null; ok?: boolean };
+type State = { error: string | null };
 
 export async function updatePassword(
   _prev: State,
   formData: FormData
 ): Promise<State> {
-  const cookieStore = await cookies(); // ✅ Next.js 16 は await 必要
+  const cookieStore = await cookies();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,15 +37,20 @@ export async function updatePassword(
     return { error: "確認用パスワードが一致しません。" };
   }
 
-  const { data: userRes } = await supabase.auth.getUser();
-  if (!userRes.user) {
-    return { error: "セッションが確認できません。招待メールのリンクから再度アクセスしてください。" };
+  // セッションが無いと更新できない（URL直打ち等の対策）
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr || !userRes.user) {
+    return { error: "セッションが確認できません。ログインし直してください。" };
   }
 
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
+
   if (error) {
     return { error: `更新に失敗しました: ${error.message}` };
   }
 
-  return { error: null, ok: true };
+  // ✅ cookie 更新が反映された状態でサーバー側から遷移させる
+  redirect("/dashboard");
 }
