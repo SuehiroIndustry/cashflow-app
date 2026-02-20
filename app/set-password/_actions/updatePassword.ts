@@ -37,20 +37,37 @@ export async function updatePassword(
     return { error: "確認用パスワードが一致しません。" };
   }
 
-  // セッションが無いと更新できない（URL直打ち等の対策）
+  // 現在ログイン中ユーザーの email を取得
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !userRes.user) {
+  const email = userRes.user?.email;
+
+  if (userErr || !email) {
     return { error: "セッションが確認できません。ログインし直してください。" };
   }
 
-  const { error } = await supabase.auth.updateUser({
+  // ① パスワード更新
+  const { error: updErr } = await supabase.auth.updateUser({
     password: newPassword,
   });
 
-  if (error) {
-    return { error: `更新に失敗しました: ${error.message}` };
+  if (updErr) {
+    return { error: `更新に失敗しました: ${updErr.message}` };
   }
 
-  // ✅ cookie 更新が反映された状態でサーバー側から遷移させる
+  // ② 直後にセッションが無効化/古いままになることがあるので、
+  //    新パスワードでログインし直して cookie セッションを確実に張り直す
+  const { error: signInErr } = await supabase.auth.signInWithPassword({
+    email,
+    password: newPassword,
+  });
+
+  if (signInErr) {
+    return {
+      error:
+        "パスワードは更新できましたが、再ログインに失敗しました。ログイン画面から新しいパスワードでログインしてください。",
+    };
+  }
+
+  // ③ セッションが確実にある状態でダッシュボードへ
   redirect("/dashboard");
 }

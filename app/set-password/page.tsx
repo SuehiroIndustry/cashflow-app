@@ -8,8 +8,6 @@ type State = { error: string | null };
 const initialState: State = { error: null };
 
 export default function SetPasswordPage() {
-  // Server Action が成功すると redirect("/dashboard") で遷移するので
-  // クライアント側の useEffect/router は不要
   const [state, formAction, pending] = useActionState(updatePassword, initialState);
 
   return (
