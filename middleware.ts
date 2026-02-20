@@ -42,20 +42,6 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/simulation") ||
     pathname.startsWith("/inventory");
 
-  // ✅ 初回PW未設定ユーザーは /set-password に強制
-  // （招待リンクでセッションができてしまうので、ここで止めるのが一番堅い）
-  const passwordSet = Boolean(user?.user_metadata?.password_set);
-
-  if (user && !passwordSet) {
-    // /set-password 以外に居たら強制送還
-    if (pathname !== "/set-password" && !pathname.startsWith("/auth")) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/set-password";
-      res = NextResponse.redirect(url);
-      return res;
-    }
-  }
-
   // 未ログインで保護領域に来たら /login へ
   if (!user && isProtected) {
     const url = req.nextUrl.clone();
