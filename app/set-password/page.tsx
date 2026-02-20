@@ -1,14 +1,59 @@
 "use client";
 
-import { useActionState } from "react";
-import { updatePassword } from "./_actions/updatePassword";
-
-type State = { error: string | null };
-
-const initialState: State = { error: null };
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 export default function SetPasswordPage() {
-  const [state, formAction, pending] = useActionState(updatePassword, initialState);
+  const router = useRouter();
+
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (newPassword.length < 8) {
+      setError("パスワードは8文字以上にしてください。");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("確認用パスワードが一致しません。");
+      return;
+    }
+
+    setPending(true);
+    try {
+      const supabase = createSupabaseBrowserClient();
+
+      // セッション確認（直打ち対策）
+      const { data: userRes } = await supabase.auth.getUser();
+      if (!userRes.user) {
+        setError("セッションが確認できません。ログインし直してください。");
+        return;
+      }
+
+      // パスワード更新
+      const { error: updErr } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+      if (updErr) {
+        setError(`更新に失敗しました: ${updErr.message}`);
+        return;
+      }
+
+      // 念のためセッション更新（環境によって効く）
+      await supabase.auth.refreshSession();
+
+      // ✅ ここは確実に dashboard に行く
+      router.replace("/dashboard");
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center px-4">
@@ -18,17 +63,18 @@ export default function SetPasswordPage() {
           初回ログインのため、パスワードを設定してください。
         </p>
 
-        {state.error && (
+        {error && (
           <div className="mt-4 rounded-lg border border-red-900 bg-red-950 px-4 py-3 text-sm text-red-200">
-            {state.error}
+            {error}
           </div>
         )}
 
-        <form action={formAction} className="mt-5 space-y-4">
+        <form onSubmit={onSubmit} className="mt-5 space-y-4">
           <div>
             <label className="block text-sm mb-1">新しいパスワード</label>
             <input
-              name="newPassword"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
               type="password"
               className="w-full rounded-md bg-neutral-950 border border-neutral-700 px-3 py-2 text-neutral-100 placeholder:text-neutral-500"
               placeholder="8文字以上"
@@ -40,7 +86,8 @@ export default function SetPasswordPage() {
           <div>
             <label className="block text-sm mb-1">確認（もう一度）</label>
             <input
-              name="confirmPassword"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               type="password"
               className="w-full rounded-md bg-neutral-950 border border-neutral-700 px-3 py-2 text-neutral-100 placeholder:text-neutral-500"
               placeholder="同じパスワードを入力"
