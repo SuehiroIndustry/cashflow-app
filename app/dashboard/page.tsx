@@ -39,12 +39,17 @@ function monthStartISO(d = new Date()): string {
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
-  // 1) 口座一覧
+  // 1) 口座一覧（ここで id=2 のみ返る想定）
   const accounts = (await getAccounts()) as AccountRow[];
 
-  // 2) 表示対象の口座ID（URL優先 → なければ先頭）
+  // 2) 表示対象の口座ID（URLは「存在する時だけ」採用）
   const selectedFromQuery = toInt(searchParams?.cashAccountId);
-  const cashAccountId = selectedFromQuery ?? (accounts?.[0]?.id ?? null);
+  const selectedValid =
+    selectedFromQuery != null && accounts.some((a) => a.id === selectedFromQuery)
+      ? selectedFromQuery
+      : null;
+
+  const cashAccountId = selectedValid ?? (accounts?.[0]?.id ?? null);
 
   // 3) month（getOverview Input 必須）
   const month = monthStartISO();
@@ -142,7 +147,6 @@ export default async function DashboardPage({ searchParams }: Props) {
         monthly={monthly}
       >
         <div className="flex flex-col gap-4">
-          {/* ✅ Overviewの右側に「実績判定」を追加（枠は別） */}
           <div className="grid gap-4 md:grid-cols-2">
             <OverviewCard payload={overviewPayload} />
 
@@ -158,7 +162,6 @@ export default async function DashboardPage({ searchParams }: Props) {
                   </div>
                 </div>
 
-                {/* ✅ 説明（3つ） */}
                 <div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-500 leading-relaxed">
                   <div className="font-semibold text-white mb-1">判定ロジック</div>
                   <ul className="list-disc pl-4 space-y-1">
@@ -180,7 +183,6 @@ export default async function DashboardPage({ searchParams }: Props) {
             </div>
           </div>
 
-          {/* ここから下は今のまま */}
           <BalanceCard rows={monthly} />
           <EcoCharts rows={monthly} />
         </div>
