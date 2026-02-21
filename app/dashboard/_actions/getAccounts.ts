@@ -21,9 +21,11 @@ function toNumber(v: unknown, fallback = 0): number {
 export async function getAccounts(): Promise<AccountRow[]> {
   const supabase = await createSupabaseServerClient();
 
+  // ✅ id=2（共有メイン口座）だけ返す
   const { data, error } = await supabase
     .from("cash_accounts")
     .select("id, name, current_balance")
+    .eq("id", 2)
     .order("id", { ascending: true });
 
   if (error) {
@@ -31,7 +33,6 @@ export async function getAccounts(): Promise<AccountRow[]> {
     return [];
   }
 
-  // ✅ bigint/string を確実に number 化して返す（これが重要）
   return (data ?? []).map((r: any) => ({
     id: toNumber(r.id),
     name: String(r.name ?? ""),
