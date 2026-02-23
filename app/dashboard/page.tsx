@@ -60,7 +60,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const cashStatus = (overview as any)?.cashStatus ?? null;
   const alertCards = ((overview as any)?.alertCards ?? []) as AlertCard[];
 
-  // 5) 月次推移
+  // 5) 月次推移（B仕様：balance は「期首残高＋収支累積」のはず）
   const monthlyRaw = (cashAccountId
     ? await getMonthlyBalance({ cashAccountId, months: 12 })
     : []) as MonthlyBalanceRow[];
@@ -84,29 +84,14 @@ export default async function DashboardPage({ searchParams }: Props) {
   const thisMonthExpense = thisMonthRow?.expense ?? 0;
   const net = thisMonthIncome - thisMonthExpense;
 
-  // ✅ 現在残高は「口座の current_balance / overview.currentBalance」を最優先にする
-  //    monthly.balance は当月net等の可能性があるので最後の保険扱い
+  // ✅✅ B仕様：現在残高は「月次の最新 balance（期首＋累積）」を最優先にする
+  // 口座の current_balance（楽天最終残高）は参照しない（別物）
   const latestRow = monthly.length ? monthly[monthly.length - 1] : null;
 
-  const accountCurrentBalance =
-    typeof account?.current_balance === "number" && Number.isFinite(account.current_balance)
-      ? account.current_balance
-      : null;
-
-  const overviewCurrentBalance =
-    typeof (overview as any)?.currentBalance === "number" &&
-    Number.isFinite((overview as any).currentBalance)
-      ? (overview as any).currentBalance
-      : typeof (overview as any)?.balance === "number" && Number.isFinite((overview as any).balance)
-      ? (overview as any).balance
-      : null;
-
   const currentBalance =
-    accountCurrentBalance ??
-    overviewCurrentBalance ??
-    (typeof latestRow?.balance === "number" && Number.isFinite(latestRow.balance)
+    typeof latestRow?.balance === "number" && Number.isFinite(latestRow.balance)
       ? latestRow.balance
-      : 0);
+      : 0;
 
   const overviewPayload: OverviewPayload = {
     accountName,
