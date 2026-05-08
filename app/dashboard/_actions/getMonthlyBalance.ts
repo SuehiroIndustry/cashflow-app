@@ -70,12 +70,11 @@ export async function getMonthlyBalance(params: {
     return [];
   }
 
-  // 対象口座の取引を取得
+  // org 配下の全口座の取引を取得（楽天・岐阜信用金庫等すべて対象）
   const { data: flows, error: flowsErr } = await supabase
     .from("cash_flows")
     .select("date, amount, section, cash_category_id, source_type")
-    .eq("org_id", orgId)
-    .eq("cash_account_id", cashAccountId);
+    .eq("org_id", orgId);
 
   if (flowsErr) {
     console.error("[getMonthlyBalance] cash_flows error:", flowsErr);
@@ -108,18 +107,22 @@ export async function getMonthlyBalance(params: {
     });
   }
 
-  // 期首残高（カテゴリ名='初期値' かつ source_type='manual' の合計）
-  // ※ section が income/expense どちらでも耐えるよう符号付きで合算
-  let openingBalance = 0;
-  for (const r of rows) {
-    const catName = r.cash_category_id ? catNameById.get(r.cash_category_id) ?? "" : "";
-    if (catName !== "初期値") continue;
-    if (r.source_type !== "manual") continue;
+  // 残高の真実は cash_accounts.current_balance（口座別の通帳残高）
+  // cash_flows は収支履歴のみ。openingBalance は balance 算出に使わない
+  const { data: accs, error: accsErr } = await supabase
+    .from("cash_accounts")
+    .select("current_balance")
+    .eq("org_id", orgId);
 
-    const amt = toNumber(r.amount, 0);
-    const signed = r.section === "expense" ? -amt : amt;
-    openingBalance += signed;
+  if (accsErr) {
+    console.error("[getMonthlyBalance] cash_accounts error:", accsErr);
+    return [];
   }
+
+  const totalCurrentBalance = (accs ?? []).reduce(
+    (sum: number, r: any) => sum + toNumber(r.current_balance, 0),
+    0
+  );
 
   // 月次集計（初期値は除外）
   const monthAgg = new Map<
@@ -149,21 +152,31 @@ export async function getMonthlyBalance(params: {
     monthAgg.set(monthKey, cur);
   }
 
-  // 月昇順で累積残高（opening + running net）
+  // 月昇順にソート
   const monthlyAsc = Array.from(monthAgg.values()).sort((a, b) =>
     a.month.localeCompare(b.month)
   );
 
-  let running = openingBalance;
-  const monthlyWithBalanceAsc = monthlyAsc.map((m) => {
-    running += m.net;
-    return {
-      month: m.month,
-      income: m.income,
-      expense: m.expense,
-      balance: running, // ✅ 累積残高
+  // 最新月の balance = totalCurrentBalance（cash_accounts の合計）を基点に逆算
+  // 各月の balance は「その月末時点の累積残高」
+  // balance[n-1] = balance[n] - balance[n].net
+  const monthlyWithBalanceAsc: Array<{
+    month: string;
+    income: number;
+    expense: number;
+    balance: number;
+  }> = new Array(monthlyAsc.length);
+
+  let running = totalCurrentBalance;
+  for (let i = monthlyAsc.length - 1; i >= 0; i--) {
+    monthlyWithBalanceAsc[i] = {
+      month: monthlyAsc[i].month,
+      income: monthlyAsc[i].income,
+      expense: monthlyAsc[i].expense,
+      balance: running,
     };
-  });
+    running -= monthlyAsc[i].net;
+  }
 
   // 直近 months 件だけ返す（既存と同じく降順）
   const sliced = monthlyWithBalanceAsc.slice(-months).reverse();
