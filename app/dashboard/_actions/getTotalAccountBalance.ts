@@ -27,7 +27,8 @@ export async function getTotalAccountBalance(): Promise<number> {
   const orgId = toNumber((memberData as any)?.org_id, 0);
   if (!orgId) throw new Error("org_id not found in org_members");
 
-  // 1) 楽天連携口座の残高合計（cash_accounts.current_balance）
+  // org 配下の全口座の current_balance を合計する
+  // 各口座（楽天・岐阜信用金庫等）の残高は cash_accounts.current_balance に保持する
   const { data: accounts, error: accErr } = await supabase
     .from("cash_accounts")
     .select("current_balance")
@@ -35,26 +36,8 @@ export async function getTotalAccountBalance(): Promise<number> {
 
   if (accErr) throw accErr;
 
-  const linkedBalance = (accounts ?? []).reduce(
+  return (accounts ?? []).reduce(
     (sum: number, r: any) => sum + toNumber(r.current_balance, 0),
     0
   );
-
-  // 2) マニュアル口座の現在残高（cash_accounts master レコードは存在しない）
-  //    org_id 配下の source_type='manual' の cash_flows を符号付きで累積
-  //    getMonthlyBalance と同じ計算：初期値 + Σ収支 = Σ(全cash_flows符号付き合計)
-  const { data: flows, error: flowsErr } = await supabase
-    .from("cash_flows")
-    .select("amount, section")
-    .eq("org_id", orgId)
-    .eq("source_type", "manual");
-
-  if (flowsErr) throw flowsErr;
-
-  const manualBalance = (flows ?? []).reduce((sum: number, r: any) => {
-    const amt = toNumber(r.amount, 0);
-    return sum + (r.section === "expense" ? -amt : amt);
-  }, 0);
-
-  return linkedBalance + manualBalance;
 }
