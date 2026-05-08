@@ -15,15 +15,17 @@ function toNumber(v: unknown, fallback = 0): number {
 export async function getTotalAccountBalance(): Promise<number> {
   const supabase = await createSupabaseServerClient();
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+  const { data: memberData, error: memberErr } = await supabase
+    .from("org_members")
+    .select("org_id")
+    .order("org_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
-  if (userErr || !user) throw new Error("Not authenticated");
+  if (memberErr) throw memberErr;
 
-  const orgId = toNumber((user as any)?.user_metadata?.org_id, 0);
-  if (!orgId) throw new Error("org_id not found in user metadata");
+  const orgId = toNumber((memberData as any)?.org_id, 0);
+  if (!orgId) throw new Error("org_id not found in org_members");
 
   const { data, error } = await supabase
     .from("cash_accounts")
