@@ -7,6 +7,7 @@ import { getAccounts } from "./_actions/getAccounts";
 import { getOverview } from "./_actions/getOverview";
 import { getMonthlyBalance } from "./_actions/getMonthlyBalance";
 import { getDashboardJudge } from "./_actions/getDashboardJudge";
+import { getTotalAccountBalance } from "./_actions/getTotalAccountBalance";
 
 import OverviewCard from "./_components/OverviewCard";
 import BalanceCard from "./_components/BalanceCard";
@@ -84,14 +85,8 @@ export default async function DashboardPage({ searchParams }: Props) {
   const thisMonthExpense = thisMonthRow?.expense ?? 0;
   const net = thisMonthIncome - thisMonthExpense;
 
-  // ✅✅ B仕様：現在残高は「月次の最新 balance（期首＋累積）」を最優先にする
-  // 口座の current_balance（楽天最終残高）は参照しない（別物）
-  const latestRow = monthly.length ? monthly[monthly.length - 1] : null;
-
-  const currentBalance =
-    typeof latestRow?.balance === "number" && Number.isFinite(latestRow.balance)
-      ? latestRow.balance
-      : 0;
+  // 現在残高は cash_accounts の current_balance 全件合計
+  const currentBalance = await getTotalAccountBalance();
 
   const overviewPayload: OverviewPayload = {
     accountName,
