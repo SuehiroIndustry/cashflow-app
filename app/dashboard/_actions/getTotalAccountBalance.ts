@@ -50,45 +50,23 @@ export async function getTotalAccountBalance(): Promise<number> {
     0
   );
 
-  // 4) マニュアル口座の opening balance（cash_flows の '初期値' エントリ）を取得
+  // 4) マニュアル口座の現在残高を cash_flows 全件の符号付き合計で算出
+  //    getMonthlyBalance と同じロジック：
+  //      openingBalance(初期値) + Σ月次ネット = Σ(全cash_flows符号付き合計)
+  //    初期値だけを取るのではなく、初期値 + その後の収支すべての累積が現在残高
   let manualBalance = 0;
 
   if (manualAccountIds.length > 0) {
     const { data: flows, error: flowsErr } = await supabase
       .from("cash_flows")
-      .select("amount, section, cash_category_id")
-      .eq("source_type", "manual")
-      .in("cash_account_id", manualAccountIds)
-      .not("cash_category_id", "is", null);
+      .select("amount, section")
+      .in("cash_account_id", manualAccountIds);
 
     if (flowsErr) throw flowsErr;
 
-    const catIds = Array.from(
-      new Set(
-        (flows ?? []).map((r: any) => r.cash_category_id).filter(Boolean)
-      )
-    ) as number[];
-
-    if (catIds.length > 0) {
-      const { data: cats, error: catErr } = await supabase
-        .from("cash_categories")
-        .select("id, name")
-        .in("id", catIds);
-
-      if (catErr) throw catErr;
-
-      const nameById = new Map<number, string>();
-      (cats ?? []).forEach((c: any) =>
-        nameById.set(toNumber(c.id, 0), String(c.name ?? ""))
-      );
-
-      for (const r of (flows ?? []) as any[]) {
-        const catName = nameById.get(toNumber(r.cash_category_id, 0)) ?? "";
-        if (catName !== "初期値") continue;
-
-        const amt = toNumber(r.amount, 0);
-        manualBalance += r.section === "expense" ? -amt : amt;
-      }
+    for (const r of (flows ?? []) as any[]) {
+      const amt = toNumber(r.amount, 0);
+      manualBalance += r.section === "expense" ? -amt : amt;
     }
   }
 
