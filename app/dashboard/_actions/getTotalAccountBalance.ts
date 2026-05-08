@@ -27,48 +27,34 @@ export async function getTotalAccountBalance(): Promise<number> {
   const orgId = toNumber((memberData as any)?.org_id, 0);
   if (!orgId) throw new Error("org_id not found in org_members");
 
-  // 1) org 配下の全口座と current_balance を取得
+  // 1) 楽天連携口座の残高合計（cash_accounts.current_balance）
   const { data: accounts, error: accErr } = await supabase
     .from("cash_accounts")
-    .select("id, current_balance")
+    .select("current_balance")
     .eq("org_id", orgId);
 
   if (accErr) throw accErr;
 
-  const rows = (accounts ?? []) as { id: number; current_balance: unknown }[];
-
-  // 2) current_balance が 0 / null の口座 ID を収集（マニュアル管理口座）
-  //    二重計上を防ぐため、銀行連携口座（current_balance > 0）は cash_flows から拾わない
-  const manualAccountIds = rows
-    .filter((r) => toNumber(r.current_balance, 0) === 0)
-    .map((r) => r.id)
-    .filter(Boolean);
-
-  // 3) 銀行連携口座の合計（current_balance > 0 の口座）
-  const linkedBalance = rows.reduce(
-    (sum, r) => sum + toNumber(r.current_balance, 0),
+  const linkedBalance = (accounts ?? []).reduce(
+    (sum: number, r: any) => sum + toNumber(r.current_balance, 0),
     0
   );
 
-  // 4) マニュアル口座の現在残高を cash_flows 全件の符号付き合計で算出
-  //    getMonthlyBalance と同じロジック：
-  //      openingBalance(初期値) + Σ月次ネット = Σ(全cash_flows符号付き合計)
-  //    初期値だけを取るのではなく、初期値 + その後の収支すべての累積が現在残高
-  let manualBalance = 0;
+  // 2) マニュアル口座の現在残高（cash_accounts master レコードは存在しない）
+  //    org_id 配下の source_type='manual' の cash_flows を符号付きで累積
+  //    getMonthlyBalance と同じ計算：初期値 + Σ収支 = Σ(全cash_flows符号付き合計)
+  const { data: flows, error: flowsErr } = await supabase
+    .from("cash_flows")
+    .select("amount, section")
+    .eq("org_id", orgId)
+    .eq("source_type", "manual");
 
-  if (manualAccountIds.length > 0) {
-    const { data: flows, error: flowsErr } = await supabase
-      .from("cash_flows")
-      .select("amount, section")
-      .in("cash_account_id", manualAccountIds);
+  if (flowsErr) throw flowsErr;
 
-    if (flowsErr) throw flowsErr;
-
-    for (const r of (flows ?? []) as any[]) {
-      const amt = toNumber(r.amount, 0);
-      manualBalance += r.section === "expense" ? -amt : amt;
-    }
-  }
+  const manualBalance = (flows ?? []).reduce((sum: number, r: any) => {
+    const amt = toNumber(r.amount, 0);
+    return sum + (r.section === "expense" ? -amt : amt);
+  }, 0);
 
   return linkedBalance + manualBalance;
 }
